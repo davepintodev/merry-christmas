@@ -2,6 +2,15 @@
 
 State and next steps for the next session. Ticket keys are in the planning store.
 
+## State
+
+- Done and pushed to main (live on the workers.dev address the publish run prints): XMAS-25, 26, 27 (countdown on a plain sky), and XMAS-28 part 1 (object list, rough sheets, style rules, font split into its own module).
+- XMAS-28 is claimed and still open. Part 2 is left: colour tables for Frosty morning, Sunset and Purple night, taken from the prototype THEMES (overrides of base hex keys, in `prototype/visual-direction/variant-b.js` lines 21-39, pal 0, 2, 4), plus a test that the colour numbers used by house, pines, snowman, presents, base and Santa are never overridden by any phase. Proposed shape: `phaseOverrides: Record<'frosty-morning'|'sunset'|'purple-night', Record<hex, hex>>` in art/colours.ts. Then close XMAS-28 with a comment.
+- Next unblocked: XMAS-29 (screen reader text), XMAS-30 (contrast test and Dawn stand-in; note the straight-line ink mix fails 4.5:1 mid-blend).
+- Open nits worth a ticket: cap for scene art once the scene imports art.generated.ts (tests/repo/rough-art.test.ts uses an invented 40000); FONT_SHEET hard-coded in tools/art.ts; speaker icons have no cone; present-3 at 3x3 barely reads; Santa's 31x6 is tight.
+- Standing user rule: each deployable, e2e-testable state goes live on a real address; report the link.
+- Pipeline reminders: test-writer (Opus) -> `ticket-impl` -> own `pnpm check` -> fresh reviewer -> commit. ticket-impl exits 3 when a session passes 150k: restart with a full brief.
+
 ## Review log
 
 | Ticket | Round | Verdict | Findings |
