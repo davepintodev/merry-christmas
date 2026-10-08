@@ -355,7 +355,7 @@ describe('AC2 one workflow; every push runs `pnpm check`', () => {
   });
 
   it('package.json `check` script is unchanged', () => {
-    expect(pkg().scripts?.['check']).toBe('pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run test:e2e');
+    expect(pkg().scripts?.['check']).toBe('pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run check:caps && pnpm run test:e2e');
   });
 
   it('the check job never sees the Cloudflare credentials', () => {

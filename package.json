@@ -10,8 +10,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
+    "check:caps": "node tools/check-caps.ts",
     "test:e2e": "playwright test",
-    "check": "pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run test:e2e"
+    "check": "pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run check:caps && pnpm run test:e2e"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

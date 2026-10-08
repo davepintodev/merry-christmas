@@ -18,10 +18,12 @@ of every file.
 
 - `pnpm check` — full gate. It runs, in order, chained with `&&`:
   `pnpm run typecheck`, `pnpm run test:unit`, `pnpm run build`,
-  `pnpm run test:e2e`.
+  `pnpm run check:caps`, `pnpm run test:e2e`.
 - `pnpm run typecheck` — `tsc --noEmit`.
 - `pnpm run test:unit` — `vitest run`.
 - `pnpm run build` — `vite build`.
+- `pnpm run check:caps` — `node tools/check-caps.ts`; prints Brotli bytes per
+  download cap and fails on any cap that is passed.
 - `pnpm run test:e2e` — `playwright test`; it serves the built page with
   `vite preview` via the Playwright web server.
 - `pnpm dev` — Vite dev server. Set `HOST` to choose the bind address;
