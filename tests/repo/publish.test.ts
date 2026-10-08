@@ -649,7 +649,7 @@ describe('AC7 no visitor-counting script', () => {
 //     prints a canned wrangler log (stdout part to stdout, error part to
 //     stderr) and exits with wrangler's exit code; any other pnpm call exits 97;
 //   - RUNNER_TEMP (empty temp dir), GITHUB_OUTPUT and GITHUB_STEP_SUMMARY
-//     (empty temp files) set as on a runner. Nothing else from GitHub is set.
+//     (empty temp files) set as on a CI machine. Nothing else from GitHub is set.
 const NOT_YET_EXIST =
   'You cannot upload a new version of a Worker that does not yet exist. Please run the `deploy` command first.';
 const PREVIEW_URL = 'https://abcd1234-merry-christmas.example-sub.workers.dev';
@@ -669,7 +669,7 @@ function runPreviewStep(upload: Upload): StepRun {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'xmas23-step-'));
   try {
     const bin = path.join(dir, 'bin');
-    const tmp = path.join(dir, 'runner-temp');
+    const tmp = path.join(dir, 'ci-temp');
     mkdirSync(bin);
     mkdirSync(tmp);
     writeFileSync(path.join(dir, 'upload.out'), upload.stdout);
