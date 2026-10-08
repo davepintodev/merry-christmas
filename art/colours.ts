@@ -38,3 +38,47 @@ export const phaseColours: Record<PhaseName, { sky: string; ink: string }> = {
   sunset: { sky: '#2a1a4a', ink: '#ffe08a' },
   'purple-night': { sky: '#1a1433', ink: '#ffe08a' },
 };
+
+// XMAS-28: the per-phase overrides the art pass redraws scene colours with,
+// taken from the visual-direction prototype's themes (hex entries only). A
+// colour the house, pines, snowman, presents, base or Santa is drawn with is
+// never overridden, so those objects look the same in every phase. Purple
+// night overrides nothing; dawn's stand-in is the plain palette.
+export const phaseOverrides: Record<'frosty-morning' | 'sunset' | 'purple-night', Record<string, string>> = {
+  'frosty-morning': {
+    '#221a47': '#97c6ee',
+    '#2b225c': '#b0d6f4',
+    '#372b70': '#c9e4f9',
+    '#463682': '#e2f1fd',
+    '#d9d2ff': '#ffffff',
+    '#1d3350': '#3d6a8a',
+    '#16283f': '#2f5878',
+    '#aab6e6': '#c4d8f0',
+    '#dfe6ff': '#ffffff',
+    '#8f8ad0': '#ffffff',
+    '#b9c3ee': '#d6e6f8',
+    '#98a4dc': '#9fb8dc',
+    '#9fd8ff': '#1d4f7a',
+    '#ff8c7a': '#1f6f5c',
+    '#7f8ac8': '#5f86b0',
+    '#aebcf0': '#ffffff',
+  },
+  sunset: {
+    '#221a47': '#5a2a6a',
+    '#2b225c': '#a03f78',
+    '#372b70': '#e0637a',
+    '#463682': '#ffa07a',
+    '#d9d2ff': '#ffe9d0',
+    '#1d3350': '#3a1f4a',
+    '#16283f': '#2a1638',
+    '#aab6e6': '#e8b4c8',
+    '#dfe6ff': '#ffe9ee',
+    '#8f8ad0': '#f0c0d8',
+    '#b9c3ee': '#ffd9e6',
+    '#98a4dc': '#d49ab8',
+    '#9fd8ff': '#ffe9d0',
+    '#ff8c7a': '#ffd9c8',
+    '#7f8ac8': '#b07a9a',
+  },
+  'purple-night': {},
+};
