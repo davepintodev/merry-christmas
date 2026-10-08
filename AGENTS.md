@@ -21,7 +21,9 @@ of every file.
   `pnpm run check:caps`, `pnpm run test:e2e`.
 - `pnpm run typecheck` — `tsc --noEmit`.
 - `pnpm run test:unit` — `vitest run`.
-- `pnpm run build` — `vite build`.
+- `pnpm run build` — `pnpm run build:art` then `vite build`.
+- `pnpm run build:art` — `node tools/build-art.ts`; packs the sheets named in
+  `art/sheets.ts` into `src/shared/art.generated.ts` and `art/xmas.gpl`.
 - `pnpm run check:caps` — `node tools/check-caps.ts`; prints Brotli bytes per
   download cap and fails on any cap that is passed.
 - `pnpm run test:e2e` — `playwright test`; it serves the built page with

@@ -6,7 +6,8 @@
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build:art": "node tools/build-art.ts",
+    "build": "pnpm run build:art && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
