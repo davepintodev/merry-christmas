@@ -8,13 +8,14 @@ import { build, type Plugin } from 'vite';
 const ENTRY = fileURLToPath(new URL('../src/countdown/main.ts', import.meta.url));
 const MARKER = '<!-- countdown-script -->';
 
-// The generated art module names the PNG sheets it was cut from. The page must
-// never mention a PNG, so the countdown bundle drops that build-time field:
-// the field name and any quoted value, whatever spacing the generator uses.
+// The generated art and font modules name the PNG sheets they were cut from.
+// The page must never mention a PNG, so the countdown bundle drops that
+// build-time field: the field name and any quoted value, whatever spacing the
+// generator uses.
 const dropSheetNames: Plugin = {
   name: 'countdown-drop-sheet-names',
   transform: (code, id) =>
-    id.endsWith('art.generated.ts')
+    id.endsWith('.generated.ts')
       ? code.replace(/\bsheet\s*:\s*(?:"[^"]*"|'[^']*'|`[^`]*`)\s*,?/g, '')
       : undefined,
 };

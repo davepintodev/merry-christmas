@@ -1,7 +1,8 @@
 // XMAS-26 "Art build step and the rough Font sheet": the art CLI.
 // Usage: node tools/build-art.ts (from the repo root). Packs every sheet in
-// art/sheets.ts, writes src/shared/art.generated.ts and art/xmas.gpl, and
-// exits 1 with the reason if any sheet fails.
+// art/sheets.ts, writes src/shared/art.generated.ts, the font-only
+// src/shared/font.generated.ts and art/xmas.gpl, and exits 1 with the reason
+// if any sheet fails.
 import { masterColours } from '../art/colours.ts';
 import { sheets } from '../art/sheets.ts';
 import { ArtBuildError, buildArt } from './art.ts';
@@ -12,6 +13,7 @@ try {
     sheetsDir: 'art/sheets',
     palette: masterColours,
     moduleFile: 'src/shared/art.generated.ts',
+    fontModuleFile: 'src/shared/font.generated.ts',
     gplFile: 'art/xmas.gpl',
     gplName: 'XMAS',
   });

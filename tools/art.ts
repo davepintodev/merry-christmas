@@ -12,6 +12,9 @@ export type PackedDrawing = { width: number; height: number; pixels: Uint8Array 
 export type ArtDrawing = PackedDrawing & { sheet: string; x: number; y: number };
 export type ArtModule = Record<string, ArtDrawing>;
 
+/** The sheet whose drawings go into the font module, next to the full art module. */
+const FONT_SHEET = 'font.png';
+
 /** Any problem that must stop the build, with the file (and position) named. */
 export class ArtBuildError extends Error {
   constructor(message: string) {
@@ -133,6 +136,8 @@ export type BuildArtOptions = {
   moduleFile: string;
   gplFile: string;
   gplName: string;
+  /** Optional second module holding only the font.png glyphs, so the countdown page carries no scene art. */
+  fontModuleFile?: string;
 };
 
 /**
@@ -184,4 +189,11 @@ export function buildArt(options: BuildArtOptions): void {
   const gplText = gplFile(options.gplName, options.palette);
   writeFileSync(options.moduleFile, moduleText);
   writeFileSync(options.gplFile, gplText);
+  if (options.fontModuleFile !== undefined) {
+    const fontDrawings: ArtModule = {};
+    for (const [name, drawing] of Object.entries(drawings)) {
+      if (drawing.sheet === FONT_SHEET) fontDrawings[name] = drawing;
+    }
+    writeFileSync(options.fontModuleFile, generateArtModule(fontDrawings));
+  }
 }
