@@ -4,6 +4,24 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Christmas Countdown</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      canvas#countdown {
+        image-rendering: pixelated;
+      }
+    </style>
   </head>
-  <body></body>
+  <body>
+    <canvas id="countdown" aria-hidden="true" hidden></canvas>
+    <noscript><span>Christmas is on 25 December</span></noscript>
+    <!-- countdown-script -->
+  </body>
 </html>
