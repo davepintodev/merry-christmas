@@ -389,10 +389,16 @@ for (const [now, at] of [
     const reading = phaseAt(at);
     expect(reading.share).toBeGreaterThan(0);
     const mixes = [0, 1, 2, 3].map((i) => skyAndInk(phaseAt(plus(at, i))));
+    // XMAS-30: blends into and out of frosty-morning may bridge the sky or swap
+    // the ink to keep contrast, so only the dark-to-dark blends must differ from
+    // both ends; every blend must draw exactly what skyAndInk returns.
+    const linear = reading.from !== 'frosty-morning' && reading.to !== 'frosty-morning';
     const ends = [phaseColours[reading.from], phaseColours[reading.to]];
-    for (const end of ends) {
-      expect(mixes[0]!.sky).not.toBe(end.sky);
-      if (ends[0]!.ink !== ends[1]!.ink) expect(mixes[0]!.ink).not.toBe(end.ink);
+    if (linear) {
+      for (const end of ends) {
+        expect(mixes[0]!.sky).not.toBe(end.sky);
+        if (ends[0]!.ink !== ends[1]!.ink) expect(mixes[0]!.ink).not.toBe(end.ink);
+      }
     }
     await open(page, now);
     const result = await page.locator('canvas#countdown').evaluate((el) => {
