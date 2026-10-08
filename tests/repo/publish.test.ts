@@ -809,3 +809,76 @@ describe('concurrency never cancels a main run', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('workflow token permissions', () => {
+  it('sets top-level permissions to exactly { contents: read }', () => {
+    expect(workflow()['permissions']).toEqual({ contents: 'read' });
+  });
+
+  it('no job widens the permissions', () => {
+    const bad: string[] = [];
+    for (const [n, j] of Object.entries(jobs())) {
+      const p = j['permissions'];
+      if (p === undefined) continue;
+      if (!isObj(p)) {
+        bad.push(`${n}: ${String(p)}`);
+        continue;
+      }
+      for (const [k, v] of Object.entries(p)) {
+        const ok = v === 'none' || (k === 'contents' && v === 'read');
+        if (!ok) bad.push(`${n}.${k}: ${String(v)}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('dist/ is built once in check and handed to the deploying jobs', () => {
+  const SHA_PIN = /@[0-9a-f]{40}\s+#\s*v\d/;
+
+  function usesStep(job: Job, action: string): [number, Step] {
+    const i = steps(job).findIndex((s) => typeof s.uses === 'string' && s.uses.startsWith(`${action}@`));
+    return [i, steps(job)[i]!];
+  }
+
+  function normDir(v: unknown): string {
+    return String(v ?? '').trim().replace(/^\.\//, '').replace(/\/+$/, '');
+  }
+
+  it('every action in the workflow is pinned by full commit SHA with a # vX comment', () => {
+    const lines = readText(WORKFLOW).split('\n').filter((l) => /^\s*-?\s*uses:/.test(l));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l, l.trim()).toMatch(SHA_PIN);
+  });
+
+  it('check uploads dist/ with actions/upload-artifact after `pnpm check`', () => {
+    const check = jobs()['check']!;
+    const [i, step] = usesStep(check, 'actions/upload-artifact');
+    expect(i, 'upload-artifact step in check').toBeGreaterThanOrEqual(0);
+    expect(i, 'upload after the build in `pnpm check`').toBeGreaterThan(stepIndex(check, /\bpnpm\s+(run\s+)?check\b/));
+    const w = obj(step.with, 'upload-artifact with');
+    expect(normDir(w['path'])).toBe('dist');
+    expect(typeof w['name']).toBe('string');
+  });
+
+  it('preview and publish download that artifact into dist/ before wrangler', () => {
+    const uploaded = obj(usesStep(jobs()['check']!, 'actions/upload-artifact')[1]?.with, 'upload-artifact with')['name'];
+    for (const [name, job] of [previewJob(), publishJob()]) {
+      const [i, step] = usesStep(job, 'actions/download-artifact');
+      expect(i, `${name}: download-artifact step`).toBeGreaterThanOrEqual(0);
+      const w = obj(step.with, `${name}: download-artifact with`);
+      expect(w['name'], `${name}: artifact name`).toBe(uploaded);
+      expect(normDir(w['path']), `${name}: download path`).toBe('dist');
+      expect(i, `${name}: download before wrangler`).toBeLessThan(stepIndex(job, /\bwrangler\s+(deploy|versions\s+upload)\b/));
+    }
+  });
+
+  it('preview and publish no longer build, but still install with a frozen lockfile', () => {
+    for (const [name, job] of [previewJob(), publishJob()]) {
+      expect(runText(job), `${name} must not rebuild`).not.toMatch(/\bpnpm\s+(run\s+)?(build|check)\b|\bvite\s+build\b/);
+      expect(stepIndex(job, /\bpnpm\s+(install|i)\b[^\n]*--frozen-lockfile/), `${name}: frozen install`).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
