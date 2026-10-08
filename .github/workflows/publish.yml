@@ -1,0 +1,105 @@
+name: publish
+
+on:
+  push:
+    branches: ['**']
+
+# One push at a time per ref; a run on main is never cancelled by a newer push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm check
+
+  preview:
+    needs: check
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACC_ID }}
+    outputs:
+      preview_url: ${{ steps.upload.outputs.preview_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Upload preview version
+        id: upload
+        run: |
+          set -uo pipefail
+
+          log="$RUNNER_TEMP/wrangler-versions-upload.log"
+          clean="$RUNNER_TEMP/wrangler-versions-upload.clean"
+
+          # A failed upload still has to be read, so keep wrangler's exit code
+          # aside instead of letting `set -e` end the step here.
+          status=0
+          pnpm exec wrangler versions upload > "$log" 2>&1 || status=$?
+          cat "$log"
+
+          # wrangler colourises its output; strip ANSI escapes before matching.
+          sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$log" > "$clean"
+
+          if grep -qi 'does not yet exist' "$clean"; then
+            echo '::error::Worker does not exist yet: publish main once first (push to main), then retry this preview.' >&2
+            exit 1
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error::version upload failed with exit status $status." >&2
+            exit "$status"
+          fi
+
+          if ! grep -q 'Version Preview URL:' "$clean"; then
+            echo '::error::version upload succeeded but printed no preview URL.' >&2
+            exit 1
+          fi
+
+          url=$(grep -m1 'Version Preview URL:' "$clean" | sed -e 's/.*Version Preview URL:[[:space:]]*//' -e 's/[[:space:]].*$//' -e "s/[\"',;.)]*\$//")
+          case "$url" in
+            https://*) ;;
+            *)
+              echo '::error::could not read the preview URL from wrangler output.' >&2
+              exit 1
+              ;;
+          esac
+
+          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Preview URL (workers.dev): $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "Preview URL (workers.dev): $url"
+
+  publish:
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACC_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm exec wrangler deploy

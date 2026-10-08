@@ -1,0 +1,10 @@
+{
+  // Static assets only: `vite build` writes ./dist before wrangler runs.
+  "name": "merry-christmas",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./dist"
+  }
+}
