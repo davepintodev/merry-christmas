@@ -1,3 +1,5 @@
+import type { PhaseName } from '../src/shared/clock.ts';
+
 /** Named colours the code uses; every one also sits in the master list. */
 export const colours = {
   midnight: '#0b1026',
@@ -24,3 +26,15 @@ export const masterColours: readonly string[] = [
   '#4a1238', '#380d2a', '#f0b8d4', '#fff0f6', '#f08cc0', '#ffd0e6', '#d98cb4', '#9ff0d8',
   '#c06a98', '#f4cfe0', '#0b1026',
 ];
+
+// XMAS-27: the sky and ink the countdown draws with, per phase. Every colour
+// is a master colour, so the art pass can redraw a phase without code changes.
+// Dawn's colours are a stand-in from the prototype's purple bands until the
+// art pass draws them; frosty-morning's sky is the palest band of its theme,
+// the one the red ink reaches 4.5:1 against.
+export const phaseColours: Record<PhaseName, { sky: string; ink: string }> = {
+  dawn: { sky: '#2b225c', ink: '#ffe08a' },
+  'frosty-morning': { sky: '#e2f1fd', ink: '#c8102e' },
+  sunset: { sky: '#2a1a4a', ink: '#ffe08a' },
+  'purple-night': { sky: '#1a1433', ink: '#ffe08a' },
+};
