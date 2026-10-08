@@ -17,10 +17,22 @@
       canvas#countdown {
         image-rendering: pixelated;
       }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
     </style>
   </head>
   <body>
     <canvas id="countdown" aria-hidden="true" hidden></canvas>
+    <p id="countdown-text" class="visually-hidden"></p>
+    <div id="countdown-announce" class="visually-hidden" aria-live="polite"></div>
     <noscript><span>Christmas is on 25 December</span></noscript>
     <!-- countdown-script -->
   </body>

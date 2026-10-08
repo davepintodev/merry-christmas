@@ -5,7 +5,8 @@ State and next steps for the next session. Ticket keys are in the planning store
 ## State
 
 - Done and pushed to main (live on the workers.dev address the publish run prints): XMAS-25, 26, 27 (countdown on a plain sky), and XMAS-28 (object list, rough sheets, style rules, font split, `phaseOverrides` colour tables: prototype hex entries minus any colour the protected objects use, so those objects look the same in every phase).
-- Next unblocked: XMAS-29 (screen reader text), XMAS-30 (contrast test and Dawn stand-in; note the straight-line ink mix fails 4.5:1 mid-blend).
+- XMAS-29 done (hidden `#countdown-text`, polite `#countdown-announce`, `src/countdown/announce.ts`).
+- Next unblocked: XMAS-30 (contrast test and Dawn stand-in; note the straight-line ink mix fails 4.5:1 mid-blend).
 - Open nits worth a ticket: `phaseOverrides` key type is a hand-written union (use `Exclude<PhaseName,'dawn'>`); spot-check test in phase-overrides.test.ts can skip everything; cap for scene art once the scene imports art.generated.ts (tests/repo/rough-art.test.ts uses an invented 40000); FONT_SHEET hard-coded in tools/art.ts; speaker icons have no cone; present-3 at 3x3 barely reads; Santa's 31x6 is tight.
 - Standing user rule: each deployable, e2e-testable state goes live on a real address; report the link.
 - Pipeline reminders: test-writer (Opus) -> `ticket-impl` -> own `pnpm check` -> fresh reviewer -> commit. ticket-impl exits 3 when a session passes 150k: restart with a full brief.
@@ -22,3 +23,4 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-28a | 1 | changes needed | spec x2 (countdown script inlines all scene art; Santa/snowman arms+scarf break the outline rule), test-gap x1 (outline rule untested), nit x3 (cap comment says build checks it; invented 40000 cap; weak pair-differs test) |
 | XMAS-28a | 2 | approve | nit x4 (invented 40000 art cap until scene imports art; speaker icons lack a cone; 3x3 presents barely read; FONT_SHEET hard-coded in tools/art.ts) |
 | XMAS-28b | 1 | approve | nit x2 (phaseOverrides key union not tied to PhaseName; spot-check test can pass vacuously) |
+| XMAS-29 | 1 | approve | nit x3 (live region keeps the greeting after Christmas Day; "Less than a minute" wording not in ticket; spacing slip at announce.spec.ts:69) |

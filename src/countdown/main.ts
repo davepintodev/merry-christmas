@@ -2,7 +2,12 @@
 // countdown frame on <canvas id="countdown"> in the phase's sky and ink, at a
 // whole number of physical pixels per art pixel, on the second and again as
 // soon as the tab comes back; at zero it switches live to the greeting.
-import { makeClock, phaseAt, timeLeft } from '../shared/clock.ts';
+// XMAS-29 "Screen reader text and the announcement at zero": the same reading
+// fills the hidden countdown text, rewritten only when it changes (once a
+// minute), and announces the greeting once in the live region the page sees
+// zero pass.
+import { makeClock, phaseAt, timeLeft, type TimeLeft } from '../shared/clock.ts';
+import { announcement, spokenTime } from './announce.ts';
 import { skyAndInk } from './colours.ts';
 import { countdownFrame } from './render.ts';
 import { fitScale } from './scale.ts';
@@ -10,13 +15,16 @@ import { fitScale } from './scale.ts';
 const clock = makeClock(location.search);
 const canvas = document.querySelector<HTMLCanvasElement>('canvas#countdown');
 const context = canvas === null ? null : canvas.getContext('2d');
+const text = document.querySelector<HTMLElement>('#countdown-text');
+const live = document.querySelector<HTMLElement>('#countdown-announce');
 let marked = false;
+let previous: TimeLeft | null = null; // the last reading, for the announcement
+let announced = false; // the live region is written at most once per page
 
-/** Draws the frame the clock asks for, filling sky first and ink over it. */
-function draw(): void {
+/** Draws the frame for one reading, filling sky first and ink over it. */
+function draw(now: Date, left: TimeLeft): void {
   if (canvas === null || context === null) return;
-  const now = new Date(Math.floor(clock().getTime() / 1000) * 1000); // the whole second it lands in
-  const frame = countdownFrame(timeLeft(now), now.getSeconds() % 2 === 0);
+  const frame = countdownFrame(left, now.getSeconds() % 2 === 0);
   const dpr = window.devicePixelRatio || 1;
   const scale = fitScale(frame, { width: window.innerWidth, height: window.innerHeight }, dpr);
   // Assigning width/height reallocates the backing store, so only do it when
@@ -45,17 +53,39 @@ function draw(): void {
   }
 }
 
+/** Keeps the hidden text and the live region in step; the text changes once a minute. */
+function speak(left: TimeLeft): void {
+  const line = spokenTime(left);
+  if (text !== null && text.textContent !== line) text.textContent = line;
+  if (live !== null && !announced) {
+    const greeting = announcement(previous, left);
+    if (greeting !== null) {
+      live.textContent = greeting;
+      announced = true;
+    }
+  }
+  previous = left;
+}
+
+/** One clock reading drives the frame and the text, so a catch-up does both. */
+function update(): void {
+  const now = new Date(Math.floor(clock().getTime() / 1000) * 1000); // the whole second it lands in
+  const left = timeLeft(now);
+  draw(now, left);
+  speak(left);
+}
+
 /** Draws, then waits to the clock's next whole second, reading it fresh. */
 function tick(): void {
-  draw();
+  update();
   window.setTimeout(tick, 1000 - clock().getMilliseconds());
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) draw();
+  if (!document.hidden) update();
 });
-window.addEventListener('pageshow', draw);
-window.addEventListener('resize', draw);
+window.addEventListener('pageshow', update);
+window.addEventListener('resize', update);
 
 /** Redraws at once when the pixel ratio changes (e.g. a move to another display). */
 function watchDpr(): void {
@@ -64,7 +94,7 @@ function watchDpr(): void {
   media.addEventListener(
     'change',
     () => {
-      draw(); // the whole-pixel scale depends on the ratio
+      update(); // the whole-pixel scale depends on the ratio
       watchDpr(); // the old query no longer matches: listen for the next ratio
     },
     { once: true },
