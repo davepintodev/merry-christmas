@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { sceneFrame } from '../src/scene/frame.ts';
 import type { PhaseName } from '../src/shared/clock.ts';
-import { framesAddress, framesPage, referenceFrames, referenceProblems, renderReference, updateReferences } from './frames.ts';
+import { framesAddress, referenceFrames, referenceProblems, renderReference, updateReferences } from './frames.ts';
 import { decodePng, encodePng } from './png.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -158,34 +158,9 @@ describe('updateReferences and referenceProblems', () => {
   });
 });
 
-describe('framesPage', () => {
-  it('is one HTML page with an <img> for every reference picture', () => {
-    const html = framesPage();
-    expect(html).toMatch(/^<!doctype html>/i);
-    for (const name of NAMES) expect(html).toMatch(new RegExp(`<img\\b[^>]*\\bsrc="(\\./|/)?${name}\\.png"`));
-  });
-
-  it('enlarges every picture by one whole-number scale of at least 2, with hard edges', () => {
-    const html = framesPage();
-    expect(html).toMatch(/image-rendering\s*:\s*(pixelated|crisp-edges)/);
-    expect(html).not.toMatch(/image-rendering\s*:\s*(auto|smooth|high-quality)/);
-    for (const ref of referenceFrames) {
-      const tag = new RegExp(`<img\\b[^>]*\\bsrc="(\\./|/)?${ref.name}\\.png"[^>]*>`).exec(html)?.[0] ?? '';
-      const width = Number(/\bwidth="(\d+)"/.exec(tag)?.[1]);
-      const height = Number(/\bheight="(\d+)"/.exec(tag)?.[1]);
-      const sx = width / ref.input.width;
-      const sy = height / ref.input.height;
-      expect(Number.isInteger(sx), `${ref.name}: width ${width}`).toBe(true);
-      expect(sx).toBeGreaterThanOrEqual(2);
-      expect(sy, `${ref.name}: height ${height}`).toBe(sx);
-    }
-  });
-
-  it('labels each picture with its name', () => {
-    const text = framesPage().replace(/<[^>]*>/g, ' ');
-    for (const name of NAMES) expect(text).toContain(name);
-  });
-});
+// XMAS-31c replaced the all-pictures page: the review page (one picture at a
+// time, frames found in the folder at run time) is pinned by
+// tools/frames-review.test.ts and tests/browser/frames-review.spec.ts.
 
 describe('framesAddress', () => {
   it('stays on loopback when HOST is unset or empty, like pnpm dev', () => {
@@ -290,8 +265,7 @@ describe('the CLIs', () => {
     const page = await waitFor(`http://127.0.0.1:${port}/`);
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type') ?? '').toMatch(/text\/html/);
-    const html = await page.text();
-    for (const name of NAMES) expect(html).toContain(`${name}.png`);
+    expect(await page.text()).toMatch(/^<!doctype html>/i);
     const png = await fetch(`http://127.0.0.1:${port}/dawn.png`);
     expect(png.status).toBe(200);
     expect(png.headers.get('content-type') ?? '').toMatch(/image\/png/);

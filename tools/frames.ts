@@ -1,7 +1,8 @@
 // XMAS-31a "Scene core engine and reference pictures": the reference
-// renderer, the deliberate update command (`pnpm frames:update`), the check
-// `pnpm run test:unit` runs, and the `pnpm frames` viewing page. Pictures are
-// PNGs written with tools/png.ts; only the update command writes them.
+// renderer, the deliberate update command (`pnpm frames:update`) and the check
+// `pnpm run test:unit` runs. Pictures are PNGs written with tools/png.ts; only
+// the update command writes them. The `pnpm frames` review page and its
+// server live in tools/frames-review.ts and tools/frames-serve.ts.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { sceneFrame, type SceneInput } from '../src/scene/frame.ts';
@@ -105,37 +106,6 @@ export function referenceProblems(dir: string): string[] {
     }
   }
   return problems;
-}
-
-/** How much the page enlarges each art pixel; a whole number, so the edges stay hard. */
-const FRAME_SCALE = 2;
-
-/** The one page showing every reference picture enlarged with hard edges. */
-export function framesPage(): string {
-  const figures = referenceFrames.map((ref) => {
-    const width = ref.input.width * FRAME_SCALE;
-    const height = ref.input.height * FRAME_SCALE;
-    return `    <figure>
-      <img src="./${ref.name}.png" width="${width}" height="${height}" alt="${ref.name}">
-      <figcaption>${ref.name}</figcaption>
-    </figure>`;
-  });
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>Scene reference pictures</title>
-    <style>
-      body { background: #111; color: #eee; font-family: system-ui, sans-serif; }
-      figure { display: inline-block; margin: 8px; }
-      img { display: block; image-rendering: pixelated; }
-      figcaption { padding-top: 4px; font-size: 13px; }
-    </style>
-  </head>
-  <body>
-${figures.join('\n')}
-  </body>
-</html>`;
 }
 
 /** The port `pnpm frames` uses when PORT is unset or empty. */

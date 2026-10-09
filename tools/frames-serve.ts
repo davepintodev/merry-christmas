@@ -1,36 +1,53 @@
-// XMAS-31a "Scene core engine and reference pictures": the viewing page.
-// Usage: node tools/frames-serve.ts [dir] (default tests/frames). Serves the
-// page and the pictures on HOST and PORT (see framesAddress); never writes.
+// XMAS-31c "Frames review page": the review server. Usage:
+// node tools/frames-serve.ts [dir] (default tests/frames). Serves the review
+// page and the folder's PNGs on HOST and PORT (see framesAddress); the folder
+// is read on every request, so pictures added or removed while the page is
+// open show up on reload, and the server never writes.
 import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import path from 'node:path';
-import { framesAddress, framesPage, referenceFrames } from './frames.ts';
+import { framesAddress } from './frames.ts';
+import { frameList, reviewPage } from './frames-review.ts';
 
 const dir = process.argv[2] ?? 'tests/frames';
 const { host, port } = framesAddress(process.env);
-const page = framesPage();
-const pictures = new Set(referenceFrames.map((ref) => `${ref.name}.png`));
+
+/** The one answer for anything the folder does not hold as a PNG right now. */
+function missing(response: ServerResponse): void {
+  response.writeHead(404, { 'content-type': 'text/plain' });
+  response.end('not a frame picture');
+}
+
+/** The requested path as a file name, or null when it cannot be decoded. */
+function decodeName(pathname: string): string | null {
+  try {
+    return decodeURIComponent(pathname.slice(1));
+  } catch {
+    return null;
+  }
+}
 
 const server = createServer((request, response) => {
   const name = new URL(request.url ?? '/', `http://${host}:${port}`).pathname;
   if (name === '/') {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(page);
+    response.end(reviewPage(frameList(dir)));
     return;
   }
-  const file = name.slice(1);
-  if (!pictures.has(file)) {
-    response.writeHead(404, { 'content-type': 'text/plain' });
-    response.end('not a reference picture');
+  // A request only ever names one of the folder's own entries, so no decoded
+  // name can step outside it; anything else (including `..` paths) is missing.
+  const wanted = decodeName(name);
+  const found = wanted === null ? undefined : frameList(dir).find((frame) => frame.file === wanted);
+  if (found === undefined) {
+    missing(response);
     return;
   }
   try {
-    const body = readFileSync(path.join(dir, file));
+    const body = readFileSync(path.join(dir, found.file));
     response.writeHead(200, { 'content-type': 'image/png' });
     response.end(body);
   } catch {
-    response.writeHead(404, { 'content-type': 'text/plain' });
-    response.end('missing reference picture');
+    missing(response);
   }
 });
 server.on('error', (error: NodeJS.ErrnoException) => {
