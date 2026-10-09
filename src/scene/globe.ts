@@ -12,6 +12,7 @@ import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { glyph, GLYPH_HEIGHT, GLYPH_WIDTH } from '../shared/font.ts';
 import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
+import { drawShapes } from './shapes-draw.ts';
 
 /** A full turn in radians: the globe's period, negative and whole turns included. */
 const FULL_TURN = 2 * Math.PI;
@@ -307,6 +308,7 @@ export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayo
   const boxX = layout.globe.cx - base.width / 2;
   const boxY = layout.groundTop;
   paintGlass(picture, width, layout, glass);
+  drawShapes(picture, width, layout, phase, spin);
   paintReflections(picture, width, layout, glass, spin);
   paintCastShadow(picture, width, layout, boxX + base.width, boxY + base.height - 2);
   paintBase(picture, width, base, boxX, boxY, spin);
