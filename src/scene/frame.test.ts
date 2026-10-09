@@ -468,6 +468,22 @@ describe('sceneFrame: sky, ground and disc', () => {
     expect(byNumber.size).toBeGreaterThan(1);
   });
 
+  it.each(STAR_READINGS)('keeps the disc\'s snow-white highlight pure white in %s (as the base\'s white lettering ink is)', (_name, phase) => {
+    const { pixels } = discArt();
+    const white = masterColours.indexOf('#ffffff') + 1;
+    const f = sceneFrame(input({ phase }));
+    const { x: dx, y: dy } = f.layout.disc;
+    let seen = 0;
+    for (let y = 0; y < 13; y++) {
+      for (let x = 0; x < 13; x++) {
+        if ((pixels[y * 13 + x] ?? 0) !== white) continue;
+        seen++;
+        expect(at(f, dx + x, dy + y), `highlight pixel ${x},${y}`).toBe(0xffffff);
+      }
+    }
+    expect(seen, 'the Props sheet disc has snow-white highlight pixels').toBeGreaterThan(0);
+  });
+
   it('shows a cool moon at night and a warm sun by day: the disc body changes colour, not shape', () => {
     const night = sceneFrame(input({ phase: steady('purple-night') }));
     const day = sceneFrame(input({ phase: steady('frosty-morning') }));

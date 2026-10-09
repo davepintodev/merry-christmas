@@ -3,12 +3,13 @@
 // frame whose picture is width * height colour numbers (0xRRGGBB). The top
 // strip is the countdown's plain sky; sky bands, ground and stars are worked
 // out in code, the disc comes from the Props sheet, phases only swap colour
-// tables, and the globe's place is reserved.
-import { masterColours, phaseColours, phaseOverrides } from '../../art/colours.ts';
+// tables, and the globe is drawn over the ground on its base (globe.ts).
+import { colours, masterColours, phaseColours, phaseOverrides } from '../../art/colours.ts';
 import { mixHex, skyAndInk } from '../countdown/colours.ts';
 import { countdownFrame } from '../countdown/render.ts';
 import { drawings } from '../shared/art.generated.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
+import { drawGlobe } from './globe.ts';
 
 /** The globe's radius in art pixels. */
 export const GLOBE_RADIUS = 56;
@@ -16,6 +17,8 @@ export const GLOBE_RADIUS = 56;
 export const DISC_SIZE = 13;
 /** The shortest picture: the countdown area above the globe. */
 export const MIN_HEIGHT = 160;
+/** The base drawing's height in art pixels (art/objects.ts, the Base sheet): the globe sits on it on the ground. */
+const BASE_HEIGHT = drawings['base']?.height ?? 22;
 /** The countdown's reserved height: the taller countdown frame, the Christmas Day greeting. */
 const COUNTDOWN_HEIGHT = Math.max(
   countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, true).height,
@@ -47,6 +50,8 @@ export interface SceneInput {
   time: number;
   /** Globe drag (turn); only the globe may change with it. */
   drag: number;
+  /** Globe turn angle in radians: 0 faces the visitor (the default), period 2π. */
+  turn?: number;
   /** Phase and blend share, from phaseAt on the shared clock. */
   phase: PhaseReading;
   /** The only source of randomness. */
@@ -205,8 +210,11 @@ export function sceneLayout(width: number, height: number, seed: number): SceneL
     cy: Math.min(Math.max(Math.round(height * 0.56), COUNTDOWN_HEIGHT + GLOBE_RADIUS), height - GLOBE_RADIUS),
     radius: GLOBE_RADIUS,
   };
-  // The globe sits on the ground, so the horizon follows it down for taller pictures.
-  const groundTop = Math.min(height - 1, globe.cy + GLOBE_RADIUS + 3);
+  // The globe sits on its base on the ground, so the horizon is the globe's
+  // bottom; the shortest pictures hold the whole base on the ground instead,
+  // which raises the horizon and sinks the glass's foot into the base (its
+  // lowest 16 rows at height 160, where cy stays 98).
+  const groundTop = Math.min(height - BASE_HEIGHT, globe.cy + GLOBE_RADIUS);
   const disc: Rect = { x: 2, y: COUNTDOWN_HEIGHT, width: DISC_SIZE, height: DISC_SIZE };
   return { width, height, groundTop, countdown, globe, disc, stars: placeStars(width, groundTop, globe, disc, countdown, seed) };
 }
@@ -327,6 +335,9 @@ function shifted(colour: string, a: string, b: string, k: number): string {
 function discColour(phase: PhaseName, n: number): string {
   const drawn = masterColours[n - 1] ?? '#000000';
   if (drawn === SUN_COLOUR) return DISC_BODY[phase];
+  // Snow white is the disc's brightest highlight, not part of the body: it
+  // stays white in every phase, as the base's lettering ink does.
+  if (drawn === colours.snow) return drawn;
   return mixHex(drawn, SUN_COLOUR, SUN_SHARE[phase]);
 }
 
@@ -403,6 +414,8 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   for (let y = groundTop; y < height; y++) {
     picture.fill(y < groundTop + GROUND_SHADOW_ROWS ? shadow : snow, y * width, (y + 1) * width);
   }
+  // The globe sits on the ground's first row, on its base.
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0);
   paintDisc(picture, layout, input.phase, share);
   paintStars(picture, layout, input, share, sky);
 }
@@ -410,6 +423,9 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
 export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: SceneLayout): SceneFrame {
   if (!Number.isFinite(input.time)) {
     throw new RangeError(`time must be a finite number of milliseconds, got ${input.time}`);
+  }
+  if (input.turn !== undefined && !Number.isFinite(input.turn)) {
+    throw new RangeError(`turn must be a finite number of radians, got ${input.turn}`);
   }
   // The caller may keep a layout for one size and seed and hand it back in
   // (src/page/frames.ts), so the stars are not placed again every frame.
