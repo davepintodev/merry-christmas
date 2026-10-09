@@ -19,9 +19,20 @@ async function open(page: Page, now: string): Promise<void> {
   await expect(page.locator('canvas#countdown')).toBeVisible();
 }
 
+/**
+ * XMAS-31b: these specs fast-forward a fake clock that also fakes
+ * requestAnimationFrame, so the scene's every-refresh loop would run each
+ * faked frame. The scene file is blocked here: these tests are about the
+ * countdown text alone, and must not depend on the scene ever holding still.
+ */
+async function noScene(page: Page): Promise<void> {
+  await page.route(/\/assets\/scene-/, (route) => route.abort());
+}
+
 /** Installs a paused page clock at a UTC wall time, then opens the page at the same ?now. */
 async function openFrozen(page: Page, now: string): Promise<void> {
   const at = new Date(`${now}Z`);
+  await noScene(page);
   await page.clock.install({ time: at });
   await page.clock.pauseAt(at);
   await open(page, now);

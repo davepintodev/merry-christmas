@@ -91,15 +91,21 @@ describe('a build with countdownPlugin', () => {
 
   it('bundles main.ts and its imports, leaving no import or export statement', () => {
     const body = scripts(html)[0]?.body ?? '';
-    expect(body).not.toMatch(/(^|[;\s}])import\s*[\w{*'"(]/);
+    // XMAS-31b: a dynamic import( of the lazy scene file is allowed; static imports are not.
+    expect(body).not.toMatch(/(^|[;\s}])import\s*[\w{*'"]/);
     expect(body).not.toMatch(/(^|[;\s}])export\s*[\w{*]/);
     // The drawing code is in the page itself: it reaches for the countdown canvas.
     expect(body).toContain('countdown');
     expect(() => new Function(body)).not.toThrow(); // parses as a classic script
   });
 
-  it('emits no separate script file for the countdown', () => {
-    expect(listFiles(outDir).filter((f) => /\.(m?js|css)$/.test(f))).toEqual([]);
+  // XMAS-31b: the lazily loaded scene file may now sit next to the page; the
+  // countdown itself is still inline, and the page links no file up front.
+  it('emits no stylesheet, and the page links no script file up front', () => {
+    const files = listFiles(outDir);
+    expect(files.filter((f) => /\.css$/.test(f))).toEqual([]);
+    const outside = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    for (const file of files.filter((f) => /\.m?js$/.test(f))) expect(outside).not.toContain(path.posix.basename(file));
   });
 
   it('keeps the canvas and the noscript line in the built page', () => {

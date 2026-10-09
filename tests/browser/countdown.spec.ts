@@ -11,7 +11,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { phaseColours } from '../../art/colours.ts';
 import { countdownFrame, type Frame } from '../../src/countdown/render.ts';
 import { skyAndInk } from '../../src/countdown/colours.ts';
-import { fitScale } from '../../src/countdown/scale.ts';
+import { pagePixels } from '../../src/page/pixel.ts';
 import { phaseAt, timeLeft } from '../../src/shared/clock.ts';
 
 const GOLD = phaseColours['purple-night'].ink; // '#ffe08a'
@@ -96,6 +96,15 @@ async function shown(page: Page, list: Candidate[], ink: string): Promise<string
     if (art !== null && art === bits(frame)) return label;
   }
   return null;
+}
+
+/**
+ * XMAS-31b: specs that drive Playwright's fake clock (which also fakes
+ * requestAnimationFrame) block the scene file, so the scene's every-refresh
+ * loop never runs there and the countdown checks do not depend on it.
+ */
+async function noScene(page: Page): Promise<void> {
+  await page.route(/\/assets\/scene-/, (route) => route.abort());
 }
 
 async function open(page: Page, now: string): Promise<void> {
@@ -204,6 +213,7 @@ test.describe('redraws at once (timers frozen)', () => {
   const start = local(2026, 12, 1, 22, 0, 0);
 
   async function frozen(page: Page): Promise<void> {
+    await noScene(page);
     await page.clock.install({ time: start });
     await page.clock.pauseAt(start);
     await open(page, '2026-12-01T22:00:00');
@@ -238,7 +248,8 @@ test.describe('redraws at once (timers frozen)', () => {
     expect(await shown(page, later, GOLD)).not.toBeNull();
     const frame = later[0]!.frame;
     const size = await canvasSize(page);
-    expect(size.width / frame.width).toBe(fitScale(frame, { width: 400, height: 300 }, size.dpr));
+    // XMAS-31b: one art pixel size across the page, shared with the scene.
+    expect(size.width / frame.width).toBe(pagePixels({ width: 400, height: 300 }, size.dpr).scale);
   });
 });
 
@@ -288,8 +299,9 @@ for (const dpr of [2, 3]) {
     const frame = countdownFrame(timeLeft(at), true);
     const size = await canvasSize(page);
     expect(size.dpr).toBe(dpr);
-    expect(size.width).toBe(frame.width * fitScale(frame, viewport, dpr));
-    expect(size.height).toBe(frame.height * fitScale(frame, viewport, dpr));
+    // XMAS-31b: the countdown uses the page's one art pixel size, shared with the scene.
+    expect(size.width).toBe(frame.width * pagePixels(viewport, dpr).scale);
+    expect(size.height).toBe(frame.height * pagePixels(viewport, dpr).scale);
     // CSS size is canvas size / dpr. Chromium lays out on a 1/64 CSS px grid,
     // so allow that rounding (1/64 * 3 < 0.05 physical px), no more.
     expect(size.width % frame.width).toBe(0);
@@ -355,14 +367,16 @@ test('the canvas takes no keyboard focus and nothing is stored', async ({ page }
   expect(stored).toEqual({ local: 0, session: 0, cookie: '', dbs: 0 });
 });
 
-test('the page makes no request beyond the document, and shows no image or error text', async ({ page }) => {
+// XMAS-31b: the lazily loaded scene file (a script under /assets/) is now the
+// one request allowed beyond the document; the page links no script up front.
+test('the page makes no request beyond the document and the scene file, and shows no image or error text', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', (req) => requests.push(new URL(req.url()).pathname));
   await open(page, '2026-12-01T22:00:00');
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(1200);
-  expect(requests.filter((p) => p !== '/' && p !== '/favicon.ico')).toEqual([]);
-  expect(await page.locator('script[src]').count()).toBe(0);
+  const extra = requests.filter((p) => p !== '/' && p !== '/favicon.ico');
+  expect(extra.filter((p) => !/^\/assets\/[^/]+\.m?js$/.test(p))).toEqual([]);
   expect(await page.locator('img').count()).toBe(0);
   const text = (await page.locator('body').innerText()).trim();
   expect(text).not.toMatch(/error|retry|failed|loading/i);
@@ -490,6 +504,7 @@ test.describe('on the device clock (no ?now)', () => {
   test.use({ timezoneId: 'UTC' });
 
   test('the value changes when the device clock reaches the whole second', async ({ page }) => {
+    await noScene(page);
     await page.clock.install({ time: EVE_NOON_UTC });
     await page.clock.pauseAt(EVE_NOON_UTC + 300); // load 300 ms into a second
     await page.goto('/');
@@ -505,6 +520,7 @@ test.describe('on the device clock (no ?now)', () => {
 test('a time zone change on the device shows within a second or so', async ({ page }) => {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });
+  await noScene(page);
   await page.clock.install({ time: EVE_NOON_UTC });
   await page.goto('/');
   await expect(page.locator('canvas#countdown')).toBeVisible();

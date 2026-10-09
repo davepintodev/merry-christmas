@@ -9,13 +9,26 @@
       body {
         margin: 0;
         height: 100%;
+        overflow: hidden;
       }
-      body {
-        display: grid;
-        place-items: center;
+      /* Both canvases hold their place whether or not the scene file loads:
+         the scene covers the window, the countdown sits over its top strip. */
+      canvas {
+        position: fixed;
+        top: 0;
+        image-rendering: pixelated;
+      }
+      canvas#scene {
+        /* The picture may overhang a very narrow window by a part-pixel; it
+           stays centred so the countdown is centred on its strip. */
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 0;
       }
       canvas#countdown {
-        image-rendering: pixelated;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1;
       }
       .visually-hidden {
         position: absolute;
@@ -30,6 +43,7 @@
     </style>
   </head>
   <body>
+    <canvas id="scene" aria-hidden="true"></canvas>
     <canvas id="countdown" aria-hidden="true" hidden></canvas>
     <p id="countdown-text" class="visually-hidden"></p>
     <div id="countdown-announce" class="visually-hidden" aria-live="polite"></div>

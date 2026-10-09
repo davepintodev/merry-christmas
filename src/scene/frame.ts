@@ -261,16 +261,18 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   paintStars(picture, layout, input, share, sky);
 }
 
-export function sceneFrame(input: SceneInput, target?: Uint32Array): SceneFrame {
+export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: SceneLayout): SceneFrame {
   if (!Number.isFinite(input.time)) {
     throw new RangeError(`time must be a finite number of milliseconds, got ${input.time}`);
   }
-  const layout = sceneLayout(input.width, input.height, input.seed);
-  const size = layout.width * layout.height;
+  // The caller may keep a layout for one size and seed and hand it back in
+  // (src/page/frames.ts), so the stars are not placed again every frame.
+  const used = layout ?? sceneLayout(input.width, input.height, input.seed);
+  const size = used.width * used.height;
   if (target !== undefined && target.length !== size) {
     throw new RangeError(`target must hold ${size} colour numbers, got ${target.length}`);
   }
   const picture = target ?? new Uint32Array(size);
-  paint(picture, layout, input);
-  return { width: layout.width, height: layout.height, picture, layout };
+  paint(picture, used, input);
+  return { width: used.width, height: used.height, picture, layout: used };
 }

@@ -6,11 +6,18 @@
 // fills the hidden countdown text, rewritten only when it changes (once a
 // minute), and announces the greeting once in the live region the page sees
 // zero pass.
+// XMAS-31b "Scene core": the art pixel size is the page's one size, shared
+// with the scene (src/page/pixel.ts), and once the countdown first shows the
+// page asks for the scene's own file; a failure leaves this plain sky.
 import { makeClock, phaseAt, timeLeft, type TimeLeft } from '../shared/clock.ts';
+import { pagePixels } from '../page/pixel.ts';
 import { announcement, spokenTime } from './announce.ts';
 import { skyAndInk } from './colours.ts';
 import { countdownFrame } from './render.ts';
-import { fitScale } from './scale.ts';
+
+// The scene file's URL. tools/countdown-plugin.ts fills this in: the build
+// names the emitted /assets/scene-<hash>.js, the dev server the source file.
+const SCENE_URL = '%SCENE_URL%';
 
 const clock = makeClock(location.search);
 const canvas = document.querySelector<HTMLCanvasElement>('canvas#countdown');
@@ -20,13 +27,23 @@ const live = document.querySelector<HTMLElement>('#countdown-announce');
 let marked = false;
 let previous: TimeLeft | null = null; // the last reading, for the announcement
 let announced = false; // the live region is written at most once per page
+let sceneAsked = false; // the scene file is imported at most once per page
+
+/** Imports the scene file once; any failure leaves the countdown on its plain sky, silently. */
+function askForScene(): void {
+  if (sceneAsked) return;
+  sceneAsked = true;
+  void import(/* @vite-ignore */ SCENE_URL).catch(() => {
+    // The scene is decoration: a missing or broken file changes nothing on screen.
+  });
+}
 
 /** Draws the frame for one reading, filling sky first and ink over it. */
 function draw(now: Date, left: TimeLeft): void {
   if (canvas === null || context === null) return;
   const frame = countdownFrame(left, now.getSeconds() % 2 === 0);
   const dpr = window.devicePixelRatio || 1;
-  const scale = fitScale(frame, { width: window.innerWidth, height: window.innerHeight }, dpr);
+  const { scale } = pagePixels({ width: window.innerWidth, height: window.innerHeight }, dpr);
   // Assigning width/height reallocates the backing store, so only do it when
   // the whole-pixel size actually changes.
   const physicalWidth = frame.width * scale;
@@ -50,6 +67,7 @@ function draw(now: Date, left: TimeLeft): void {
     marked = true;
     canvas.hidden = false; // the canvas joins the layout only once it has drawn
     performance.mark('countdown-visible');
+    askForScene();
   }
 }
 
