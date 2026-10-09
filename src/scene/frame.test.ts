@@ -111,6 +111,27 @@ const STAR_READINGS: [string, PhaseReading][] = [
   ),
 ];
 
+/** The blends with Dawn in them, which bend through a via ramp instead of mixing straight. */
+const DAWN_BLENDS = [
+  ['purple-night', 'dawn'],
+  ['dawn', 'frosty-morning'],
+] as const;
+const DAWN_SIZES: [number, number][] = [
+  [130, 260],
+  [120, 420],
+  [240, 170],
+];
+const DAWN_CASES: [number, number, number][] = DAWN_SIZES.flatMap(([w, h]) => [0.25, 0.5, 0.75].map((s): [number, number, number] => [w, h, s]));
+/** Most one channel may move from one sky row to the next before it shows as a band. */
+const MAX_SKY_STEP = 8;
+/** Mid-blend horizon floors: below these the colour reads as grey. */
+const MIN_HORIZON_CHROMA = 36;
+const MIN_HORIZON_SATURATION = 0.3;
+
+function rgb2n(r: number, g: number, b: number): number {
+  return (r << 16) | (g << 8) | b;
+}
+
 /** 3 seconds at 60 steps a second. */
 function sweep(phase: PhaseReading, seed = SEED): SceneFrame[] {
   return Array.from({ length: 180 }, (_, i) => sceneFrame(input({ phase, seed, time: T + (i * 1000) / 60 })));
@@ -578,10 +599,11 @@ describe('sceneFrame: phases are colour tables only', () => {
 });
 
 describe('sceneFrame: blends', () => {
-  // Dark-to-dark blends mix straight; the frosty-morning blends follow the
-  // countdown bridge, pinned above through the top sky row.
+  // Sunset -> Purple night mixes straight, pixel by pixel. Blends with Dawn
+  // in them bend through a via ramp instead (pinned below), and the
+  // frosty-morning blends follow the countdown bridge, pinned above through
+  // the top sky row.
   it.each([
-    ['06:22:30, purple night -> dawn at 1/4', new Date(2026, 11, 3, 6, 22, 30), 0.25],
     ['19:00:00, sunset -> purple night at 1/2', new Date(2026, 11, 3, 19, 0, 0), 0.5],
     ['19:07:30, sunset -> purple night at 3/4', new Date(2026, 11, 3, 19, 7, 30), 0.75],
   ] as const)('shows an even mix of the two colour tables at %s', (_name, when, share) => {
@@ -603,6 +625,62 @@ describe('sceneFrame: blends', () => {
         }
       }
     }
+  });
+
+  describe.each(DAWN_BLENDS)('%s -> %s, through its via ramp', (from, to) => {
+    it.each(DAWN_SIZES)('is the steady pictures at share 0 and 1, pixel for pixel, at %ix%i', (width, height) => {
+      const start = sceneFrame(input({ width, height, phase: { from, to, share: 0 } }));
+      const end = sceneFrame(input({ width, height, phase: { from, to, share: 1 } }));
+      expect(Array.from(start.picture)).toEqual(Array.from(sceneFrame(input({ width, height, phase: steady(from) })).picture));
+      expect(Array.from(end.picture)).toEqual(Array.from(sceneFrame(input({ width, height, phase: steady(to) })).picture));
+    });
+
+    it.each(DAWN_CASES)('keeps the countdown strip the countdown sky at %ix%i, share %d', (width, height, share) => {
+      const reading: PhaseReading = { from, to, share };
+      const f = sceneFrame(input({ width, height, phase: reading }));
+      const want = hexNum(skyAndInk(reading).sky);
+      const c = f.layout.countdown;
+      for (let y = c.y; y < c.y + c.height; y++) {
+        for (let x = c.x; x < c.x + c.width; x++) {
+          if (at(f, x, y) !== want) expect.fail(`countdown pixel ${x},${y} is ${hexOf(at(f, x, y))}, not the countdown sky ${hexOf(want)}`);
+        }
+      }
+    });
+
+    it.each(DAWN_CASES)('runs the sky smoothly from the strip to the horizon at %ix%i, share %d: no channel steps more than 8 between rows', (width, height, share) => {
+      const f = sceneFrame(input({ width, height, phase: { from, to, share } }));
+      for (let y = 1; y < f.layout.groundTop; y++) {
+        const above = rgb(rowSky(f, y - 1));
+        const here = rgb(rowSky(f, y));
+        for (let c = 0; c < 3; c++) {
+          const step = Math.abs((here[c] ?? 0) - (above[c] ?? 0));
+          if (step > MAX_SKY_STEP) expect.fail(`row ${y - 1} -> ${y} channel ${c} steps ${step}`);
+        }
+      }
+    });
+
+    it.each(DAWN_SIZES)('keeps the mid-blend horizon coloured, not grey, at %ix%i', (width, height) => {
+      // Rendered at 1/2: purple night -> dawn #c889a0 (chroma 63, saturation
+      // 0.36), dawn -> frosty morning #f5cad6 (chroma 43, saturation 0.68).
+      // The straight mix would be #a2848f-ish (0.14) and #cbccc8 (0.04).
+      const f = sceneFrame(input({ width, height, phase: { from, to, share: 0.5 } }));
+      const [r, g, b] = rgb(rowSky(f, f.layout.groundTop - 1));
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const lightness = (max + min) / 510;
+      const saturation = max === min ? 0 : (max - min) / 255 / (1 - Math.abs(2 * lightness - 1));
+      expect(max - min, `horizon ${hexOf(rgb2n(r, g, b))} chroma`).toBeGreaterThanOrEqual(MIN_HORIZON_CHROMA);
+      expect(saturation, `horizon ${hexOf(rgb2n(r, g, b))} saturation`).toBeGreaterThanOrEqual(MIN_HORIZON_SATURATION);
+    });
+
+    it('gives the same frame for the same inputs, also after a frame of another size', () => {
+      const reading: PhaseReading = { from, to, share: 0.5 };
+      const first = Array.from(sceneFrame(input({ width: 130, height: 260, phase: reading })).picture);
+      sceneFrame(input({ width: 240, height: 170, phase: { from, to, share: 0.25 } }));
+      const again = sceneFrame(input({ width: 130, height: 260, phase: reading }));
+      expect(Array.from(again.picture)).toEqual(first);
+      expect(Array.from(sceneFrame(input({ width: 130, height: 260, phase: reading })).picture)).toEqual(first);
+    });
   });
 
   it('differs mid-blend from both steady phases', () => {

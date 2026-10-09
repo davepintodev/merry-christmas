@@ -30,11 +30,11 @@ export const masterColours: readonly string[] = [
 // XMAS-27: the sky and ink the countdown draws with, per phase. Every colour
 // is a master colour, so the art pass can redraw a phase without code changes.
 // Dawn's colours are a stand-in from the prototype's purple bands until the
-// art pass draws them; frosty-morning's sky is the palest band of its theme,
-// the one the red ink reaches 4.5:1 against.
+// art pass draws them; frosty-morning's sky is a calm pale winter blue, close
+// to the darkest sky the red ink still reaches 4.5:1 against (4.63:1).
 export const phaseColours: Record<PhaseName, { sky: string; ink: string }> = {
   dawn: { sky: '#2b225c', ink: '#ffe08a' },
-  'frosty-morning': { sky: '#e2f1fd', ink: '#c8102e' },
+  'frosty-morning': { sky: '#d6e6f8', ink: '#c8102e' },
   sunset: { sky: '#2a1a4a', ink: '#ffe08a' },
   'purple-night': { sky: '#1a1433', ink: '#ffe08a' },
 };
