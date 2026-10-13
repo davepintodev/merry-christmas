@@ -283,10 +283,11 @@ describe('globeShapes: what stands in the globe', () => {
     expect([...count.entries()].sort()).toEqual([[1, 2], [2, 2], [3, 2], [4, 2]]);
   });
 
-  it('holds one lamp post, 2 across and 12 tall like its drawing, and nothing else', () => {
+  it('holds one lamp post, 2 across and 12 tall like its drawing, and no other turning shape', () => {
     const lamp = only(lamps());
     expect([lamp.width, lamp.depth, lamp.height]).toEqual([2, 2, 12]);
-    expect(globeShapes.length).toBe(10);
+    // XMAS-32c adds the pines and the snowman (tests/frames/globe-trees-snowman.test.ts); the turning shapes stay ten.
+    expect(globeShapes.filter((s) => s.kind === 'house' || s.kind === 'present' || s.kind === 'lamp-post').length).toBe(10);
     for (const s of globeShapes) if (s.kind !== 'present') expect(s.design, `${s.kind} carries no present design`).toBeUndefined();
   });
 

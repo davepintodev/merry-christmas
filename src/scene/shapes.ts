@@ -7,8 +7,9 @@
 // drawn height, and the whole shape's footprint stays inside the disc.
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 
-export type ShapeKind = 'house' | 'present' | 'lamp-post';
+export type ShapeKind = 'house' | 'present' | 'lamp-post' | 'pine' | 'snowman';
 export type PresentDesign = 1 | 2 | 3 | 4;
+export type PineDrawing = 'pine-1' | 'pine-2' | 'pine-3';
 
 /**
  * One turning shape, placed on the floor disc at turn 0. Local axes: x across
@@ -24,6 +25,8 @@ export interface GlobeShape {
   height: number;
   /** Presents only: which of the four present drawings its faces carry. */
   design?: PresentDesign;
+  /** Pines only: the name of the drawing the pine is, one of pine-1 to pine-3. */
+  drawing?: PineDrawing;
 }
 
 /** The floor disc the shapes stand on: its centre's offset below the globe's centre on screen, and its radius, in art pixels. */
@@ -83,7 +86,16 @@ const PRESENTS: readonly GlobeShape[] = [
 /** The lamp post: a thin cylinder, so its one drawing shows the same 2 x 12 face from every side. */
 const LAMP_POST: GlobeShape = { kind: 'lamp-post', x: 12, z: 12, width: 2, depth: 2, height: 12 };
 
-export const globeShapes: readonly GlobeShape[] = [HOUSE, ...PRESENTS, LAMP_POST];
+/** The three pines: flat drawings facing the visitor, each on a thin footprint, away from the house's screen area at turn 0. */
+const PINES: readonly GlobeShape[] = [
+  { kind: 'pine', x: 34.5, z: 10, width: 7, depth: 2, height: 20, drawing: 'pine-1' },
+  { kind: 'pine', x: -33, z: 10, width: 6, depth: 2, height: 16, drawing: 'pine-2' },
+  { kind: 'pine', x: -27.5, z: -20, width: 5, depth: 2, height: 13, drawing: 'pine-3' },
+];
+/** The snowman: his body is a flat drawing facing the visitor, round on a 6 x 6 footprint; his face, arms and scarf turn with the globe. */
+const SNOWMAN: GlobeShape = { kind: 'snowman', x: 6, z: 10, width: 6, depth: 6, height: 12 };
+
+export const globeShapes: readonly GlobeShape[] = [HOUSE, ...PRESENTS, LAMP_POST, ...PINES, SNOWMAN];
 
 /** The turn folded into [0, 2π): negative turns and whole turns show turn 0. */
 export function wrapTurn(turn: number): number {
@@ -278,6 +290,36 @@ function presentFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
 }
 
 /**
+ * The snowman's faces: his body, always facing the visitor, behind the three
+ * parts that turn with the globe. The face sits on the front of his head
+ * (rows 1-3 of the body drawing, one column left of its middle so that its
+ * columns land on the grid) and shows while it looks towards the visitor; the
+ * scarf (row 4, his neck) and the arms (rows 4-6) stand in his middle plane
+ * and show from both sides, mirrored once seen from behind.
+ */
+function snowmanFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
+  const { x, z, width, height } = shape;
+  const body = roundFace(sheet('snowman-body'), 'snowman-body', x, z, 0, cos, sin);
+  // The turning parts always cover the body, whichever side they are seen from.
+  body.near -= 1;
+  const faceHalf = sheet('snowman-face').width / 2;
+  const armsHalf = sheet('snowman-arms').width / 2;
+  const scarfHalf = sheet('snowman-scarf').width / 2;
+  const front = width / 2 - 1;
+  // The face stands out of the middle plane by `front`; lifting it by the tilt's share keeps its rows on the body's at turn 0.
+  const faceTop = height - 1 + TILT * front;
+  const faceX = x - 0.5;
+  return [
+    body,
+    ...(shows(0, 1, 0, cos, sin)
+      ? [face('snowman-face', [[faceX - faceHalf, z + front, faceTop], [faceX + faceHalf, z + front, faceTop], [faceX + faceHalf, z + front, faceTop - 3], [faceX - faceHalf, z + front, faceTop - 3]], cos, sin)]
+      : []),
+    face('snowman-arms', [[x - armsHalf, z, height - 4], [x + armsHalf, z, height - 4], [x + armsHalf, z, height - 7], [x - armsHalf, z, height - 7]], cos, sin),
+    face('snowman-scarf', [[x - scarfHalf, z, height - 4], [x + scarfHalf, z, height - 4], [x + scarfHalf, z, height - 6], [x - scarfHalf, z, height - 6]], cos, sin),
+  ];
+}
+
+/**
  * The faces of `shape` the visitor sees at `turn` (radians, period 2π), the
  * nearest first. A point (x, z) turns to screen x = x cos t - z sin t, its
  * nearness to the visitor being x sin t + z cos t. Throws a RangeError for a
@@ -296,6 +338,12 @@ export function projectShape(shape: GlobeShape, turn: number): ProjectedFace[] {
         return presentFaces(shape, cos, sin);
       case 'lamp-post':
         return [roundFace(sheet('lamp-post'), 'lamp-post', shape.x, shape.z, 0, cos, sin)];
+      case 'pine':
+        // A pine is a flat drawing that always faces the visitor, like the lamp post but wider.
+        if (shape.drawing === undefined) throw new Error('a pine carries no drawing');
+        return [roundFace(sheet(shape.drawing), shape.drawing, shape.x, shape.z, 0, cos, sin)];
+      case 'snowman':
+        return snowmanFaces(shape, cos, sin);
     }
   })();
   return placed.sort((a, b) => b.near - a.near).map((one) => one.face);
