@@ -283,9 +283,9 @@ describe('globeShapes: what stands in the globe', () => {
     expect([...count.entries()].sort()).toEqual([[1, 2], [2, 2], [3, 2], [4, 2]]);
   });
 
-  it('holds one lamp post, 2 across and 12 tall like its drawing, and no other turning shape', () => {
+  it('holds one lamp post, 3 across and 18 tall like its drawing, and no other turning shape', () => {
     const lamp = only(lamps());
-    expect([lamp.width, lamp.depth, lamp.height]).toEqual([2, 2, 12]);
+    expect([lamp.width, lamp.depth, lamp.height]).toEqual([3, 3, 18]);
     // XMAS-32c adds the pines and the snowman (tests/frames/globe-trees-snowman.test.ts); the turning shapes stay ten.
     expect(globeShapes.filter((s) => s.kind === 'house' || s.kind === 'present' || s.kind === 'lamp-post').length).toBe(10);
     for (const s of globeShapes) if (s.kind !== 'present') expect(s.design, `${s.kind} carries no present design`).toBeUndefined();
@@ -398,14 +398,14 @@ describe('projectShape: turning a shape about the globe axis', () => {
     }
   });
 
-  it('shows the lamp post the same from every side: its drawing, 2 across and 12 tall', () => {
+  it('shows the lamp post the same from every side: its drawing, 3 across and 18 tall', () => {
     const lamp = only(lamps());
     for (let k = 0; k < 24; k++) {
       const t = (k * FULL) / 24;
       const post = face(projectShape(lamp, t), 'lamp-post');
       if (post === undefined) expect.fail(`turn ${t}: no lamp post face`);
-      expect(extentX(post), `turn ${t}`).toBeCloseTo(2, 6);
-      expect(extentY(post), `turn ${t}`).toBeCloseTo(12, 6);
+      expect(extentX(post), `turn ${t}`).toBeCloseTo(3, 6);
+      expect(extentY(post), `turn ${t}`).toBeCloseTo(18, 6);
     }
   });
 

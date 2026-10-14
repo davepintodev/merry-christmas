@@ -53,7 +53,7 @@ const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => {
   return l.groundTop - l.globe.cy;
 }));
 const PINE_DRAWINGS = ['pine-1', 'pine-2', 'pine-3'];
-const SNOWMAN_DRAWINGS = ['snowman-body', 'snowman-face', 'snowman-arms', 'snowman-scarf'];
+const SNOWMAN_DRAWINGS = ['snowman-body', 'snowman-face', 'snowman-arms', 'snowman-scarf', 'snowman-buttons'];
 const TURNING_KINDS = new Set(['house', 'present', 'lamp-post']);
 
 function hexNum(hex: string): number {

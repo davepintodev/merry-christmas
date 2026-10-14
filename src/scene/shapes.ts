@@ -74,17 +74,17 @@ export const floorDisc: FloorDisc = { y: 20, radius: 44 };
 const HOUSE: GlobeShape = { kind: 'house', x: -12, z: -8, width: 22, depth: 16, height: 12 };
 /** The eight presents, two of each design, each a cube the size of its design's drawings, stood round the house. */
 const PRESENTS: readonly GlobeShape[] = [
-  { kind: 'present', x: 15.5, z: -18.5, width: 5, depth: 5, height: 5, design: 1 },
-  { kind: 'present', x: 25.5, z: 5.5, width: 5, depth: 5, height: 5, design: 1 },
-  { kind: 'present', x: 8, z: -10, width: 4, depth: 4, height: 4, design: 2 },
-  { kind: 'present', x: 32, z: -14, width: 4, depth: 4, height: 4, design: 2 },
-  { kind: 'present', x: 1.5, z: 2.5, width: 3, depth: 3, height: 3, design: 3 },
-  { kind: 'present', x: 18.5, z: -13.5, width: 3, depth: 3, height: 3, design: 3 },
-  { kind: 'present', x: -27.5, z: 5.5, width: 5, depth: 5, height: 5, design: 4 },
-  { kind: 'present', x: -9.5, z: 21.5, width: 5, depth: 5, height: 5, design: 4 },
+  { kind: 'present', x: 13.5, z: -13.5, width: 7, depth: 7, height: 7, design: 1 },
+  { kind: 'present', x: 25.5, z: 6.5, width: 7, depth: 7, height: 7, design: 1 },
+  { kind: 'present', x: 8, z: -3, width: 6, depth: 6, height: 6, design: 2 },
+  { kind: 'present', x: 32, z: -13, width: 6, depth: 6, height: 6, design: 2 },
+  { kind: 'present', x: -3.5, z: 7.5, width: 5, depth: 5, height: 5, design: 3 },
+  { kind: 'present', x: 21.5, z: -12.5, width: 5, depth: 5, height: 5, design: 3 },
+  { kind: 'present', x: -29.5, z: -3.5, width: 7, depth: 7, height: 7, design: 4 },
+  { kind: 'present', x: -9.5, z: 16.5, width: 7, depth: 7, height: 7, design: 4 },
 ];
-/** The lamp post: a thin cylinder, so its one drawing shows the same 2 x 12 face from every side. */
-const LAMP_POST: GlobeShape = { kind: 'lamp-post', x: 12, z: 12, width: 2, depth: 2, height: 12 };
+/** The lamp post: a thin cylinder, so its one drawing shows the same 3 x 18 face from every side. */
+const LAMP_POST: GlobeShape = { kind: 'lamp-post', x: 18.5, z: 10, width: 3, depth: 3, height: 18 };
 
 /** The three pines: flat drawings facing the visitor, each on a thin footprint, away from the house's screen area at turn 0. */
 const PINES: readonly GlobeShape[] = [
@@ -92,8 +92,8 @@ const PINES: readonly GlobeShape[] = [
   { kind: 'pine', x: -33, z: 10, width: 6, depth: 2, height: 16, drawing: 'pine-2' },
   { kind: 'pine', x: -27.5, z: -20, width: 5, depth: 2, height: 13, drawing: 'pine-3' },
 ];
-/** The snowman: his body is a flat drawing facing the visitor, round on a 6 x 6 footprint; his face, arms and scarf turn with the globe. */
-const SNOWMAN: GlobeShape = { kind: 'snowman', x: 6, z: 10, width: 6, depth: 6, height: 12 };
+/** The snowman: his body is a flat drawing facing the visitor, round on an 8 x 8 footprint; his face, arms and scarf turn with the globe. */
+const SNOWMAN: GlobeShape = { kind: 'snowman', x: 6, z: 10, width: 8, depth: 8, height: 15 };
 
 export const globeShapes: readonly GlobeShape[] = [HOUSE, ...PRESENTS, LAMP_POST, ...PINES, SNOWMAN];
 
@@ -292,11 +292,17 @@ function presentFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
 /**
  * The snowman's faces: his body, always facing the visitor, behind the three
  * parts that turn with the globe. The face sits on the front of his head
- * (rows 1-3 of the body drawing, one column left of its middle so that its
+ * (rows 4-6 of the body drawing, one column left of its middle so that its
  * columns land on the grid) and shows while it looks towards the visitor; the
- * scarf (row 4, his neck) and the arms (rows 4-6) stand in his middle plane
+ * scarf (rows 7-8, his neck) and the arms (rows 8-10) stand in his middle plane
  * and show from both sides, mirrored once seen from behind.
  */
+/** The rows of the body drawing (from the top) where his turning parts sit: face rows 4-6, scarf rows 7-8, arms rows 8-10, coal buttons rows 9-13. */
+const FACE_ROW = 4;
+const SCARF_ROW = 7;
+const ARMS_ROW = 8;
+const BUTTONS_ROW = 9;
+
 function snowmanFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
   const { x, z, width, height } = shape;
   const body = roundFace(sheet('snowman-body'), 'snowman-body', x, z, 0, cos, sin);
@@ -307,15 +313,21 @@ function snowmanFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
   const scarfHalf = sheet('snowman-scarf').width / 2;
   const front = width / 2 - 1;
   // The face stands out of the middle plane by `front`; lifting it by the tilt's share keeps its rows on the body's at turn 0.
-  const faceTop = height - 1 + TILT * front;
+  const faceTop = height - FACE_ROW + TILT * front;
   const faceX = x - 0.5;
+  const buttons = sheet('snowman-buttons');
+  const buttonsTop = height - BUTTONS_ROW + TILT * front;
   return [
     body,
     ...(shows(0, 1, 0, cos, sin)
       ? [face('snowman-face', [[faceX - faceHalf, z + front, faceTop], [faceX + faceHalf, z + front, faceTop], [faceX + faceHalf, z + front, faceTop - 3], [faceX - faceHalf, z + front, faceTop - 3]], cos, sin)]
       : []),
-    face('snowman-arms', [[x - armsHalf, z, height - 4], [x + armsHalf, z, height - 4], [x + armsHalf, z, height - 7], [x - armsHalf, z, height - 7]], cos, sin),
-    face('snowman-scarf', [[x - scarfHalf, z, height - 4], [x + scarfHalf, z, height - 4], [x + scarfHalf, z, height - 6], [x - scarfHalf, z, height - 6]], cos, sin),
+    // The coal buttons sit on his front only, one column wide, in the middle of the face's columns.
+    ...(shows(0, 1, 0, cos, sin)
+      ? [face('snowman-buttons', [[faceX - 0.5, z + front, buttonsTop], [faceX + 0.5, z + front, buttonsTop], [faceX + 0.5, z + front, buttonsTop - buttons.height], [faceX - 0.5, z + front, buttonsTop - buttons.height]], cos, sin)]
+      : []),
+    face('snowman-arms', [[x - armsHalf, z, height - ARMS_ROW], [x + armsHalf, z, height - ARMS_ROW], [x + armsHalf, z, height - ARMS_ROW - 3], [x - armsHalf, z, height - ARMS_ROW - 3]], cos, sin),
+    face('snowman-scarf', [[x - scarfHalf, z, height - SCARF_ROW], [x + scarfHalf, z, height - SCARF_ROW], [x + scarfHalf, z, height - SCARF_ROW - 2], [x - scarfHalf, z, height - SCARF_ROW - 2]], cos, sin),
   ];
 }
 

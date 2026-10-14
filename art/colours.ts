@@ -82,6 +82,7 @@ export const phaseOverrides: Record<'frosty-morning' | 'sunset' | 'purple-night'
     '#9fd8ff': '#ffe9d0',
     '#ff8c7a': '#ffd9c8',
     '#7f8ac8': '#b07a9a',
+    '#c3cef2': '#f0cfe0',
   },
   'purple-night': {},
 };

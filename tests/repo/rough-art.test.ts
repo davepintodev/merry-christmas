@@ -36,6 +36,7 @@ const OUTLINE_EXEMPT: ReadonlySet<string> = new Set([
   'snowman-arms',
   'snowman-scarf',
   'snowman-face',
+  'snowman-buttons',
   'lamp-post',
   'disc',
 ]);
