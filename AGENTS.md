@@ -43,3 +43,6 @@ of every file.
   Fix what you see (clipping, touching edges, wrong colours, stale or error
   banners, old and new mixed up) before asking. Say in the hand-back which
   screenshots you checked and what you found and fixed.
+
+## Golden test file
+New unit tests follow `src/page/loop-observer.test.ts`: a hand-written fake that implements the real interface, a clock the test drives, and no `vi.mock`. Run one file with `pnpm vitest run <file> --reporter=dot --bail=1`.
