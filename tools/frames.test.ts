@@ -10,12 +10,30 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { sceneFrame } from '../src/scene/frame.ts';
+import { drawSanta } from '../src/scene/santa.ts';
 import type { PhaseName } from '../src/shared/clock.ts';
 import { framesAddress, referenceFrames, referenceProblems, renderReference, updateReferences } from './frames.ts';
 import { decodePng, encodePng } from './png.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const NAMES = ['dawn', 'frosty-morning', 'sunset', 'purple-night', 'sunset-to-purple-night'];
+const NAMES = [
+  'dawn',
+  'frosty-morning',
+  'sunset',
+  'purple-night',
+  'sunset-to-purple-night',
+  'purple-night-turn-90',
+  'purple-night-turn-180',
+  'purple-night-turn-270',
+  'frosty-morning-turn-180',
+];
+/** XMAS-32e: the turned pictures, each a steady phase at a turn other than 0. */
+const TURNED: [string, PhaseName, number][] = [
+  ['purple-night-turn-90', 'purple-night', Math.PI / 2],
+  ['purple-night-turn-180', 'purple-night', Math.PI],
+  ['purple-night-turn-270', 'purple-night', (3 * Math.PI) / 2],
+  ['frosty-morning-turn-180', 'frosty-morning', Math.PI],
+];
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 
 const temps: string[] = [];
@@ -41,7 +59,7 @@ function refByName(name: string) {
 }
 
 describe('referenceFrames', () => {
-  it('lists one picture per phase and one mid-blend, by name', () => {
+  it('lists one picture per phase, one mid-blend, then the turned pictures, by name', () => {
     expect(referenceFrames.map((r) => r.name)).toEqual(NAMES);
   });
 
@@ -54,6 +72,53 @@ describe('referenceFrames', () => {
 
   it('holds the blend picture at exactly half way from sunset to purple night', () => {
     expect(refByName('sunset-to-purple-night').input.phase).toEqual({ from: 'sunset', to: 'purple-night', share: 0.5 });
+  });
+
+  it.each([...PHASES, 'sunset-to-purple-night'])('keeps %s at turn 0', (name) => {
+    expect(refByName(name).input.turn ?? 0).toBe(0);
+  });
+
+  it.each(TURNED)('holds %s steady in %s at turn %s, with the same clock, seed and size as the turn-0 picture', (name, phase, turn) => {
+    const { input } = refByName(name);
+    const base = refByName(phase).input;
+    expect(input.phase).toEqual({ from: phase, to: phase, share: 0 });
+    expect(input.turn).toBeCloseTo(turn, 12);
+    expect([input.time, input.seed, input.width, input.height, input.drag]).toEqual([base.time, base.seed, base.width, base.height, base.drag]);
+  });
+
+  it.each(TURNED)('draws %s differently from its turn-0 picture inside the glass and identically outside it', (name, phase) => {
+    const turned = sceneFrame(refByName(name).input);
+    const flat = sceneFrame(refByName(phase).input);
+    const { cx, cy, radius } = flat.layout.globe;
+    let inside = 0;
+    for (let i = 0; i < flat.picture.length; i++) {
+      if (turned.picture[i] === flat.picture[i]) continue;
+      const x = i % flat.width;
+      const y = Math.floor(i / flat.width);
+      const inGlass = (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= radius ** 2;
+      // The lettering slides on the base with the turn, so the base's box may change too.
+      const onBase = y >= flat.layout.groundTop && y < flat.layout.groundTop + 30 && Math.abs(x + 0.5 - cx) <= radius;
+      if (inGlass) inside++;
+      else if (!onBase) expect.fail(`${name}: pixel ${x},${y} outside the glass and base differs from ${phase}`);
+    }
+    expect(inside, `${name}: pixels inside the glass that differ from ${phase}`).toBeGreaterThan(50);
+  });
+
+  it.each(TURNED)('shows Santa in %s: his drawing\'s colours are in the glass', (name) => {
+    const ref = refByName(name);
+    const frame = sceneFrame(ref.input);
+    const turn = ref.input.turn ?? 0;
+    // Santa alone over two plain backgrounds: pixels he wholly covers come out the same over both.
+    const a = new Uint32Array(frame.picture.length).fill(0x010203);
+    const b = new Uint32Array(frame.picture.length).fill(0xfdfcfb);
+    drawSanta(a, frame.width, frame.layout, turn, ref.input.time);
+    drawSanta(b, frame.width, frame.layout, turn, ref.input.time);
+    const whole: number[] = [];
+    for (let i = 0; i < a.length; i++) if (a[i] === b[i] && a[i] !== 0x010203) whole.push(i);
+    expect(whole.length, `${name}: Santa drawn`).toBeGreaterThan(0);
+    // A reflection or a shape in front may cover part of him; some of him must show.
+    const shown = whole.filter((i) => frame.picture[i] === a[i]).length;
+    expect(shown, `${name}: Santa's wholly covered pixels shown in the frame (of ${whole.length})`).toBeGreaterThanOrEqual(3);
   });
 });
 

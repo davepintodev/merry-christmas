@@ -16,7 +16,7 @@ const SIZE = { width: 130, height: 260 };
 const SEED = 31;
 const TIME = 1_234_567;
 
-/** The fixed reference pictures: one per phase and one mid-blend. */
+/** The fixed reference pictures: one per phase, one mid-blend and the globe at other turn angles. */
 export const referenceFrames: readonly ReferenceFrame[] = [
   ...(['dawn', 'frosty-morning', 'sunset', 'purple-night'] as const).map(
     (phase): ReferenceFrame => ({
@@ -28,6 +28,19 @@ export const referenceFrames: readonly ReferenceFrame[] = [
     name: 'sunset-to-purple-night',
     input: { time: TIME, drag: 0, phase: { from: 'sunset', to: 'purple-night', share: 0.5 }, seed: SEED, ...SIZE },
   },
+  ...(
+    [
+      ['purple-night-turn-90', 'purple-night', Math.PI / 2],
+      ['purple-night-turn-180', 'purple-night', Math.PI],
+      ['purple-night-turn-270', 'purple-night', (3 * Math.PI) / 2],
+      ['frosty-morning-turn-180', 'frosty-morning', Math.PI],
+    ] as const
+  ).map(
+    ([name, phase, turn]): ReferenceFrame => ({
+      name,
+      input: { time: TIME, drag: 0, turn, phase: { from: phase, to: phase, share: 0 }, seed: SEED, ...SIZE },
+    }),
+  ),
 ];
 
 /** The reference's pixels as RGBA bytes, straight from the scene. */

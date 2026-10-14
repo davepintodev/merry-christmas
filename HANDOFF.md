@@ -43,3 +43,4 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-32c | 2 | changes needed | bug x1 (pine-1 too close to a present: centre-sort flips while overlapping), test-gap x1 (no whole-scene sweep), nit x2 (loose drawing type; shapes.test.ts edit) |
 | XMAS-32c | 3 | approve after test additions | test-gap x1 (house visible at turn 0 untested; added), nit x2 (face grid at turn 0 untested, added; missing-drawing throw untested) |
 | XMAS-32d | 1 | approve | nit x3 (orbit sized on hard-coded 56 not layout radius; height/bob lack the prototype COS factor, ~1px higher; .gitignore .dev/ unrelated, kept out of the commit) |
+| XMAS-32e | 1 | approve | nit x3 (Santa test calls drawSanta directly; base band hard-coded 30 rows; turned list written twice) |

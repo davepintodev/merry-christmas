@@ -99,7 +99,11 @@ describe('frameList', () => {
   it('lists the committed reference pictures in tests/frames, not a hard-coded phase list', () => {
     expect(frameList(path.join(ROOT, 'tests', 'frames')).map((f) => f.file)).toEqual([
       'dawn.png',
+      'frosty-morning-turn-180.png',
       'frosty-morning.png',
+      'purple-night-turn-180.png',
+      'purple-night-turn-270.png',
+      'purple-night-turn-90.png',
       'purple-night.png',
       'sunset-to-purple-night.png',
       'sunset.png',
