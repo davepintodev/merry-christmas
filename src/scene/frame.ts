@@ -11,6 +11,8 @@ import { drawings } from '../shared/art.generated.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { drawGlobe } from './globe.ts';
+import { paintHint } from './hint.ts';
+import { MAX_LEAN } from './lean.ts';
 import type { GlobeSnow } from './snow.ts';
 
 /** The globe's radius in art pixels. */
@@ -54,6 +56,8 @@ export interface SceneInput {
   drag: number;
   /** Globe turn angle in radians: 0 faces the visitor (the default), period 2π. */
   turn?: number;
+  /** Globe lean in radians (XMAS-41b1): + leans the top toward +x; the base and ground stay put. Within ±MAX_LEAN. */
+  lean?: number;
   /** Phase and blend share, from phaseAt on the shared clock. */
   phase: PhaseReading;
   /** The only source of randomness. */
@@ -422,10 +426,12 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   }
   // The outside snow falls behind the globe, so the glass and objects cover it.
   if (input.outsideSnow !== undefined) drawOutsideSnow(picture, width, layout, input.outsideSnow, input.time);
-  // The globe sits on the ground's first row, on its base.
-  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow);
-  paintDisc(picture, layout, input.phase, share);
+  // The stars lie behind the globe too: a leaning glass covers them and shows them where it has left.
   paintStars(picture, layout, input, share, sky);
+  // The globe sits on the ground's first row, on its base.
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0);
+  paintDisc(picture, layout, input.phase, share);
+  paintHint(picture, layout, BASE_HEIGHT);
 }
 
 export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: SceneLayout): SceneFrame {
@@ -434,6 +440,9 @@ export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: Sce
   }
   if (input.turn !== undefined && !Number.isFinite(input.turn)) {
     throw new RangeError(`turn must be a finite number of radians, got ${input.turn}`);
+  }
+  if (input.lean !== undefined && !(Math.abs(input.lean) <= MAX_LEAN)) {
+    throw new RangeError(`lean must be a finite number of radians within ±${MAX_LEAN}, got ${input.lean}`);
   }
   // The caller may keep a layout for one size and seed and hand it back in
   // (src/page/frames.ts), so the stars are not placed again every frame.

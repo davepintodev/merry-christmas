@@ -12,6 +12,7 @@ import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { glyph, glyphWidth, GLYPH_HEIGHT } from '../shared/font.ts';
 import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
+import { keepBackdrop, leanGlass } from './lean.ts';
 import { drawSanta, santaPlacement } from './santa.ts';
 import { drawShapes } from './shapes-draw.ts';
 import { drawSnowBehind, drawSnowFront } from './snow-draw.ts';
@@ -313,8 +314,8 @@ function paintBase(picture: Uint32Array, width: number, base: Drawing, boxX: num
   paintLettering(picture, width, base, boxX, boxY, turn);
 }
 
-/** Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), the snow inside the glass when given, and its base under it, into picture (width art pixels across). */
-export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayout, phase: PhaseReading, turn: number, time: number, snow?: GlobeSnow): void {
+/** Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), the snow inside the glass when given, leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). */
+export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayout, phase: PhaseReading, turn: number, time: number, snow?: GlobeSnow, lean = 0): void {
   const base = drawings['base'];
   if (base === undefined) throw new Error('the Base sheet has no base drawing');
   const spin = wrapTurn(turn);
@@ -322,6 +323,7 @@ export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayo
   const boxX = layout.globe.cx - base.width / 2;
   const boxY = layout.groundTop;
   const behind = santaPlacement(spin, time).depth <= 0;
+  if (lean !== 0) keepBackdrop(picture, width, layout);
   paintGlass(picture, width, layout, glass);
   if (snow !== undefined) drawSnowBehind(picture, width, layout, snow);
   if (behind) drawSanta(picture, width, layout, spin, time);
@@ -329,6 +331,7 @@ export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayo
   if (!behind) drawSanta(picture, width, layout, spin, time);
   paintReflections(picture, width, layout, glass, spin);
   if (snow !== undefined) drawSnowFront(picture, width, layout, snow, time);
+  if (lean !== 0) leanGlass(picture, width, layout, lean);
   paintCastShadow(picture, width, layout, boxX + base.width, boxY + base.height - 2);
   paintBase(picture, width, base, boxX, boxY, spin);
 }

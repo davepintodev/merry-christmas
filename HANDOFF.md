@@ -25,6 +25,8 @@ State and next steps for the next session. Ticket keys are in the planning store
 
 - XMAS-41a done (pure drag model `src/page/drag.ts`: `createDrag`, `DRAG_SETTINGS`, pointer down/move/up/cancel in art pixels, `step(dt)` returns `{turn, lean, raise, push}`; 2D stir and push, motion-kicked lean spring, flick burst above 200 px/s capped at 3x). Next: XMAS-41b (pointer listeners in `src/page`, replace `autoTurn` with the drag turn, pass `lean` to the scene and draw it, hint "DRAG TO SPIN AND STIR" under the globe, attach input before `globe-ready`, `touch-action: none`, browser tests). Pass `step()` output to one snow step per frame only.
 
+- XMAS-41b1 done (scene side: `SceneInput.lean` radians, |lean| <= 0.5, per-row shear of glass and contents about the glass foot in `src/scene/lean.ts`; hint "DRAG TO SPIN AND STIR" in `src/scene/hint.ts`, one red ink, hidden when fewer than 14 rows are free under the base, so absent at 160 rows; 12 reference pictures regenerated, only the hint rows changed). Next: XMAS-41b2 (page: pointer listeners with `touch-action: none` and pointer capture, one drag per first pointer, `createDrag` stepped once per scene step feeding `turn`, `lean`, `raise`, `push`; remove `autoTurn` from the page and `src/scene/turn.ts`; attach input before `globe-ready`; browser tests: drag turns the globe, flick raises the stir; owner review of the live feel).
+
 ## Review log
 
 | Ticket | Round | Verdict | Findings |
@@ -74,3 +76,4 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-40 | 1 | approve with nits | nit x2 (snowmanFaces doc comment displaced by new constants; no test for buttons hidden from behind) - left, owner-approved lane=full |
 | XMAS-41a | 1 | changes needed | spec x2 (stir/push horizontal only, lean aimed at press offset instead of kicked by motion), nit x1 (burst started at zero above the threshold) lane=full |
 | XMAS-41a | 2 | approve | none lane=full |
+| XMAS-41b1 | 1 | approve with nits | nit x2 (shear circle test one radius wide vs glass half a pixel inside; shared buffers link between keepBackdrop and leanGlass unenforced) - fixed, no re-review lane=full |
