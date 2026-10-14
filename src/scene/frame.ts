@@ -10,6 +10,7 @@ import { countdownFrame } from '../countdown/render.ts';
 import { drawings } from '../shared/art.generated.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { drawGlobe } from './globe.ts';
+import type { GlobeSnow } from './snow.ts';
 
 /** The globe's radius in art pixels. */
 export const GLOBE_RADIUS = 56;
@@ -59,6 +60,8 @@ export interface SceneInput {
   /** Picture size in art pixels. */
   width: number;
   height: number;
+  /** The globe's snow (XMAS-36b1); absent draws no flakes. */
+  snow?: GlobeSnow;
 }
 
 export interface SceneFrame {
@@ -415,7 +418,7 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
     picture.fill(y < groundTop + GROUND_SHADOW_ROWS ? shadow : snow, y * width, (y + 1) * width);
   }
   // The globe sits on the ground's first row, on its base.
-  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time);
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow);
   paintDisc(picture, layout, input.phase, share);
   paintStars(picture, layout, input, share, sky);
 }

@@ -59,7 +59,7 @@ export interface SnowInput {
 
 const STEP_SECONDS = 1 / 60;
 /** The snow stays this far inside the glass. */
-const GLASS_LIMIT = SNOW_SETTINGS.radius - 3;
+export const GLASS_LIMIT = SNOW_SETTINGS.radius - 3;
 /** The floor line sits this share of the radius below the centre. */
 const FLOOR_Y = Math.round(SNOW_SETTINGS.radius * 0.45);
 /** A lying flake's centre sits one px above the floor line. */
