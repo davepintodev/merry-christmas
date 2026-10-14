@@ -1,0 +1,505 @@
+// XMAS-41b2 "Drag input", in the built page: a drag on the globe turns it, a
+// flick stirs the snow, touch and mouse both work, the page does not scroll or
+// zoom, a second finger does not break the drag, and the pointer is listened to
+// before `globe-ready` is marked.
+//
+// Determinism: each scenario runs on Playwright's fake clock (page.clock), so
+// the page's requestAnimationFrame, performance.now and timers move only when
+// the test runs the clock. Two runs that do the same things at the same fake
+// times draw the same picture to the pixel, so "the globe turned" is read as
+// "the picture differs from a run with no drag" and "a second finger changes
+// nothing" as "the pictures are equal". The scene canvas is read pixel by pixel
+// (one canvas pixel per art pixel); no test hook is added to the page.
+//
+// Reading the stir: a stirred globe has snow in the air. The flakes are drawn
+// in two colours only (white in front, 0xaebcf0 behind), so the flake pixels
+// in the upper part of the glass, well above the floor line where resting
+// snow lies, are counted. A flick and a slow drag of the same distance turn
+// the globe the same amount, so the only difference left between them is the
+// snow, and the flick must have more of it in the air at the same moment
+// after the release.
+import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
+import { pagePixels } from '../../src/page/pixel.ts';
+import { sceneLayout } from '../../src/scene/frame.ts';
+
+const NOW = '2026-12-01T22:00:00';
+const VIEWPORT = { width: 800, height: 600 };
+const STEP_MS = 16; // Playwright's fake requestAnimationFrame interval
+
+type Geometry = { art: (x: number, y: number) => { x: number; y: number }; cx: number; cy: number; radius: number; baseTop: number; baseBottom: number; scale: number };
+type Point = { x: number; y: number };
+type Session = { context: BrowserContext; page: Page; cdp: CDPSession | null; geometry: Geometry };
+
+async function boot(browser: Browser, options: { touch?: boolean; mobile?: boolean; viewport?: { width: number; height: number } } = {}): Promise<Session> {
+  const viewport = options.viewport ?? VIEWPORT;
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: 1,
+    hasTouch: options.touch === true,
+    isMobile: options.mobile === true,
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    const w = window as unknown as { __prevented: boolean[]; __downs: number };
+    w.__prevented = [];
+    w.__downs = 0;
+    // Seen after the canvas's own listeners have run (bubbling up to the window).
+    window.addEventListener('pointerdown', (event) => {
+      w.__downs++;
+      w.__prevented.push(event.defaultPrevented);
+    });
+  });
+  await page.clock.install({ time: new Date(2026, 11, 1, 22, 0, 0) });
+  // The fake clock runs by itself until it is paused, so the scene file is held back
+  // until the clock is paused: the scene's first frame is then at a known fake moment
+  // however long the network takes, and every picture after it is the same each run.
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/\/assets\/[^/]+\.m?js(\?.*)?$/, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto(`/?now=${NOW}`);
+  await expect(page.locator('canvas#countdown')).toBeVisible();
+  await page.clock.pauseAt(new Date(2026, 11, 1, 22, 0, 30));
+  release();
+  await page.waitForTimeout(300);
+  // The fake clock leaves performance.mark with nothing to read back, so the first
+  // frame is seen as the scene canvas getting its CSS size (it is sized as it first draws).
+  for (let k = 0; k < 400 && (await sceneDrawn(page)) === 0; k++) {
+    await page.clock.runFor(STEP_MS); // one frame at a time, so the scene's first frame is always the same fake moment
+    await page.waitForTimeout(20); // the scene file arrives over the real network
+  }
+  expect(await sceneDrawn(page), 'the scene drew its first frame').toBe(1);
+  await idle(page, 200);
+  const cdp = options.touch === true ? await context.newCDPSession(page) : null;
+  return { context, page, cdp, geometry: await geometryOf(page, viewport) };
+}
+
+async function sceneDrawn(page: Page): Promise<number> {
+  return page.evaluate(() => document.querySelector<HTMLCanvasElement>('canvas#scene')?.style.width ? 1 : 0);
+}
+
+async function geometryOf(page: Page, viewport: { width: number; height: number }): Promise<Geometry> {
+  const box = await page.locator('canvas#scene').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y };
+  });
+  const { scale, width, height } = pagePixels(viewport, 1);
+  const layout = sceneLayout(width, height, 1);
+  const { cx, cy, radius } = layout.globe;
+  return {
+    art: (x, y) => ({ x: box.x + x * scale, y: box.y + y * scale }),
+    cx,
+    cy,
+    radius,
+    baseTop: cy + radius + 1,
+    baseBottom: Math.min(height - 1, cy + radius + 20),
+    scale,
+  };
+}
+
+async function idle(page: Page, ms: number): Promise<void> {
+  for (let t = 0; t < ms; t += STEP_MS) await page.clock.runFor(STEP_MS);
+}
+
+/** The scene canvas's pixels in a rectangle of art pixels, as r,g,b,a numbers. */
+async function pixels(page: Page, x: number, y: number, width: number, height: number): Promise<number[]> {
+  return page.locator('canvas#scene').evaluate(
+    (el, r) => Array.from((el as HTMLCanvasElement).getContext('2d')!.getImageData(r.x, r.y, r.width, r.height).data),
+    { x, y, width, height },
+  );
+}
+
+function differing(a: number[], b: number[]): number {
+  expect(a.length).toBe(b.length);
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++;
+  }
+  return n;
+}
+
+const isFlake = (data: number[], i: number): boolean => {
+  const rgb = (data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!;
+  return rgb === 0xffffff || rgb === 0xaebcf0;
+};
+
+/**
+ * Pixels inside the glass (a square picture of the globe's box, so a circle in it) that
+ * differ, leaving out every place where either picture shows a flake (or resting snow,
+ * which is the same white). The snow depends on how the drag was timed (the page reads
+ * the clock when each pointer event is delivered, and the browser delivers them on
+ * frames), and the sky outside the glass twinkles, so what a turn or a lean alone
+ * changes is read without them.
+ */
+function differingIgnoringSnow(a: number[], b: number[]): number {
+  expect(a.length).toBe(b.length);
+  const width = Math.round(Math.sqrt(a.length / 4));
+  const mid = (width - 1) / 2;
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    const px = (i / 4) % width;
+    const py = Math.floor(i / 4 / width);
+    if (Math.hypot(px - mid, py - mid) > mid - 3) continue;
+    if (isFlake(a, i) || isFlake(b, i)) continue;
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++;
+  }
+  return n;
+}
+
+function globeBox(g: Geometry): { x: number; y: number; width: number; height: number } {
+  return { x: g.cx - g.radius, y: g.cy - g.radius, width: 2 * g.radius + 1, height: 2 * g.radius + 1 };
+}
+
+async function globePixels(s: Session): Promise<number[]> {
+  const b = globeBox(s.geometry);
+  return pixels(s.page, b.x, b.y, b.width, b.height);
+}
+
+async function basePixels(s: Session): Promise<number[]> {
+  const g = s.geometry;
+  return pixels(s.page, g.cx - g.radius, g.baseTop, 2 * g.radius + 1, g.baseBottom - g.baseTop + 1);
+}
+
+/** How many flake-coloured pixels there are in the upper part of the glass, well above the floor line. */
+async function airborne(s: Session): Promise<number> {
+  const g = s.geometry;
+  const data = await pixels(s.page, g.cx - 50, g.cy - 50, 101, 50 + 18);
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const rgb = (data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!;
+    if (rgb === 0xffffff || rgb === 0xaebcf0) n++;
+  }
+  return n;
+}
+
+/** The point on the globe a drag starts from, in client pixels. */
+function onGlobe(s: Session): Point {
+  return s.geometry.art(s.geometry.cx, s.geometry.cy);
+}
+
+type DragOptions = { artPx: number; moves: number; msPerMove: number; release?: boolean };
+
+async function mouseDrag(s: Session, from: Point, { artPx, moves, msPerMove, release = true }: DragOptions): Promise<void> {
+  const dx = artPx * s.geometry.scale;
+  await s.page.mouse.move(from.x, from.y);
+  await s.page.mouse.down();
+  for (let k = 1; k <= moves; k++) {
+    await s.page.mouse.move(from.x + (dx * k) / moves, from.y);
+    await s.page.clock.runFor(msPerMove);
+  }
+  if (release) await s.page.mouse.up();
+}
+
+type Touch = { x: number; y: number; id: number };
+
+async function touch(s: Session, type: 'touchStart' | 'touchMove' | 'touchEnd', points: Touch[]): Promise<void> {
+  await s.cdp!.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+}
+
+/** A one-finger drag along x (and, if `second` is given, a second finger that goes down and wanders). */
+async function touchDrag(s: Session, from: Point, { artPx, moves, msPerMove, release = true }: DragOptions, second?: Point): Promise<void> {
+  const dx = artPx * s.geometry.scale;
+  await touch(s, 'touchStart', [{ x: from.x, y: from.y, id: 1 }]);
+  if (second) await touch(s, 'touchStart', [{ x: from.x, y: from.y, id: 1 }, { x: second.x, y: second.y, id: 2 }]);
+  for (let k = 1; k <= moves; k++) {
+    const first = { x: from.x + (dx * k) / moves, y: from.y, id: 1 };
+    const points = second ? [first, { x: second.x - (dx * k) / moves, y: second.y + 3 * k, id: 2 }] : [first];
+    await touch(s, 'touchMove', points);
+    await s.page.clock.runFor(msPerMove);
+  }
+  if (second) {
+    // The second finger lifts first; the first carries on a little and then lifts.
+    const first = { x: from.x + dx, y: from.y, id: 1 };
+    await touch(s, 'touchEnd', [{ x: second.x - dx, y: second.y + 3 * moves, id: 2 }]);
+    await touch(s, 'touchMove', [first]);
+  }
+  if (release) await touch(s, 'touchEnd', []);
+}
+
+const SLOW: DragOptions = { artPx: 60, moves: 12, msPerMove: 64 }; // 12 moves over 768 ms: about 78 art px/s
+const FAST: DragOptions = { artPx: 60, moves: 6, msPerMove: 16 }; // 6 moves over 96 ms: about 625 art px/s
+
+test.describe('a drag turns the whole globe, base included', () => {
+  test('a mouse drag across the globe turns it, and the base with it, and the turn stays after the button is let go', async ({ browser }) => {
+    const still = await boot(browser);
+    await idle(still.page, 4000);
+    const stillGlobe = await globePixels(still);
+    const stillBase = await basePixels(still);
+    await still.context.close();
+
+    const dragged = await boot(browser);
+    await mouseDrag(dragged, onGlobe(dragged), SLOW);
+    await idle(dragged.page, 4000 - SLOW.moves * SLOW.msPerMove);
+    expect(differing(await globePixels(dragged), stillGlobe), 'the globe is turned').toBeGreaterThan(200);
+    expect(differing(await basePixels(dragged), stillBase), 'the base is turned with it').toBeGreaterThan(0);
+    await dragged.context.close();
+  });
+
+  test('with no drag the globe does not turn by itself: the base is the same a minute apart', async ({ browser }) => {
+    const s = await boot(browser);
+    const early = await basePixels(s);
+    await idle(s.page, 20_000);
+    expect(differing(await basePixels(s), early)).toBe(0);
+    await s.context.close();
+  });
+
+  test('dragging right and dragging left turn it opposite ways: the pictures differ', async ({ browser }) => {
+    const right = await boot(browser);
+    await mouseDrag(right, onGlobe(right), SLOW);
+    await idle(right.page, 3000);
+    const rightGlobe = await basePixels(right);
+    await right.context.close();
+
+    const left = await boot(browser);
+    await mouseDrag(left, onGlobe(left), { ...SLOW, artPx: -SLOW.artPx });
+    await idle(left.page, 3000);
+    expect(differing(await basePixels(left), rightGlobe)).toBeGreaterThan(0);
+    await left.context.close();
+  });
+
+  test('a touch drag turns the globe exactly as the same mouse drag does', async ({ browser }) => {
+    const mouse = await boot(browser);
+    await mouseDrag(mouse, onGlobe(mouse), SLOW);
+    await idle(mouse.page, 3000);
+    const viaMouse = await globePixels(mouse);
+    const viaMouseBase = await basePixels(mouse);
+    await mouse.context.close();
+
+    const still = await boot(browser, { touch: true });
+    await idle(still.page, SLOW.moves * SLOW.msPerMove + 3000);
+    const stillGlobe = await globePixels(still);
+    await still.context.close();
+
+    const finger = await boot(browser, { touch: true });
+    await touchDrag(finger, onGlobe(finger), SLOW);
+    await idle(finger.page, 3000);
+    const viaTouch = await globePixels(finger);
+    const viaTouchBase = await basePixels(finger);
+    expect(differing(viaTouch, stillGlobe), 'a touch drag turns it').toBeGreaterThan(200);
+    // The turn is exact: the base moves only with the turn, so it is the same to the pixel.
+    expect(differing(viaTouchBase, viaMouseBase), 'and the same turn as the mouse').toBe(0);
+    // The snow's lighter shades and the like differ a little (event delivery times differ by a frame or
+    // two between the runs, and the page reads the clock then); a different turn differs by thousands.
+    const noise = differingIgnoringSnow(viaTouch, viaMouse);
+    expect(noise, 'and the same picture as the mouse, the snow aside').toBeLessThan(differingIgnoringSnow(viaTouch, stillGlobe) / 20);
+    await finger.context.close();
+  });
+
+  test('a drag that begins away from the globe, on the open ground, still turns it (the whole canvas listens)', async ({ browser }) => {
+    const still = await boot(browser);
+    await idle(still.page, 3000 + SLOW.moves * SLOW.msPerMove);
+    const stillBase = await basePixels(still);
+    await still.context.close();
+
+    const s = await boot(browser);
+    const ground = s.geometry.art(s.geometry.cx + 80, s.geometry.baseBottom + 4);
+    await mouseDrag(s, ground, SLOW);
+    await idle(s.page, 3000);
+    expect(differing(await basePixels(s), stillBase)).toBeGreaterThan(0);
+    await s.context.close();
+  });
+});
+
+test.describe('the globe leans into a drag and springs back', () => {
+  test('just after a drag the glass is tilted (the base stays put); a few seconds later it is upright and then stays so', async ({ browser }) => {
+    const total = FAST.moves * FAST.msPerMove;
+    const s = await boot(browser);
+    await mouseDrag(s, onGlobe(s), FAST);
+    await idle(s.page, 50);
+    const leaningGlass = await globePixels(s); // same turn as the later picture: only the lean (and the snow and the sky) can differ
+    const leaningBase = await basePixels(s);
+    await idle(s.page, 5000);
+    const uprightGlass = await globePixels(s);
+    const uprightBase = await basePixels(s);
+    await idle(s.page, 3000); // the last of the spring
+    const settledBase = await basePixels(s);
+    await idle(s.page, 3000);
+    // One base pixel animates by itself (a light), so not exactly 0; a base still leaning would differ by dozens.
+    expect(differing(await basePixels(s), settledBase), 'the base is upright and stays so').toBeLessThanOrEqual(2);
+    await s.context.close();
+
+    // The same two moments with no drag: what the scene's own animation changes in that time.
+    const calm = await boot(browser);
+    await idle(calm.page, total + 50);
+    const calmA = await globePixels(calm);
+    await idle(calm.page, 5000);
+    const calmB = await globePixels(calm);
+    await calm.context.close();
+
+    expect(differing(leaningBase, uprightBase), 'the base does not lean, it only turns').toBe(0);
+    const tilt = differingIgnoringSnow(leaningGlass, uprightGlass);
+    expect(tilt, 'the glass was tilted and is upright now, far beyond the scene animating alone').toBeGreaterThan(differingIgnoringSnow(calmA, calmB) * 5);
+  });
+});
+
+test.describe('a flick stirs the snow', () => {
+  test('a fast flick leaves more snow in the air than a slow drag of the same distance, the same time after the release', async ({ browser }) => {
+    const slow = await boot(browser);
+    await mouseDrag(slow, onGlobe(slow), SLOW);
+    await idle(slow.page, 600);
+    const slowAir = await airborne(slow);
+    await slow.context.close();
+
+    const fast = await boot(browser);
+    await mouseDrag(fast, onGlobe(fast), FAST);
+    await idle(fast.page, 600);
+    const fastAir = await airborne(fast);
+    await fast.context.close();
+
+    expect(fastAir).toBeGreaterThan(slowAir * 1.3);
+  });
+
+  test('any drag stirs in proportion to its distance, with no threshold: a long slow drag (under the flick speed) leaves much more snow in the air than a short one or none', async ({ browser }) => {
+    const PASS = { artPx: 40, moves: 9, msPerMove: 30 }; // about 150 art px/s, under the 200 threshold
+    const passes = 6;
+    const settle = 100;
+    const air = async (count: number): Promise<number> => {
+      const s = await boot(browser);
+      // Back and forth, so the pointer is never faster than 150 art px/s and never lifted until the end.
+      const from = onGlobe(s);
+      const dx = PASS.artPx * s.geometry.scale;
+      await s.page.mouse.move(from.x, from.y);
+      await s.page.mouse.down();
+      for (let p = 0; p < count; p++) {
+        for (let k = 1; k <= PASS.moves; k++) {
+          const along = (dx * k) / PASS.moves;
+          await s.page.mouse.move(from.x + (p % 2 === 0 ? along : dx - along), from.y);
+          await s.page.clock.runFor(PASS.msPerMove);
+        }
+      }
+      await s.page.mouse.up();
+      await idle(s.page, settle);
+      const n = await airborne(s);
+      await s.context.close();
+      return n;
+    };
+    const none = await air(0);
+    const short = await air(1);
+    const long = await air(passes);
+    // A short slow drag (stir 0.24) barely lifts a flake; six times the path (1.44) lifts many.
+    expect(long, `a long slow drag stirs well over no drag (none ${none}, short ${short}, long ${long})`).toBeGreaterThan(none * 1.5);
+    expect(long, `and well over a short one (none ${none}, short ${short}, long ${long})`).toBeGreaterThan(short * 1.5);
+  });
+});
+
+test.describe('the page does not scroll or zoom on a drag on the globe', () => {
+  test('the scene canvas has touch-action none', async ({ browser }) => {
+    const s = await boot(browser);
+    expect(await s.page.locator('canvas#scene').evaluate((el) => getComputedStyle(el).touchAction)).toBe('none');
+    await s.context.close();
+  });
+
+  test('a pointer down on the globe has its default prevented; a mouse drag does not scroll the page', async ({ browser }) => {
+    const s = await boot(browser);
+    await mouseDrag(s, onGlobe(s), { artPx: 30, moves: 5, msPerMove: 16 });
+    const seen = await s.page.evaluate(() => (window as unknown as { __prevented: boolean[] }).__prevented);
+    expect(seen).toEqual([true]);
+    expect(await s.page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
+    await s.context.close();
+  });
+
+  test('a touch drag does not scroll the page, and a two-finger spread on the globe does not zoom it', async ({ browser }) => {
+    const s = await boot(browser, { touch: true, mobile: true, viewport: { width: 390, height: 844 } });
+    const centre = onGlobe(s);
+    const scale = s.geometry.scale;
+    await touchDrag(s, centre, { artPx: 40, moves: 8, msPerMove: 16 });
+    // A pinch: two fingers on the globe moving apart.
+    await touch(s, 'touchStart', [
+      { x: centre.x - 10 * scale, y: centre.y, id: 1 },
+      { x: centre.x + 10 * scale, y: centre.y, id: 2 },
+    ]);
+    for (let k = 1; k <= 8; k++) {
+      await touch(s, 'touchMove', [
+        { x: centre.x - (10 + 3 * k) * scale, y: centre.y, id: 1 },
+        { x: centre.x + (10 + 3 * k) * scale, y: centre.y, id: 2 },
+      ]);
+      await s.page.clock.runFor(16);
+    }
+    await touch(s, 'touchEnd', []);
+    const view = await s.page.evaluate(() => ({ scroll: [window.scrollX, window.scrollY], zoom: window.visualViewport?.scale ?? 1 }));
+    expect(view.scroll).toEqual([0, 0]);
+    expect(view.zoom).toBe(1);
+    expect(await s.page.evaluate(() => (window as unknown as { __prevented: boolean[] }).__prevented.every(Boolean))).toBe(true);
+    await s.context.close();
+  });
+});
+
+test.describe('a second finger does not break the drag', () => {
+  test('a second finger that goes down, wanders and lifts changes nothing: the same picture as one finger alone', async ({ browser }) => {
+    const alone = await boot(browser, { touch: true });
+    await touchDrag(alone, onGlobe(alone), SLOW);
+    await idle(alone.page, 1500);
+    const single = await globePixels(alone);
+    const singleBase = await basePixels(alone);
+    await alone.context.close();
+
+    const two = await boot(browser, { touch: true });
+    const far = two.geometry.art(two.geometry.cx + 70, two.geometry.cy + 30);
+    await touchDrag(two, onGlobe(two), SLOW, far);
+    await idle(two.page, 1500);
+    expect(differing(await basePixels(two), singleBase), 'the same turn').toBe(0);
+    // The snow aside (event timing differs a little between the runs): a different turn differs by thousands.
+    expect(differingIgnoringSnow(await globePixels(two), single), 'the same picture, snow aside').toBeLessThan(100);
+    await two.context.close();
+  });
+
+  test('the first finger keeps turning the globe after the second has lifted', async ({ browser }) => {
+    const still = await boot(browser, { touch: true });
+    await idle(still.page, 3000);
+    const stillBase = await basePixels(still);
+    await still.context.close();
+
+    const s = await boot(browser, { touch: true });
+    const centre = onGlobe(s);
+    const far = s.geometry.art(s.geometry.cx + 70, s.geometry.cy + 30);
+    await touch(s, 'touchStart', [{ ...centre, id: 1 }]);
+    await touch(s, 'touchStart', [{ ...centre, id: 1 }, { ...far, id: 2 }]);
+    await touch(s, 'touchEnd', [{ ...far, id: 2 }]);
+    for (let k = 1; k <= 6; k++) {
+      await touch(s, 'touchMove', [{ x: centre.x + k * 6 * s.geometry.scale, y: centre.y, id: 1 }]);
+      await s.page.clock.runFor(32);
+    }
+    await touch(s, 'touchEnd', []);
+    await idle(s.page, 3000 - 6 * 32);
+    expect(differing(await basePixels(s), stillBase)).toBeGreaterThan(0);
+    await s.context.close();
+  });
+});
+
+test.describe('input is attached before globe-ready', () => {
+  test('all four pointer listeners are on the scene canvas by the time globe-ready is marked', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __types: string[]; __atReady: string[] | null };
+      w.__types = [];
+      w.__atReady = null;
+      const realAdd = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (this: EventTarget, type: string, ...rest: unknown[]) {
+        if (this instanceof HTMLCanvasElement && this.id === 'scene') w.__types.push(type);
+        return (realAdd as (...a: unknown[]) => void).call(this, type, ...rest);
+      } as typeof EventTarget.prototype.addEventListener;
+      const realMark = performance.mark.bind(performance);
+      performance.mark = ((name: string, ...rest: unknown[]) => {
+        if (name === 'globe-ready') w.__atReady = [...w.__types];
+        return (realMark as (...a: unknown[]) => PerformanceMark)(name, ...rest);
+      }) as typeof performance.mark;
+    });
+    await page.goto(`/?now=${NOW}`);
+    await page.waitForFunction(() => performance.getEntriesByName('globe-ready', 'mark').length > 0, null, { timeout: 10_000 });
+    const atReady = await page.evaluate(() => (window as unknown as { __atReady: string[] | null }).__atReady);
+    expect(atReady).not.toBeNull();
+    expect(atReady).toEqual(expect.arrayContaining(['pointerdown', 'pointermove', 'pointerup', 'pointercancel']));
+  });
+
+  test('a drag made the moment globe-ready appears is taken, not lost', async ({ browser }) => {
+    const s = await boot(browser);
+    // boot returns as soon as the mark exists, then runs the clock a little; drag at once from there.
+    await mouseDrag(s, onGlobe(s), { artPx: 30, moves: 5, msPerMove: 16 });
+    expect(await s.page.evaluate(() => (window as unknown as { __downs: number }).__downs)).toBe(1);
+    expect(await s.page.evaluate(() => (window as unknown as { __prevented: boolean[] }).__prevented)).toEqual([true]);
+    await s.context.close();
+  });
+});

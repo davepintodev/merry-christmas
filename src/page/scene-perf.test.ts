@@ -30,7 +30,17 @@ beforeEach(() => {
   captured.calls = [];
   created = [];
   vi.resetModules();
-  const canvas = { width: 0, height: 0, style: { width: '', height: '' }, getContext: () => ({ putImageData: () => undefined }) };
+  const canvas = {
+    width: 0,
+    height: 0,
+    style: { width: '', height: '' },
+    getContext: () => ({ putImageData: () => undefined }),
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    setPointerCapture: () => undefined,
+    releasePointerCapture: () => undefined,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+  };
   vi.stubGlobal('window', {
     devicePixelRatio: 1,
     innerWidth: 800,

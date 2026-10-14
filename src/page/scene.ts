@@ -6,18 +6,24 @@
 // XMAS-33 "The ?perf readout": with the hidden ?perf option the scene loads
 // the readout's file and passes the loop an observer; without it, nothing of
 // the readout is loaded or timed.
+// XMAS-41b2 "Drag input": a drag on the globe turns and leans it and stirs the
+// snow. The pointer is attached before the loop starts, so before globe-ready.
 import { makeClock, phaseAt, timeLeft } from '../shared/clock.ts';
-import { autoTurn } from '../scene/turn.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
+import { createDrag } from './drag.ts';
 import { runSceneLoop, type LoopHost, type LoopScene } from './loop.ts';
+import { attachPointer } from './pointer.ts';
 import { wantsPerf } from './perf-option.ts';
 import { readoutLink } from './scene-perf.ts';
 import { pagePixels } from './pixel.ts';
 import { makeSnowRuntime } from './snow-runtime.ts';
-import { STEP_MS } from './steps.ts';
+import { STEPS_PER_SECOND, STEP_MS } from './steps.ts';
 
 /** The only source of randomness for a page: fixed, so every visit draws the same sky. */
 const SEED = 1;
+
+/** Where the globe starts, in radians, so the house is not square on at time 0. */
+const START_TURN = 0.5;
 
 // The readout file's URL. tools/countdown-plugin.ts fills this in: the build
 // names the emitted /assets/perf-<hash>.js, the dev server the source file.
@@ -28,9 +34,15 @@ const canvas = document.querySelector<HTMLCanvasElement>('canvas#scene');
 const context = canvas === null ? null : canvas.getContext('2d');
 const frames: FrameSource = makeFrameSource();
 const snow = makeSnowRuntime(SEED);
+let drag = createDrag(START_TURN);
+/** The art pixel size the drag was started under, and how to take its pointer back off. */
+let dragScale = 0;
+let detachPointer: (() => void) | null = null;
 
 /** Steps taken since the scene started; the scene's own clock, not the wall clock. */
 let steps = 0;
+/** The globe's turn and lean as the last scene step left them; the frame draws these. */
+let pose = { turn: START_TURN, lean: 0 };
 /** The colour, RGBA and image buffers for one picture size, kept between frames. */
 let buffers: { picture: Uint32Array; rgba: Uint8ClampedArray; image: ImageData } | null = null;
 
@@ -45,8 +57,29 @@ function windowPixels(ratioNow: number): { scale: number; width: number; height:
   return pagePixels({ width: window.innerWidth, height: window.innerHeight }, ratioNow);
 }
 
+/** A client point as art pixels: one art pixel is `scale` physical pixels, so `scale / ratio` CSS pixels. */
+function artPoint(target: HTMLCanvasElement, clientX: number, clientY: number): { x: number; y: number } {
+  const box = target.getBoundingClientRect();
+  const dpr = ratio();
+  const cssPerArt = windowPixels(dpr).scale / dpr;
+  return { x: (clientX - box.left) / cssPerArt, y: (clientY - box.top) / cssPerArt };
+}
+
+/**
+ * Starts the drag on `target` for the art pixel size `scale`. A new drag replaces
+ * the old one, which cancels the drag in progress: a move measured in the old
+ * art pixels would jump by the difference when the size changes.
+ */
+function startDrag(target: HTMLCanvasElement, scale: number): void {
+  detachPointer?.();
+  drag = createDrag(pose.turn);
+  dragScale = scale;
+  // Pointer times are performance.now() at delivery: the browser merges queued moves, so an event's own timestamp can lag.
+  detachPointer = attachPointer(target, drag, (x, y) => artPoint(target, x, y), () => performance.now() / 1000);
+}
+
 /** One picture size in canvas pixels and CSS pixels; the canvas is re-sized only when it changes. */
-function resize(target: HTMLCanvasElement, ratioNow: number): { width: number; height: number } {
+function resize(target: HTMLCanvasElement, ratioNow: number): { scale: number; width: number; height: number } {
   const { scale, width, height } = windowPixels(ratioNow);
   if (target.width !== width) target.width = width;
   if (target.height !== height) target.height = height;
@@ -54,19 +87,29 @@ function resize(target: HTMLCanvasElement, ratioNow: number): { width: number; h
   const cssHeight = `${(height * scale) / ratioNow}px`;
   if (target.style.width !== cssWidth) target.style.width = cssWidth;
   if (target.style.height !== cssHeight) target.style.height = cssHeight;
-  return { width, height };
+  return { scale, width, height };
 }
 
 const scene: LoopScene = {
   step(): void {
     steps++;
     const { width, height } = windowPixels(ratio());
-    snow.step({ turn: autoTurn(steps * STEP_MS), christmasDay: timeLeft(clock()).christmasDay, width, height });
+    const out = drag.step(1 / STEPS_PER_SECOND);
+    pose = { turn: out.turn, lean: out.lean };
+    snow.step({
+      turn: out.turn,
+      christmasDay: timeLeft(clock()).christmasDay,
+      width,
+      height,
+      raise: out.raise,
+      push: out.push,
+    });
   },
   draw(): void {
     if (canvas === null || context === null) return;
     const dpr = ratio();
-    const { width, height } = resize(canvas, dpr);
+    const { scale, width, height } = resize(canvas, dpr);
+    if (scale !== dragScale) startDrag(canvas, scale);
     const size = width * height;
     if (buffers === null || buffers.picture.length !== size) {
       const picture = new Uint32Array(size);
@@ -82,7 +125,8 @@ const scene: LoopScene = {
         seed: SEED,
         width,
         height,
-        turn: autoTurn(time),
+        turn: pose.turn,
+        lean: pose.lean,
         snow: snow.snow ?? undefined,
         outsideSnow: snow.outsideSnow ?? undefined,
       },
@@ -104,6 +148,7 @@ const host: LoopHost = {
 const readout = wantsPerf(location.search) ? readoutLink() : undefined;
 
 if (canvas !== null && context !== null) {
+  startDrag(canvas, windowPixels(ratio()).scale);
   runSceneLoop(host, scene, readout?.observer);
   readout?.load(PERF_URL);
 }

@@ -24,6 +24,9 @@
         left: 50%;
         transform: translateX(-50%);
         z-index: 0;
+        /* A drag on the globe turns it: it must not scroll, zoom or select. */
+        touch-action: none;
+        user-select: none;
       }
       canvas#countdown {
         left: 50%;

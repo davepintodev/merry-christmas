@@ -27,6 +27,8 @@ State and next steps for the next session. Ticket keys are in the planning store
 
 - XMAS-41b1 done (scene side: `SceneInput.lean` radians, |lean| <= 0.5, per-row shear of glass and contents about the glass foot in `src/scene/lean.ts`; hint "DRAG TO SPIN AND STIR" in `src/scene/hint.ts`, one red ink, hidden when fewer than 14 rows are free under the base, so absent at 160 rows; 12 reference pictures regenerated, only the hint rows changed). Next: XMAS-41b2 (page: pointer listeners with `touch-action: none` and pointer capture, one drag per first pointer, `createDrag` stepped once per scene step feeding `turn`, `lean`, `raise`, `push`; remove `autoTurn` from the page and `src/scene/turn.ts`; attach input before `globe-ready`; browser tests: drag turns the globe, flick raises the stir; owner review of the live feel).
 
+- XMAS-41b2 done, XMAS-41 complete (page: `src/page/pointer.ts` `attachPointer` with five listeners incl. `lostpointercapture`, mouse moves with no button cancel, only RangeError swallowed; `src/page/scene.ts` one `createDrag` stepped per scene step feeding turn, lean, raise, push; art scale change mid-drag restarts the drag; `touch-action: none` on the scene canvas in `index.html`; `autoTurn` and `src/scene/turn.ts` removed; browser tests in `tests/browser/drag.spec.ts`). Pointer timestamps are `performance.now()` at delivery. Hint is hidden on wide short windows (fewer than 14 free rows under the base). Owner should feel-test the drag, lean and flick on a phone. Next: XMAS-42 onward (shake, keyboard, pause per the spec's suggested split).
+
 ## Review log
 
 | Ticket | Round | Verdict | Findings |
@@ -77,3 +79,5 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-41a | 1 | changes needed | spec x2 (stir/push horizontal only, lean aimed at press offset instead of kicked by motion), nit x1 (burst started at zero above the threshold) lane=full |
 | XMAS-41a | 2 | approve | none lane=full |
 | XMAS-41b1 | 1 | approve with nits | nit x2 (shear circle test one radius wide vs glass half a pixel inside; shared buffers link between keepBackdrop and leanGlass unenforced) - fixed, no re-review lane=full |
+| XMAS-41b2 | 1 | changes needed | bug x1 (releasePointerCapture before the drag model could leave a stuck drag; no lostpointercapture or lost mouse-up handling), nit x3 (guard swallowed every error; timestamp source undocumented; art scale change mid-drag jumped) lane=full |
+| XMAS-41b2 | 2 | approve | none lane=full |
