@@ -5,7 +5,7 @@
 // with. The colours the house, pines, snowman, presents,
 // base and Santa are drawn with must be ones no phase replaces; the colours in
 // use are read from the real art/sheets.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -17,6 +17,9 @@ import { packSheet } from '../../tools/art.ts';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHEETS_DIR = path.join(ROOT, 'art', 'sheets');
 const PROTOTYPE = path.join(ROOT, 'prototype', 'visual-direction', 'variant-b.js');
+
+// prototype/ is gitignored, so CI has no such folder: tests that read it are skipped there.
+const HAS_PROTOTYPE = existsSync(PROTOTYPE);
 
 const PHASES = ['frosty-morning', 'sunset', 'purple-night'] as const;
 type Phase = (typeof PHASES)[number];
@@ -115,7 +118,7 @@ describe('phaseOverrides: the per-phase colour tables', () => {
 });
 
 describe('phaseOverrides match the prototype themes', () => {
-  it('the prototype themes, hex entries only, are themselves all master colours', () => {
+  it.skipIf(!HAS_PROTOTYPE)('the prototype themes, hex entries only, are themselves all master colours', () => {
     const outside: string[] = [];
     for (const phase of PHASES) {
       for (const [k, v] of Object.entries(prototypeTheme(PROTOTYPE_THEME[phase]))) {
@@ -126,21 +129,21 @@ describe('phaseOverrides match the prototype themes', () => {
     expect(outside).toEqual([]);
   });
 
-  it('the prototype parse finds 20 frosty-morning and 18 sunset hex entries', () => {
+  it.skipIf(!HAS_PROTOTYPE)('the prototype parse finds 20 frosty-morning and 18 sunset hex entries', () => {
     expect(Object.keys(prototypeTheme('Frosty morning')).length).toBe(20);
     expect(Object.keys(prototypeTheme('Sunset')).length).toBe(18);
     expect(prototypeTheme('Purple night')).toEqual({});
   });
 
   for (const phase of PHASES) {
-    it(`${phase} equals the prototype's ${PROTOTYPE_THEME[phase]} hex entries minus every protected-colour key`, () => {
+    it.skipIf(!HAS_PROTOTYPE)(`${phase} equals the prototype's ${PROTOTYPE_THEME[phase]} hex entries minus every protected-colour key`, () => {
       const prot = protectedColours();
       const expected = Object.fromEntries(Object.entries(prototypeTheme(PROTOTYPE_THEME[phase])).filter(([k]) => !prot.has(k)));
       expect(normalised(table(phase))).toEqual(expected);
     });
   }
 
-  it('the filter has work to do: the prototype frosty-morning and sunset themes do touch protected colours', () => {
+  it.skipIf(!HAS_PROTOTYPE)('the filter has work to do: the prototype frosty-morning and sunset themes do touch protected colours', () => {
     const prot = protectedColours();
     for (const phase of ['frosty-morning', 'sunset'] as const) {
       const hit = Object.keys(prototypeTheme(PROTOTYPE_THEME[phase])).filter((k) => prot.has(k));
