@@ -81,3 +81,5 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-41b1 | 1 | approve with nits | nit x2 (shear circle test one radius wide vs glass half a pixel inside; shared buffers link between keepBackdrop and leanGlass unenforced) - fixed, no re-review lane=full |
 | XMAS-41b2 | 1 | changes needed | bug x1 (releasePointerCapture before the drag model could leave a stuck drag; no lostpointercapture or lost mouse-up handling), nit x3 (guard swallowed every error; timestamp source undocumented; art scale change mid-drag jumped) lane=full |
 | XMAS-41b2 | 2 | approve | none lane=full |
+| visual-reset-1 | 1 | changes needed | bug x1 (greeting last row outside the reserved strip after the top offset), test-gap x1, nit x1 (DAYS label half a pixel off-centre at digitScale 2) lane=full |
+| visual-reset-1 | 2 | approve | none lane=full |

@@ -7,10 +7,9 @@ import { GLYPH_HEIGHT, GLYPH_WIDTH, glyph, glyphWidth } from '../shared/font.ts'
 
 export interface Frame { width: number; height: number; pixels: Uint8Array }
 
-const DIGIT_SCALE = 4; // art pixels per font pixel for the digits and greeting
 const LETTER_GAP = 1; // blank art pixels between letters
 const LINE_GAP = 2; // blank art pixels between the title, digits and labels
-const COLON_STEP = GLYPH_WIDTH * DIGIT_SCALE; // the colon's slot between groups
+const GREETING_GAP = 1; // blank art pixels between MERRY and CHRISTMAS
 
 interface Group { digits: string; label: string }
 
@@ -61,44 +60,57 @@ function drawText(frame: Frame, text: string, scale: number, x: number, y: numbe
 }
 
 /** "UNTIL CHRISTMAS" with labels, four digit groups and the blinking colons. */
-function countdown(t: TimeLeft, colonOn: boolean): Frame {
+function countdown(t: TimeLeft, colonOn: boolean, digitScale: number): Frame {
   const parts = groups(t);
   const top = 'UNTIL CHRISTMAS';
-  const row = parts.reduce((sum, group) => sum + textWidth(group.digits, DIGIT_SCALE), 0) + 3 * COLON_STEP;
+  const colonStep = GLYPH_WIDTH * digitScale; // the colon's slot between groups
+  const row = parts.reduce((sum, group) => sum + textWidth(group.digits, digitScale), 0) + 3 * colonStep;
   const width = Math.max(row, textWidth(top, 1));
   const digitsTop = GLYPH_HEIGHT + LINE_GAP;
-  const labelsTop = digitsTop + GLYPH_HEIGHT * DIGIT_SCALE + LINE_GAP;
+  const labelsTop = digitsTop + GLYPH_HEIGHT * digitScale + LINE_GAP;
   const height = labelsTop + GLYPH_HEIGHT;
   const frame: Frame = { width, height, pixels: new Uint8Array(width * height) };
 
   drawText(frame, top, 1, (width - textWidth(top, 1)) >> 1, 0);
   let x = (width - row) >> 1;
   for (const [i, group] of parts.entries()) {
-    const digits = textWidth(group.digits, DIGIT_SCALE);
-    drawText(frame, group.digits, DIGIT_SCALE, x, digitsTop);
-    drawText(frame, group.label, 1, x + ((digits - textWidth(group.label, 1)) >> 1), labelsTop);
+    const digits = textWidth(group.digits, digitScale);
+    drawText(frame, group.digits, digitScale, x, digitsTop);
+    // A label wider than its group (DAYS at digit scale 2) starts at the frame's edge, not left of it.
+    drawText(frame, group.label, 1, x + Math.max(0, (digits - textWidth(group.label, 1)) >> 1), labelsTop);
     x += digits;
     if (i < parts.length - 1) {
-      if (colonOn) drawGlyph(frame, ':', DIGIT_SCALE, x, digitsTop);
-      x += COLON_STEP;
+      if (colonOn) drawGlyph(frame, ':', digitScale, x, digitsTop);
+      x += colonStep;
     }
   }
   return frame;
 }
 
-/** Christmas Day: MERRY over CHRISTMAS in the countdown's own font. */
-function greeting(): Frame {
+/**
+ * Christmas Day: MERRY over CHRISTMAS in the countdown's own font. CHRISTMAS
+ * sits one blank row under MERRY, not two, and the frame keeps its height, so
+ * its last inked row is one row above the frame's bottom: the page's one-row
+ * sky offset above the countdown then keeps the greeting inside the scene's
+ * reserved strip.
+ */
+function greeting(digitScale: number): Frame {
   const lines = ['MERRY', 'CHRISTMAS'];
-  const line = GLYPH_HEIGHT * DIGIT_SCALE;
-  const width = Math.max(...lines.map((text) => textWidth(text, DIGIT_SCALE)));
+  const line = GLYPH_HEIGHT * digitScale;
+  const width = Math.max(...lines.map((text) => textWidth(text, digitScale)));
   const height = line * lines.length + LINE_GAP * (lines.length - 1);
   const frame: Frame = { width, height, pixels: new Uint8Array(width * height) };
   lines.forEach((text, i) => {
-    drawText(frame, text, DIGIT_SCALE, (width - textWidth(text, DIGIT_SCALE)) >> 1, i * (line + LINE_GAP));
+    drawText(frame, text, digitScale, (width - textWidth(text, digitScale)) >> 1, i * (line + GREETING_GAP));
   });
   return frame;
 }
 
-export function countdownFrame(t: TimeLeft, colonOn: boolean): Frame {
-  return t.christmasDay ? greeting() : countdown(t, colonOn);
+/**
+ * The countdown (or the greeting on Christmas Day) as pixels. digitScale is the
+ * art pixels per font pixel for the digits, colons and greeting, 1 to 4; the
+ * title and unit labels always stay at 1. The default, 4, is the full size.
+ */
+export function countdownFrame(t: TimeLeft, colonOn: boolean, digitScale = 4): Frame {
+  return t.christmasDay ? greeting(digitScale) : countdown(t, colonOn, digitScale);
 }

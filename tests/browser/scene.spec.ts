@@ -300,6 +300,48 @@ test.describe('the scene arrives without moving the countdown', () => {
   });
 });
 
+test.describe('the countdown ink stays inside the scene\'s reserved countdown strip', () => {
+  const VIEWS = [
+    ['1920x1130 at 1', { width: 1920, height: 1130 }, 1],
+    ['1280x800 at 1', { width: 1280, height: 800 }, 1],
+    ['2560x1440 at 1', { width: 2560, height: 1440 }, 1],
+    ['360x700 at 2', { width: 360, height: 700 }, 2],
+    ['412x800 at 2.6', { width: 412, height: 800 }, 2.6],
+    ['1600x500 at 1 (height-bound picture)', { width: 1600, height: 500 }, 1],
+  ] as const;
+  const WHEN = [
+    ['the greeting', '2026-12-25T10:00:00'],
+    ['the normal countdown', '2026-12-01T22:00:00'],
+  ] as const;
+
+  for (const [label, viewport, dpr] of VIEWS) {
+    for (const [what, now] of WHEN) {
+      test(`${label}: the last inked row of ${what} is inside the strip`, async ({ browser }) => {
+        const { context, page } = await sized(browser, viewport, dpr);
+        await open(page, now);
+        const { scale, width, height } = pagePixels(viewport, dpr);
+        const strip = sceneLayout(width, height, 1).countdown;
+        const box = await rect(page, 'canvas#countdown');
+        const inkRow = await page.locator('canvas#countdown').evaluate((el) => {
+          const c = el as HTMLCanvasElement;
+          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+          const key = (i: number): string => `${d[i]},${d[i + 1]},${d[i + 2]}`;
+          const sky = key(0);
+          for (let y = c.height - 1; y >= 0; y--) {
+            for (let x = 0; x < c.width; x++) if (key((y * c.width + x) * 4) !== sky) return y;
+          }
+          return -1;
+        });
+        expect(inkRow).toBeGreaterThanOrEqual(0);
+        const artCss = scale / dpr;
+        const lastArtRow = Math.floor((box.y + (inkRow + 0.5) / dpr) / artCss + 1e-6);
+        expect(lastArtRow).toBeLessThanOrEqual(strip.y + strip.height - 1);
+        await context.close();
+      });
+    }
+  }
+});
+
 test.describe('one art pixel size, whole physical pixels, hard edges', () => {
   const CASES = [
     ['1280x720 at 1', { width: 1280, height: 720 }, 1],
@@ -337,7 +379,7 @@ test.describe('one art pixel size, whole physical pixels, hard edges', () => {
       }));
       expect(scroll).toEqual({ x: 0, y: 0 });
       // The countdown uses the same art pixel size.
-      const frame = countdownFrame(timeLeft(AT), true);
+      const frame = countdownFrame(timeLeft(AT), true, want.digitScale);
       const countdown = await rect(page, 'canvas#countdown');
       expect(Math.abs((countdown.width * dpr) / frame.width - want.scale)).toBeLessThanOrEqual(0.01);
       expect(Math.abs((countdown.height * dpr) / frame.height - want.scale)).toBeLessThanOrEqual(0.01);

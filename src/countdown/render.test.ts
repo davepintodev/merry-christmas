@@ -3,7 +3,7 @@
 // the font's bitmaps, so the tests pin layout without fixing exact offsets.
 import { describe, expect, it } from 'vitest';
 import type { TimeLeft } from '../shared/clock.ts';
-import { glyph } from '../shared/font.ts';
+import { glyph, glyphWidth } from '../shared/font.ts';
 import { countdownFrame, type Frame } from './render.ts';
 
 const left = (days: number, hours: number, minutes: number, seconds: number): TimeLeft => ({
@@ -401,7 +401,7 @@ describe('countdownFrame: the 5-wide M (XMAS-34)', () => {
   it('draws MERRY and CHRISTMAS with the 5-wide M, each letter one blank column apart, centred over each other', () => {
     const f = countdownFrame(CHRISTMAS, true);
     const k = s();
-    const line = 5 * k + 2;
+    const line = 5 * k + 1;
     const merryY = 0;
     const christmasY = line;
     const merryX = locate(f, 'MERRY', k, merryY);
@@ -410,6 +410,7 @@ describe('countdownFrame: the 5-wide M (XMAS-34)', () => {
     expect(christmasX, 'CHRISTMAS with a 5-wide M').toBeDefined();
     expectWordAt(f, 'MERRY', k, merryX ?? 0, merryY);
     expectWordAt(f, 'CHRISTMAS', k, christmasX ?? 0, christmasY);
+    expect(blank(f, 0, 5 * k, f.width, 1), 'a fully blank row between the two lines').toBe(true);
     expect(merryX).toBe((f.width - agreedTextWidth('MERRY', k)) >> 1);
     expect(christmasX).toBe((f.width - agreedTextWidth('CHRISTMAS', k)) >> 1);
   });
@@ -465,5 +466,86 @@ describe('countdownFrame: the 5-wide M (XMAS-34)', () => {
     const colon = 3 * k;
     expect(countdownFrame(ZERO, true).width).toBe(4 * digitPair + 3 * colon);
     expect(countdownFrame(left(123, 4, 5, 6), true).width).toBe(4 * digitPair + 4 * k + 3 * colon);
+  });
+});
+
+// visual-reset-1: the digit scale is a parameter, so the countdown can shrink on a narrow page.
+describe('countdownFrame: digitScale', () => {
+  const SCALES = [1, 2, 3, 4];
+  /** "UNTIL CHRISTMAS" at scale 1: each letter's width plus one gap, less the last gap. */
+  const TITLE = [...'UNTIL CHRISTMAS'].reduce((sum, ch) => sum + glyphWidth(ch) + 1, 0) - 1;
+  const row = (days: number, d: number): number => (days >= 100 ? 41 : 37) * d;
+
+  it('the default is 4, byte for byte', () => {
+    for (const t of [ZERO, left(123, 4, 5, 6), left(364, 23, 59, 59), CHRISTMAS]) {
+      for (const colon of [true, false]) {
+        const a = countdownFrame(t, colon);
+        const b = countdownFrame(t, colon, 4);
+        expect(a.width).toBe(b.width);
+        expect(a.height).toBe(b.height);
+        expect(Array.from(a.pixels)).toEqual(Array.from(b.pixels));
+      }
+    }
+    expect(countdownFrame(ZERO, true).width).toBe(148);
+    expect(countdownFrame(ZERO, true).height).toBe(34);
+  });
+
+  it.each(SCALES)('digitScale %i: the countdown frame is as wide and tall as the layout says', (d) => {
+    const f = countdownFrame(ZERO, true, d);
+    expect(f.width).toBe(Math.max(row(0, d), TITLE));
+    expect(f.height).toBe(5 + 2 + 5 * d + 2 + 5);
+    expect(f.pixels.length).toBe(f.width * f.height);
+    const wide = countdownFrame(left(364, 23, 59, 59), true, d);
+    expect(wide.width).toBe(Math.max(row(364, d), TITLE));
+  });
+
+  it.each([2, 3, 4])('digitScale %i: eight digits and three colons at that scale; colons blink away when off', (d) => {
+    const on = countdownFrame(ZERO, true, d);
+    expect(findAll(on, '0', d).length).toBe(8);
+    expect(findAll(on, ':', d).length).toBe(3);
+    expect(findAll(countdownFrame(ZERO, false, d), ':', d).length).toBe(0);
+  });
+
+  it.each([2, 3, 4])('digitScale %i: the title and unit labels stay at scale 1', (d) => {
+    const f = countdownFrame(ZERO, true, d);
+    expect(findWord(f, 'UNTIL', 1)).toBeDefined();
+    expect(findWord(f, 'CHRISTMAS', 1)).toBeDefined();
+    for (const label of ['DAYS', 'HRS', 'MIN', 'SEC']) expect(findWord(f, label, 1), label).toBeDefined();
+    expect(f.height - 5).toBe(7 + 5 * d + 2); // the label row is 5 high whatever the digit scale
+  });
+
+  it('digitScale 1: the whole frame is the font at scale 1', () => {
+    const f = countdownFrame(left(12, 3, 45, 6), true, 1);
+    expect(findAll(f, '1', 1).length).toBeGreaterThanOrEqual(1);
+    expect(findAll(f, ':', 1).length).toBe(3);
+  });
+
+  it('a smaller digitScale gives a strictly smaller frame', () => {
+    const sizes = SCALES.map((d) => countdownFrame(left(12, 3, 45, 6), true, d));
+    for (let i = 1; i < sizes.length; i++) {
+      expect(sizes[i]!.width).toBeGreaterThan(sizes[i - 1]!.width);
+      expect(sizes[i]!.height).toBeGreaterThan(sizes[i - 1]!.height);
+    }
+  });
+
+  it('the colon slot follows the digit scale: width is four pairs + three colon slots at that scale', () => {
+    for (const d of [2, 3]) {
+      expect(countdownFrame(ZERO, true, d).width).toBe(4 * 7 * d + 3 * 3 * d);
+    }
+  });
+
+  it.each(SCALES)('digitScale %i: the greeting is MERRY over CHRISTMAS at that scale', (d) => {
+    const f = countdownFrame(CHRISTMAS, true, d);
+    expect(f.width).toBe(37 * d);
+    expect(f.height).toBe(10 * d + 2);
+    const merry = findWord(f, 'MERRY', d);
+    const xmas = findWord(f, 'CHRISTMAS', d);
+    expect(merry).toBeDefined();
+    expect(xmas).toBeDefined();
+    expect(xmas!.y).toBe(5 * d + 1);
+    expect(blank(f, 0, 5 * d, f.width, 1), 'a fully blank row between the two lines').toBe(true);
+    expect(blank(f, 0, 10 * d, f.width, 1), 'last ink row is row 10d').toBe(false);
+    expect(blank(f, 0, 10 * d + 1, f.width, 1), 'row below the ink is blank').toBe(true);
+    expect(Array.from(countdownFrame(CHRISTMAS, false, d).pixels)).toEqual(Array.from(f.pixels));
   });
 });

@@ -246,8 +246,8 @@ test.describe('redraws at once (timers frozen)', () => {
     await page.setViewportSize({ width: 400, height: 300 });
     await page.evaluate(() => window.dispatchEvent(new Event('resize')));
     expect(await shown(page, later, GOLD)).not.toBeNull();
-    const frame = later[0]!.frame;
     const size = await canvasSize(page);
+    const frame = countdownFrame(timeLeft(plus(start, 125)), true, pagePixels({ width: 400, height: 300 }, size.dpr).digitScale);
     // XMAS-31b: one art pixel size across the page, shared with the scene.
     expect(size.width / frame.width).toBe(pagePixels({ width: 400, height: 300 }, size.dpr).scale);
   });
@@ -296,7 +296,7 @@ for (const dpr of [2, 3]) {
     const page = await context.newPage();
     const at = local(2026, 12, 1, 22, 0, 0);
     await open(page, '2026-12-01T22:00:00');
-    const frame = countdownFrame(timeLeft(at), true);
+    const frame = countdownFrame(timeLeft(at), true, pagePixels(viewport, dpr).digitScale);
     const size = await canvasSize(page);
     expect(size.dpr).toBe(dpr);
     // XMAS-31b: the countdown uses the page's one art pixel size, shared with the scene.
@@ -536,3 +536,71 @@ test('a time zone change on the device shows within a second or so', async ({ pa
   for (let i = 0; i <= 10; i++) honolulu.push({ label: `hnl+${i}`, frame: frameLeft(22 * 3600 - i, i % 2 === 0) });
   await expect.poll(() => shown(page, honolulu, GOLD), { timeout: 1500, intervals: [100] }).not.toBeNull();
 });
+
+
+// visual-reset-1: the countdown's digit size follows the picture width, not the art pixel size.
+const PHONE = { viewport: { width: 360, height: 700 }, dpr: 2 };
+const LAPTOP = { viewport: { width: 1920, height: 1130 }, dpr: 1 };
+
+for (const [name, { viewport, dpr }] of [['phone', PHONE], ['laptop', LAPTOP]] as const) {
+  test.describe(`${name} ${viewport.width}x${viewport.height} at ratio ${dpr}`, () => {
+    async function openAt(browser: Browser, now: string): Promise<{ page: Page; close: () => Promise<void> }> {
+      const context = await browser.newContext({ deviceScaleFactor: dpr, viewport });
+      const page = await context.newPage();
+      await open(page, now);
+      return { page, close: () => context.close() };
+    }
+
+    test('the countdown canvas is the frame at the page digitScale and scale', async ({ browser }) => {
+      const { page, close } = await openAt(browser, '2026-12-01T22:00:00');
+      const { scale, digitScale } = pagePixels(viewport, dpr);
+      expect(digitScale).toBe(name === 'phone' ? 2 : 4);
+      expect(scale).toBe(name === 'phone' ? 6 : 7);
+      const frame = countdownFrame(timeLeft(local(2026, 12, 1, 22, 0, 0)), true, digitScale);
+      const size = await canvasSize(page);
+      expect(size.dpr).toBe(dpr);
+      expect(size.width).toBe(frame.width * scale);
+      expect(size.height).toBe(frame.height * scale);
+      expect(size.cssWidth).toBeCloseTo((frame.width * scale) / dpr, 2);
+      await close();
+    });
+
+    for (const [label, now] of [['the countdown', '2026-12-01T22:00:00'], ['three-digit days', '2026-09-01T12:00:00'], ['the greeting', '2026-12-25T00:00:01']] as const) {
+      test(`${label} leaves at least one art pixel of blank sky above its first inked row, inside the window`, async ({ browser }) => {
+        const { page, close } = await openAt(browser, now);
+        const { scale } = pagePixels(viewport, dpr);
+        const ink = now.startsWith('2026-09') ? RED : GOLD;
+        const top = await page.locator('canvas#countdown').evaluate((el, ink) => {
+          const c = el as HTMLCanvasElement;
+          const r = c.getBoundingClientRect();
+          const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+          const want = [1, 3, 5].map((at) => Number.parseInt(ink.slice(at, at + 2), 16));
+          for (let y = 0; y < c.height; y++) {
+            for (let x = 0; x < c.width; x++) {
+              const i = (y * c.width + x) * 4;
+              if (data[i] === want[0] && data[i + 1] === want[1] && data[i + 2] === want[2]) {
+                return { canvasTop: r.top, inkRow: y, dpr: window.devicePixelRatio };
+              }
+            }
+          }
+          return null;
+        }, ink);
+        expect(top, 'some ink is drawn').not.toBeNull();
+        const physicalTop = top!.canvasTop * top!.dpr + top!.inkRow;
+        expect(top!.canvasTop).toBeGreaterThanOrEqual(0);
+        expect(physicalTop).toBeGreaterThanOrEqual(scale - 0.01);
+        await close();
+      });
+    }
+
+    test('the Christmas Day greeting fits inside the window width', async ({ browser }) => {
+      const { page, close } = await openAt(browser, '2026-12-25T00:00:01');
+      const { scale, digitScale } = pagePixels(viewport, dpr);
+      const frame = countdownFrame(timeLeft(local(2026, 12, 25, 0, 0, 1)), true, digitScale);
+      const size = await canvasSize(page);
+      expect(size.width).toBe(frame.width * scale);
+      expect(size.cssWidth).toBeLessThanOrEqual(viewport.width - (7 * scale) / dpr + 0.01);
+      await close();
+    });
+  });
+}

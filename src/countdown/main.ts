@@ -41,9 +41,9 @@ function askForScene(): void {
 /** Draws the frame for one reading, filling sky first and ink over it. */
 function draw(now: Date, left: TimeLeft): void {
   if (canvas === null || context === null) return;
-  const frame = countdownFrame(left, now.getSeconds() % 2 === 0);
   const dpr = window.devicePixelRatio || 1;
-  const { scale } = pagePixels({ width: window.innerWidth, height: window.innerHeight }, dpr);
+  const { scale, digitScale } = pagePixels({ width: window.innerWidth, height: window.innerHeight }, dpr);
+  const frame = countdownFrame(left, now.getSeconds() % 2 === 0, digitScale);
   // Assigning width/height reallocates the backing store, so only do it when
   // the whole-pixel size actually changes.
   const physicalWidth = frame.width * scale;
@@ -52,6 +52,8 @@ function draw(now: Date, left: TimeLeft): void {
   if (canvas.height !== physicalHeight) canvas.height = physicalHeight;
   canvas.style.width = `${physicalWidth / dpr}px`;
   canvas.style.height = `${physicalHeight / dpr}px`;
+  // One art pixel of blank sky above the first inked row, so the title is not clipped by the window's top edge.
+  canvas.style.top = `${scale / dpr}px`;
   context.imageSmoothingEnabled = false;
   const { sky, ink } = skyAndInk(phaseAt(now));
   document.body.style.backgroundColor = sky;
