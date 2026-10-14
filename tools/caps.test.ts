@@ -243,3 +243,38 @@ describe('package.json wiring', () => {
     ]);
   });
 });
+
+// XMAS-33 "The ?perf readout": the readout's file is fetched only with the
+// hidden `?perf` option, so it rides in no download cap; every other file
+// under assets/ still counts.
+describe('the optional ?perf readout file', () => {
+  it('counts a hashed assets/perf-<hash>.js towards no cap', () => {
+    expect(capsFor('assets/perf-abc123.js')).toEqual([]);
+    expect(capsFor('assets/perf-0f1e2d3c.js')).toEqual([]);
+  });
+
+  it('still counts look-alike names in full', () => {
+    expect(capsFor('assets/scene-perf.js')).toEqual(['globe-ready', 'total']);
+    expect(capsFor('assets/performance-ab12.js')).toEqual(['globe-ready', 'total']);
+    expect(capsFor('assets/perfect-ab12.js')).toEqual(['globe-ready', 'total']);
+    expect(capsFor('assets/perf-ab12.css')).toEqual(['globe-ready', 'total']);
+    expect(capsFor('assets/perf-ab12.js.map')).toEqual(['globe-ready', 'total']);
+  });
+
+  it('still counts a perf-named file outside assets/', () => {
+    expect(capsFor('perf-ab12.js')).toEqual(['globe-ready', 'total']);
+    expect(capsFor('notes/perf-ab12.js')).toEqual(['globe-ready', 'total']);
+  });
+
+  it('adds 0 files and 0 bytes to every cap, while the scene file next to it still counts', () => {
+    const without: FileSize[] = [
+      { file: 'index.html', bytes: 10_000 },
+      { file: 'assets/scene-11aa22bb.js', bytes: 200_000 },
+      { file: 'preview-abc.png', bytes: 50_000 },
+    ];
+    const withPerf: FileSize[] = [...without, { file: 'assets/perf-33cc44dd.js', bytes: 400_000 }];
+    expect(evaluateCaps(withPerf)).toEqual(evaluateCaps(without));
+    expect(result(evaluateCaps(withPerf), 'globe-ready')).toMatchObject({ files: 2, bytes: 210_000, pass: true });
+    expect(result(evaluateCaps(withPerf), 'total')).toMatchObject({ files: 2, bytes: 210_000, pass: true });
+  });
+});

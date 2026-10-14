@@ -6,15 +6,21 @@
 // bundle, emitted next to the page as /assets/scene-<hash>.js. The countdown
 // script names it and imports it lazily once the countdown shows, so the page
 // still links nothing up front and the plain sky survives any load failure.
+// XMAS-33 "The ?perf readout": the readout is a third bundle,
+// assets/perf-<hash>.js, an ES module. The scene names it through its token
+// and imports it only with the hidden ?perf option.
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { build, type Plugin } from 'vite';
 
 const ENTRY = fileURLToPath(new URL('../src/countdown/main.ts', import.meta.url));
 const SCENE_ENTRY = fileURLToPath(new URL('../src/page/scene.ts', import.meta.url));
+const PERF_ENTRY = fileURLToPath(new URL('../src/page/perf.ts', import.meta.url));
 const DEV_SCENE = '/src/page/scene.ts';
+const DEV_PERF = '/src/page/perf.ts';
 const MARKER = '<!-- countdown-script -->';
 const SCENE_TOKEN = '%SCENE_URL%';
+const PERF_TOKEN = '%PERF_URL%';
 
 // The generated art and font modules name the PNG sheets they were cut from.
 // The page must never mention a PNG, so the countdown bundle drops that
@@ -28,13 +34,13 @@ const dropSheetNames: Plugin = {
       : undefined,
 };
 
-/** The single chunk of one in-memory lib/iife build. */
-async function library(entry: string, name: string): Promise<string> {
+/** The single chunk of one in-memory lib build: an iife script, or an es module when it exports. */
+async function library(entry: string, name: string, format: 'iife' | 'es' = 'iife'): Promise<string> {
   const outputs = await build({
     configFile: false,
     logLevel: 'silent',
     plugins: [dropSheetNames],
-    build: { write: false, minify: true, lib: { entry, name, formats: ['iife'] } },
+    build: { write: false, minify: true, lib: { entry, name, formats: [format] } },
   });
   const result = Array.isArray(outputs) ? outputs[0] : outputs;
   if (result === undefined || !('output' in result)) throw new Error(`${name}: the bundle produced no output`);
@@ -46,12 +52,27 @@ async function library(entry: string, name: string): Promise<string> {
   return chunk.code;
 }
 
-/** The scene's built code, its output name and the URL the countdown script names. */
-async function sceneFile(base: string): Promise<{ fileName: string; url: string; code: string }> {
-  const code = await library(SCENE_ENTRY, 'scene');
+type BuiltFile = { fileName: string; url: string; code: string };
+
+/** A built file named by the hash of its code, and the URL that names it. */
+function hashed(base: string, kind: string, code: string): BuiltFile {
   const hash = createHash('sha256').update(code).digest('hex').slice(0, 8);
-  const fileName = `assets/scene-${hash}.js`;
+  const fileName = `assets/${kind}-${hash}.js`;
   return { fileName, url: `${base}${fileName}`, code };
+}
+
+/** The readout's built code, its output name and the URL the scene names. */
+async function perfFile(base: string): Promise<BuiltFile> {
+  return hashed(base, 'perf', await library(PERF_ENTRY, 'perf', 'es'));
+}
+
+/** The scene's built code, its output name and the URL the countdown script names. */
+async function sceneFile(base: string, perfUrl: string): Promise<BuiltFile> {
+  const code = await library(SCENE_ENTRY, 'scene');
+  // The one token in scene.ts is the readout's URL: fail here rather than ship
+  // a scene that never names its readout file.
+  if (code.split(PERF_TOKEN).length !== 2) throw new Error('scene: the bundle does not name one readout file');
+  return hashed(base, 'scene', code.replace(PERF_TOKEN, perfUrl));
 }
 
 async function inlineScript(sceneUrl: string): Promise<string> {
@@ -75,9 +96,9 @@ export function countdownPlugin(): Plugin {
     // A dev server serves the countdown as a module; the scene is then its
     // source file. The build's inline bundle gets the emitted asset instead.
     transform(code, id) {
-      return id.endsWith('/src/countdown/main.ts') && code.includes(SCENE_TOKEN)
-        ? code.replace(SCENE_TOKEN, DEV_SCENE)
-        : undefined;
+      if (id.endsWith('/src/countdown/main.ts') && code.includes(SCENE_TOKEN)) return code.replace(SCENE_TOKEN, DEV_SCENE);
+      if (id.endsWith('/src/page/scene.ts') && code.includes(PERF_TOKEN)) return code.replace(PERF_TOKEN, DEV_PERF);
+      return undefined;
     },
     configResolved(config) {
       base = config.base;
@@ -85,7 +106,10 @@ export function countdownPlugin(): Plugin {
     },
     async buildStart() {
       if (serving) return;
-      const scene = await sceneFile(base);
+      // The readout first: the scene names its URL, so its hash goes into the scene's code.
+      const perf = await perfFile(base);
+      this.emitFile({ type: 'asset', fileName: perf.fileName, source: perf.code });
+      const scene = await sceneFile(base, perf.url);
       this.emitFile({ type: 'asset', fileName: scene.fileName, source: scene.code });
       sceneUrl = scene.url;
     },

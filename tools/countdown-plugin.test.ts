@@ -113,3 +113,29 @@ describe('a build with countdownPlugin', () => {
     expect(html).toContain('Christmas is on 25 December');
   });
 });
+
+// XMAS-33 "The ?perf readout": on the dev server the scene file names the
+// readout's source file in place of its %PERF_URL% token.
+describe('countdownPlugin on the dev server', () => {
+  type Transform = (this: unknown, code: string, id: string) => unknown;
+  function transform(code: string, id: string): string | undefined {
+    const hook = countdownPlugin().transform;
+    const fn = (typeof hook === 'function' ? hook : hook?.handler) as Transform | undefined;
+    if (fn === undefined) expect.fail('the plugin has no transform hook');
+    const out = fn.call({}, code, id);
+    if (out === undefined || out === null) return undefined;
+    return typeof out === 'string' ? out : (out as { code: string }).code;
+  }
+
+  it('points the scene file at /src/page/perf.ts', () => {
+    const out = transform("const PERF_URL = '%PERF_URL%';", '/repo/src/page/scene.ts');
+    expect(out ?? '(the plugin left the scene file untouched)').toContain("'/src/page/perf.ts'");
+    expect(out).not.toContain('%PERF_URL%');
+  });
+
+  it('leaves other files alone', () => {
+    expect(transform("const PERF_URL = '%PERF_URL%';", '/repo/src/page/loop.ts') ?? "const PERF_URL = '%PERF_URL%';").toContain(
+      '%PERF_URL%',
+    );
+  });
+});

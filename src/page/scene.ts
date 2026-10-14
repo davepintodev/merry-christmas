@@ -3,15 +3,24 @@
 // scaled up by CSS to the page's one art pixel size (pagePixels), on the
 // scene's fixed 60-steps-a-second clock, and marks `globe-ready` when the
 // first frame is drawn.
+// XMAS-33 "The ?perf readout": with the hidden ?perf option the scene loads
+// the readout's file and passes the loop an observer; without it, nothing of
+// the readout is loaded or timed.
 import { makeClock, phaseAt } from '../shared/clock.ts';
 import { autoTurn } from '../scene/turn.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
 import { runSceneLoop, type LoopHost, type LoopScene } from './loop.ts';
+import { wantsPerf } from './perf-option.ts';
+import { readoutLink } from './scene-perf.ts';
 import { pagePixels } from './pixel.ts';
 import { STEP_MS } from './steps.ts';
 
 /** The only source of randomness for a page: fixed, so every visit draws the same sky. */
 const SEED = 1;
+
+// The readout file's URL. tools/countdown-plugin.ts fills this in: the build
+// names the emitted /assets/perf-<hash>.js, the dev server the source file.
+const PERF_URL = '%PERF_URL%';
 
 const clock = makeClock(location.search);
 const canvas = document.querySelector<HTMLCanvasElement>('canvas#scene');
@@ -70,4 +79,9 @@ const host: LoopHost = {
   mark: (name) => performance.mark(name),
 };
 
-if (canvas !== null && context !== null) runSceneLoop(host, scene);
+const readout = wantsPerf(location.search) ? readoutLink() : undefined;
+
+if (canvas !== null && context !== null) {
+  runSceneLoop(host, scene, readout?.observer);
+  readout?.load(PERF_URL);
+}

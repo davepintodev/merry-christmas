@@ -31,6 +31,9 @@ export function capsFor(file: string): CapName[] {
   if (file === 'index.html') return ['before-countdown', 'globe-ready', 'total'];
   // _headers is a Cloudflare directive, not a download.
   if (file === '_headers') return [];
+  // The ?perf readout's file is fetched only with the hidden ?perf option, so
+  // it counts towards no cap. Only the exact hashed name is exempt.
+  if (/^assets\/perf-[0-9a-f]+\.js$/.test(file)) return [];
   // Everything else is served, so it counts conservatively.
   return ['globe-ready', 'total'];
 }
