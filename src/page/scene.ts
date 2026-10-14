@@ -4,6 +4,7 @@
 // scene's fixed 60-steps-a-second clock, and marks `globe-ready` when the
 // first frame is drawn.
 import { makeClock, phaseAt } from '../shared/clock.ts';
+import { autoTurn } from '../scene/turn.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
 import { runSceneLoop, type LoopHost, type LoopScene } from './loop.ts';
 import { pagePixels } from './pixel.ts';
@@ -55,7 +56,7 @@ const scene: LoopScene = {
       buffers = { picture, rgba, image: new ImageData(rgba, width, height) };
     }
     const time = steps * STEP_MS;
-    const frame = frames({ time, drag: 0, phase: phaseAt(clock()), seed: SEED, width, height }, buffers.picture);
+    const frame = frames({ time, drag: 0, phase: phaseAt(clock()), seed: SEED, width, height, turn: autoTurn(time) }, buffers.picture);
     toRgba(frame.picture, buffers.rgba);
     context.putImageData(buffers.image, 0, 0);
   },

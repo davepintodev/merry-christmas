@@ -415,7 +415,7 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
     picture.fill(y < groundTop + GROUND_SHADOW_ROWS ? shadow : snow, y * width, (y + 1) * width);
   }
   // The globe sits on the ground's first row, on its base.
-  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0);
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time);
   paintDisc(picture, layout, input.phase, share);
   paintStars(picture, layout, input, share, sky);
 }

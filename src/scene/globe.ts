@@ -12,6 +12,7 @@ import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { glyph, GLYPH_HEIGHT, GLYPH_WIDTH } from '../shared/font.ts';
 import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
+import { drawSanta, santaPlacement } from './santa.ts';
 import { drawShapes } from './shapes-draw.ts';
 
 /** A full turn in radians: the globe's period, negative and whole turns included. */
@@ -299,16 +300,19 @@ function paintBase(picture: Uint32Array, width: number, base: Drawing, boxX: num
   paintLettering(picture, width, base, boxX, boxY, turn);
 }
 
-/** Draws the globe centred on layout.globe, and its base under it, into picture (width art pixels across). */
-export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayout, phase: PhaseReading, turn: number): void {
+/** Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), and its base under it, into picture (width art pixels across). */
+export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayout, phase: PhaseReading, turn: number, time: number): void {
   const base = drawings['base'];
   if (base === undefined) throw new Error('the Base sheet has no base drawing');
   const spin = wrapTurn(turn);
   const glass = glassOf(phase);
   const boxX = layout.globe.cx - base.width / 2;
   const boxY = layout.groundTop;
+  const behind = santaPlacement(spin, time).depth <= 0;
   paintGlass(picture, width, layout, glass);
+  if (behind) drawSanta(picture, width, layout, spin, time);
   drawShapes(picture, width, layout, phase, spin);
+  if (!behind) drawSanta(picture, width, layout, spin, time);
   paintReflections(picture, width, layout, glass, spin);
   paintCastShadow(picture, width, layout, boxX + base.width, boxY + base.height - 2);
   paintBase(picture, width, base, boxX, boxY, spin);

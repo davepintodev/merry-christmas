@@ -251,14 +251,17 @@ describe('sceneFrame: determinism', () => {
     expect(sceneLayout(W, H, 0xffffffff).stars.length).toBeGreaterThan(0);
   });
 
-  it('changes only star pixels as time passes', () => {
+  // XMAS-32d: Santa flies inside the glass with the time, so the glass may change too.
+  it('changes only star pixels and pixels inside the glass as time passes', () => {
     const a = sceneFrame(input({ time: T }));
     const b = sceneFrame(input({ time: T + 7_000 }));
     const stars = starSet(a.layout);
+    const { cx, cy, radius } = a.layout.globe;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if (stars.has(`${x},${y}`)) continue;
-        if (at(a, x, y) !== at(b, x, y)) expect.fail(`non-star pixel ${x},${y} changed with time`);
+        if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= radius ** 2) continue;
+        if (at(a, x, y) !== at(b, x, y)) expect.fail(`non-star pixel ${x},${y} outside the glass changed with time`);
       }
     }
   });

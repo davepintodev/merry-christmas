@@ -42,3 +42,4 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-32c | 1 | changes needed | spec x1 (pine colours snapped to one shade, popping 231 levels per step), test-gap x2 (palette check contradicts blending; no pine sweep), nit x3 (pine drawing looked up by identity; .gitignore unrelated; shapes.test.ts count edit) |
 | XMAS-32c | 2 | changes needed | bug x1 (pine-1 too close to a present: centre-sort flips while overlapping), test-gap x1 (no whole-scene sweep), nit x2 (loose drawing type; shapes.test.ts edit) |
 | XMAS-32c | 3 | approve after test additions | test-gap x1 (house visible at turn 0 untested; added), nit x2 (face grid at turn 0 untested, added; missing-drawing throw untested) |
+| XMAS-32d | 1 | approve | nit x3 (orbit sized on hard-coded 56 not layout radius; height/bob lack the prototype COS factor, ~1px higher; .gitignore .dev/ unrelated, kept out of the commit) |

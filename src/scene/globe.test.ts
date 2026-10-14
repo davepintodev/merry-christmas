@@ -613,7 +613,7 @@ describe('drawGlobe', () => {
     const layout = sceneLayout(W, H, SEED);
     const fill = 0x123456;
     const picture = new Uint32Array(W * H).fill(fill);
-    drawGlobe(picture, W, layout, steady('sunset'), 0.6);
+    drawGlobe(picture, W, layout, steady('sunset'), 0.6, T);
     const f: SceneFrame = { width: W, height: H, picture, layout };
     const box = mustFindBase(f);
     let inside = 0;
@@ -638,8 +638,8 @@ describe('drawGlobe', () => {
     const layout = sceneLayout(W, H, SEED);
     const a = new Uint32Array(W * H).fill(0x0b1026);
     const b = new Uint32Array(W * H).fill(0x0b1026);
-    drawGlobe(a, W, layout, steady('dawn'), 2.2);
-    drawGlobe(b, W, layout, steady('dawn'), 2.2);
+    drawGlobe(a, W, layout, steady('dawn'), 2.2, T);
+    drawGlobe(b, W, layout, steady('dawn'), 2.2, T);
     expect(Array.from(a)).toEqual(Array.from(b));
   });
 });
