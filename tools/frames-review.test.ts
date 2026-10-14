@@ -105,6 +105,9 @@ describe('frameList', () => {
       'purple-night-turn-270.png',
       'purple-night-turn-90.png',
       'purple-night.png',
+      'snow-calm.png',
+      'snow-christmas-day.png',
+      'snow-mid-stir.png',
       'sunset-to-purple-night.png',
       'sunset.png',
     ]);

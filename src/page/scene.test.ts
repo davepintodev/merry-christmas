@@ -5,6 +5,7 @@
 // captured instead of run, and the frame source records what it is asked for.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SceneInput } from '../scene/frame.ts';
+import { GLOBE_SNOW } from '../scene/snow.ts';
 import { autoTurn } from '../scene/turn.ts';
 import type { LoopScene } from './loop.ts';
 import { STEP_MS } from './steps.ts';
@@ -43,7 +44,6 @@ beforeEach(() => {
   captured.inputs = [];
   vi.resetModules();
   const canvas = { width: 0, height: 0, style: { width: '', height: '' }, getContext: () => ({ putImageData: () => undefined }) };
-  vi.stubGlobal('location', { search: '' });
   vi.stubGlobal('window', {
     devicePixelRatio: 1,
     innerWidth: 800,
@@ -59,7 +59,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function loadScene(): Promise<LoopScene> {
+async function loadScene(search = ''): Promise<LoopScene> {
+  vi.stubGlobal('location', { search });
   await import('./scene.ts');
   const scene = captured.scene;
   if (scene === null) expect.fail('the page did not start the scene loop');
@@ -95,5 +96,101 @@ describe('the scene page turns the globe by itself', () => {
     }
     expect(last().time).toBeCloseTo(720 * STEP_MS, 9);
     for (let k = 1; k < turns.length; k++) expect(turns[k] ?? 0).toBeGreaterThan(turns[k - 1] ?? 0);
+  });
+});
+
+describe('the scene page wires the snow', () => {
+  const snowKey = (i: SceneInput): string => JSON.stringify([i.snow?.flakes ?? null, i.outsideSnow?.flakes ?? null]);
+
+  it('passes both snows to the frame source once a step has run', async () => {
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const input = last();
+    expect(input.snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
+    expect(input.outsideSnow?.flakes.length).toBeGreaterThan(0);
+    expect(input.outsideSnow?.flakes.length).toBe(Math.round(((input.width * input.height) / 700) * 2.5));
+  });
+
+  it('steps the snow once per step, not per draw', async () => {
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const afterOne = snowKey(last());
+    scene.draw();
+    scene.draw();
+    expect(snowKey(last()), 'drawing does not move the snow').toBe(afterOne);
+    scene.step();
+    scene.draw();
+    const afterTwo = snowKey(last());
+    expect(afterTwo).not.toBe(afterOne);
+    scene.step();
+    scene.step();
+    scene.draw();
+    expect(snowKey(last())).not.toBe(afterTwo);
+  });
+
+  it('is the same snow on every frame, moved on in place', async () => {
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const first = last();
+    for (let k = 0; k < 30; k++) scene.step();
+    scene.draw();
+    expect(first.snow, 'a snow is passed').toBeDefined();
+    expect(last().snow).toBe(first.snow);
+  });
+
+  it('draws the same snow after the same steps on a fresh page (fixed seed)', async () => {
+    const run = async (): Promise<string> => {
+      captured.inputs = [];
+      vi.resetModules();
+      const scene = await loadScene();
+      for (let k = 0; k < 100; k++) scene.step();
+      scene.draw();
+      return snowKey(last());
+    };
+    const [a, b] = [await run(), await run()];
+    expect(a).not.toBe('[null,null]');
+    expect(a).toBe(b);
+  });
+
+  it('uses the Christmas Day amounts on Christmas Day', async () => {
+    const scene = await loadScene('?now=2026-12-25T10:00:00');
+    scene.step();
+    scene.draw();
+    expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
+  });
+
+  it('uses the ordinary amounts the day before and the day after', async () => {
+    for (const now of ['2026-12-24T23:59:59', '2026-12-26T00:00:00']) {
+      captured.inputs = [];
+      vi.resetModules();
+      const scene = await loadScene(`?now=${now}`);
+      scene.step();
+      scene.draw();
+      expect(last().snow?.flakes.length, now).toBe(GLOBE_SNOW.ordinary.flakes);
+    }
+  });
+
+  it('changes the amounts live when the clock crosses midnight into Christmas Day and out of it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 11, 24, 23, 59, 58));
+      const scene = await loadScene('?now=2026-12-24T23:59:58');
+      scene.step();
+      scene.draw();
+      expect(last().snow?.flakes.length).toBe(340);
+      vi.setSystemTime(new Date(2026, 11, 25, 0, 0, 1));
+      scene.step();
+      scene.draw();
+      expect(last().snow?.flakes.length).toBe(500);
+      vi.setSystemTime(new Date(2026, 11, 26, 0, 0, 1));
+      scene.step();
+      scene.draw();
+      expect(last().snow?.flakes.length).toBe(340);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

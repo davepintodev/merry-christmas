@@ -5,7 +5,9 @@
 // server live in tools/frames-review.ts and tools/frames-serve.ts.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { makeSnowRuntime } from '../src/page/snow-runtime.ts';
 import { sceneFrame, type SceneInput } from '../src/scene/frame.ts';
+import type { PhaseName } from '../src/shared/clock.ts';
 import { decodePng, encodePng } from './png.ts';
 
 /** One reference picture: stored as tests/frames/<name>.png. */
@@ -16,7 +18,27 @@ const SIZE = { width: 130, height: 260 };
 const SEED = 31;
 const TIME = 1_234_567;
 
-/** The fixed reference pictures: one per phase, one mid-blend and the globe at other turn angles. */
+/**
+ * The snow reference's input: the page's snow runtime run for `steps` steps at the shared size and seed, the stir
+ * raised for the first `raiseSteps` of them. The snows are the ones the page would draw at that point.
+ */
+function snowInput(phase: PhaseName, christmasDay: boolean, steps: number, raiseSteps = 0, raise = 0): SceneInput {
+  const runtime = makeSnowRuntime(SEED);
+  for (let k = 0; k < steps; k++) {
+    runtime.step({ turn: 0, christmasDay, ...SIZE, raise: k < raiseSteps ? raise : 0 });
+  }
+  return {
+    time: TIME,
+    drag: 0,
+    phase: { from: phase, to: phase, share: 0 },
+    seed: SEED,
+    ...SIZE,
+    snow: runtime.snow ?? undefined,
+    outsideSnow: runtime.outsideSnow ?? undefined,
+  };
+}
+
+/** The fixed reference pictures: one per phase, one mid-blend, the globe at other turn angles and the snow. */
 export const referenceFrames: readonly ReferenceFrame[] = [
   ...(['dawn', 'frosty-morning', 'sunset', 'purple-night'] as const).map(
     (phase): ReferenceFrame => ({
@@ -41,6 +63,9 @@ export const referenceFrames: readonly ReferenceFrame[] = [
       input: { time: TIME, drag: 0, turn, phase: { from: phase, to: phase, share: 0 }, seed: SEED, ...SIZE },
     }),
   ),
+  { name: 'snow-calm', input: snowInput('purple-night', false, 600) },
+  { name: 'snow-mid-stir', input: snowInput('purple-night', false, 60, 30, 0.03) },
+  { name: 'snow-christmas-day', input: snowInput('purple-night', true, 600) },
 ];
 
 /** The reference's pixels as RGBA bytes, straight from the scene. */

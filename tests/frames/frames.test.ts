@@ -5,13 +5,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { GLOBE_SNOW, SNOW_SETTINGS } from '../../src/scene/snow.ts';
 import { sceneFrame } from '../../src/scene/frame.ts';
 import { referenceFrames, referenceProblems } from '../../tools/frames.ts';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 
 describe('reference pictures in tests/frames', () => {
-  it('has one reference per phase, one mid-blend, then the turned pictures (XMAS-32e)', () => {
+  it('has one reference per phase, one mid-blend, then the turned pictures (XMAS-32e) and the snow (XMAS-36b3)', () => {
     expect(referenceFrames.map((r) => r.name)).toEqual([
       'dawn',
       'frosty-morning',
@@ -22,7 +23,25 @@ describe('reference pictures in tests/frames', () => {
       'purple-night-turn-180',
       'purple-night-turn-270',
       'frosty-morning-turn-180',
+      'snow-calm',
+      'snow-mid-stir',
+      'snow-christmas-day',
     ]);
+  });
+
+  it('the snow pictures carry both snows: calm at rest, mid-stir between calm and the most, Christmas Day with the bigger amounts', () => {
+    const input = (name: string) => referenceFrames.find((r) => r.name === name)?.input;
+    const calm = input('snow-calm');
+    const mid = input('snow-mid-stir');
+    const day = input('snow-christmas-day');
+    expect(calm?.snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
+    expect(mid?.snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
+    expect(day?.snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
+    for (const i of [calm, mid, day]) expect(i?.outsideSnow, 'outside snow is passed').toBeDefined();
+    expect(calm?.snow?.stir ?? 1).toBeLessThan(0.05);
+    expect(mid?.snow?.stir ?? 0).toBeGreaterThan(0.2);
+    expect(mid?.snow?.stir ?? 9).toBeLessThan(SNOW_SETTINGS.maxStir * 0.9);
+    expect(day?.outsideSnow?.flakes.length ?? 0).toBeGreaterThan(calm?.outsideSnow?.flakes.length ?? Infinity);
   });
 
   it('every reference picture differs from every other', () => {

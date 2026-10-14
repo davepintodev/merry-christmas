@@ -6,13 +6,14 @@
 // XMAS-33 "The ?perf readout": with the hidden ?perf option the scene loads
 // the readout's file and passes the loop an observer; without it, nothing of
 // the readout is loaded or timed.
-import { makeClock, phaseAt } from '../shared/clock.ts';
+import { makeClock, phaseAt, timeLeft } from '../shared/clock.ts';
 import { autoTurn } from '../scene/turn.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
 import { runSceneLoop, type LoopHost, type LoopScene } from './loop.ts';
 import { wantsPerf } from './perf-option.ts';
 import { readoutLink } from './scene-perf.ts';
 import { pagePixels } from './pixel.ts';
+import { makeSnowRuntime } from './snow-runtime.ts';
 import { STEP_MS } from './steps.ts';
 
 /** The only source of randomness for a page: fixed, so every visit draws the same sky. */
@@ -26,6 +27,7 @@ const clock = makeClock(location.search);
 const canvas = document.querySelector<HTMLCanvasElement>('canvas#scene');
 const context = canvas === null ? null : canvas.getContext('2d');
 const frames: FrameSource = makeFrameSource();
+const snow = makeSnowRuntime(SEED);
 
 /** Steps taken since the scene started; the scene's own clock, not the wall clock. */
 let steps = 0;
@@ -38,9 +40,14 @@ function ratio(): number {
   return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
 }
 
+/** The window's picture as pagePixels sizes it: the scale and the size in canvas pixels, read without touching the canvas. */
+function windowPixels(ratioNow: number): { scale: number; width: number; height: number } {
+  return pagePixels({ width: window.innerWidth, height: window.innerHeight }, ratioNow);
+}
+
 /** One picture size in canvas pixels and CSS pixels; the canvas is re-sized only when it changes. */
 function resize(target: HTMLCanvasElement, ratioNow: number): { width: number; height: number } {
-  const { scale, width, height } = pagePixels({ width: window.innerWidth, height: window.innerHeight }, ratioNow);
+  const { scale, width, height } = windowPixels(ratioNow);
   if (target.width !== width) target.width = width;
   if (target.height !== height) target.height = height;
   const cssWidth = `${(width * scale) / ratioNow}px`;
@@ -53,6 +60,8 @@ function resize(target: HTMLCanvasElement, ratioNow: number): { width: number; h
 const scene: LoopScene = {
   step(): void {
     steps++;
+    const { width, height } = windowPixels(ratio());
+    snow.step({ turn: autoTurn(steps * STEP_MS), christmasDay: timeLeft(clock()).christmasDay, width, height });
   },
   draw(): void {
     if (canvas === null || context === null) return;
@@ -65,7 +74,20 @@ const scene: LoopScene = {
       buffers = { picture, rgba, image: new ImageData(rgba, width, height) };
     }
     const time = steps * STEP_MS;
-    const frame = frames({ time, drag: 0, phase: phaseAt(clock()), seed: SEED, width, height, turn: autoTurn(time) }, buffers.picture);
+    const frame = frames(
+      {
+        time,
+        drag: 0,
+        phase: phaseAt(clock()),
+        seed: SEED,
+        width,
+        height,
+        turn: autoTurn(time),
+        snow: snow.snow ?? undefined,
+        outsideSnow: snow.outsideSnow ?? undefined,
+      },
+      buffers.picture,
+    );
     toRgba(frame.picture, buffers.rgba);
     context.putImageData(buffers.image, 0, 0);
   },

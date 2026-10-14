@@ -26,6 +26,9 @@ const NAMES = [
   'purple-night-turn-180',
   'purple-night-turn-270',
   'frosty-morning-turn-180',
+  'snow-calm',
+  'snow-mid-stir',
+  'snow-christmas-day',
 ];
 /** XMAS-32e: the turned pictures, each a steady phase at a turn other than 0. */
 const TURNED: [string, PhaseName, number][] = [
