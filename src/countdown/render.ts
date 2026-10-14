@@ -3,12 +3,12 @@
 // whole art-pixel scale; the layout is fixed, so only a third day digit
 // widens the frame.
 import type { TimeLeft } from '../shared/clock.ts';
-import { GLYPH_HEIGHT, GLYPH_WIDTH, glyph } from '../shared/font.ts';
+import { GLYPH_HEIGHT, GLYPH_WIDTH, glyph, glyphWidth } from '../shared/font.ts';
 
 export interface Frame { width: number; height: number; pixels: Uint8Array }
 
 const DIGIT_SCALE = 4; // art pixels per font pixel for the digits and greeting
-const LETTER_STEP = GLYPH_WIDTH + 1; // one blank art pixel between letters
+const LETTER_GAP = 1; // blank art pixels between letters
 const LINE_GAP = 2; // blank art pixels between the title, digits and labels
 const COLON_STEP = GLYPH_WIDTH * DIGIT_SCALE; // the colon's slot between groups
 
@@ -31,7 +31,9 @@ function groups(t: TimeLeft): Group[] {
 
 /** The drawn width of text, its letters one blank art pixel apart. */
 function textWidth(text: string, scale: number): number {
-  return text.length * LETTER_STEP * scale - scale;
+  let width = 0;
+  for (const char of text) width += (glyphWidth(char) + LETTER_GAP) * scale;
+  return Math.max(0, width - LETTER_GAP * scale);
 }
 
 /** Draws one glyph, each font pixel a whole scale of art pixels. */
@@ -39,8 +41,8 @@ function drawGlyph(frame: Frame, char: string, scale: number, x: number, y: numb
   const shape = glyph(char);
   if (shape === undefined) return; // a character the font has no glyph for draws nothing
   for (let gy = 0; gy < GLYPH_HEIGHT; gy++) {
-    for (let gx = 0; gx < GLYPH_WIDTH; gx++) {
-      if ((shape.pixels[gy * GLYPH_WIDTH + gx] ?? 0) === 0) continue;
+    for (let gx = 0; gx < shape.width; gx++) {
+      if ((shape.pixels[gy * shape.width + gx] ?? 0) === 0) continue;
       for (let py = 0; py < scale; py++) {
         const row = (y + gy * scale + py) * frame.width + x + gx * scale;
         for (let px = 0; px < scale; px++) frame.pixels[row + px] = 1;
@@ -54,7 +56,7 @@ function drawText(frame: Frame, text: string, scale: number, x: number, y: numbe
   let at = x;
   for (const char of text) {
     drawGlyph(frame, char, scale, at, y);
-    at += LETTER_STEP * scale;
+    at += (glyphWidth(char) + LETTER_GAP) * scale;
   }
 }
 

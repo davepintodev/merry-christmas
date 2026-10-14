@@ -42,15 +42,26 @@ function findAll(f: Frame, ch: string, s: number): { x: number; y: number }[] {
   return hits;
 }
 
-/** A word drawn at scale s with a letter gap of 1 or 2 scaled pixels; its box, or undefined. */
+/** A glyph's own width in font pixels (M is 5, the rest 3). */
+function widthOf(ch: string): number {
+  return glyph(ch)?.width ?? 3;
+}
+
+/** A word drawn at scale s, each letter its own width plus a gap of 1 or 2 scaled pixels; its box, or undefined. */
 function findWord(f: Frame, word: string, s: number): Box | undefined {
   const first = word[0] ?? '';
   for (const { x, y } of findAll(f, first, s)) {
     for (const gap of [1, 2]) {
-      const step = (3 + gap) * s;
-      if ([...word].every((ch, i) => matchesAt(f, ch, s, x + i * step, y))) {
-        return { x, y, w: (word.length - 1) * step + 3 * s, h: 5 * s };
+      let cursor = x;
+      let ok = true;
+      for (const ch of word) {
+        if (!matchesAt(f, ch, s, cursor, y)) {
+          ok = false;
+          break;
+        }
+        cursor += (widthOf(ch) + gap) * s;
       }
+      if (ok) return { x, y, w: cursor - x - gap * s, h: 5 * s };
     }
   }
   return undefined;
@@ -299,5 +310,160 @@ describe('countdownFrame: Christmas Day', () => {
     const zero = countdownFrame(ZERO, true);
     expect(findAll(zero, '0', digitScale()).length).toBe(8);
     expect(xmas.width === zero.width && xmas.height === zero.height && xmas.pixels.every((p, i) => p === zero.pixels[i])).toBe(false);
+  });
+});
+
+// XMAS-34 "5-wide M": text advances by each glyph's own width plus one
+// blank font pixel. The agreed widths and M's pattern are written out here,
+// so these checks do not lean on the font module being right.
+const AGREED_WIDTH = (ch: string): number => (ch === 'M' ? 5 : 3);
+const M_PATTERN = ['#...#', '##.##', '#.#.#', '#...#', '#...#'];
+
+/** The agreed drawn width of text at scale s: sum(width + 1) - 1, scaled. */
+function agreedTextWidth(text: string, s: number): number {
+  return ([...text].reduce((sum, ch) => sum + AGREED_WIDTH(ch) + 1, 0) - 1) * s;
+}
+
+/** True when the 5-wide M pattern, scaled by s, sits exactly at (x, y). */
+function mAt(f: Frame, s: number, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x + 5 * s > f.width || y + 5 * s > f.height) return false;
+  for (let gy = 0; gy < 5 * s; gy++) {
+    for (let gx = 0; gx < 5 * s; gx++) {
+      const want = M_PATTERN[Math.floor(gy / s)]?.[Math.floor(gx / s)] === '#' ? 1 : 0;
+      if (at(f, x + gx, y + gy) !== want) return false;
+    }
+  }
+  return true;
+}
+
+/** Columns [x0, x1) of the frame rows [y0, y1) that hold ink: first and past-the-last. */
+function inkSpan(f: Frame, y0: number, y1: number): [number, number] {
+  let lo = f.width;
+  let hi = -1;
+  for (let y = y0; y < y1; y++) {
+    for (let x = 0; x < f.width; x++) {
+      if (at(f, x, y) === 1) {
+        lo = Math.min(lo, x);
+        hi = Math.max(hi, x);
+      }
+    }
+  }
+  return [lo, hi + 1];
+}
+
+/** True when the column band [x, x + w) of rows [y, y + h) is all sky. */
+function blank(f: Frame, x: number, y: number, w: number, h: number): boolean {
+  for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) if (at(f, xx, yy) !== 0) return false;
+  return true;
+}
+
+/** Checks `word` is drawn from (x, y) at scale s with the agreed advance, M as the 5-wide pattern, one blank column after each letter. */
+function expectWordAt(f: Frame, word: string, s: number, x: number, y: number): void {
+  let cursor = x;
+  for (const [i, ch] of [...word].entries()) {
+    if (ch === 'M') expect(mAt(f, s, cursor, y), `${word}: 5-wide M at x=${cursor}`).toBe(true);
+    else if (ch !== ' ') expect(matchesAt(f, ch, s, cursor, y), `${word}: ${ch} at x=${cursor}`).toBe(true);
+    cursor += AGREED_WIDTH(ch) * s;
+    if (i < word.length - 1) expect(blank(f, cursor, y, s, 5 * s), `${word}: gap after ${ch} at x=${cursor}`).toBe(true);
+    cursor += s;
+  }
+}
+
+/** Finds the left edge of `word` at scale s on rows y: the first x where its first glyph matches and the whole word follows. */
+function locate(f: Frame, word: string, s: number, y: number): number | undefined {
+  const first = word[0] ?? '';
+  for (let x = 0; x < f.width; x++) {
+    const head = first === 'M' ? mAt(f, s, x, y) : matchesAt(f, first, s, x, y);
+    if (!head) continue;
+    let cursor = x;
+    let ok = true;
+    for (const ch of word) {
+      const hit = ch === 'M' ? mAt(f, s, cursor, y) : ch === ' ' || matchesAt(f, ch, s, cursor, y);
+      if (!hit) {
+        ok = false;
+        break;
+      }
+      cursor += (AGREED_WIDTH(ch) + 1) * s;
+    }
+    if (ok) return x;
+  }
+  return undefined;
+}
+
+describe('countdownFrame: the 5-wide M (XMAS-34)', () => {
+  const s = (): number => digitScale();
+
+  it('sizes the Christmas Day frame by CHRISTMAS at the agreed advance: sum(width + 1) - 1 font pixels, scaled', () => {
+    const f = countdownFrame(CHRISTMAS, true);
+    expect(f.width).toBe(agreedTextWidth('CHRISTMAS', s()));
+  });
+
+  it('draws MERRY and CHRISTMAS with the 5-wide M, each letter one blank column apart, centred over each other', () => {
+    const f = countdownFrame(CHRISTMAS, true);
+    const k = s();
+    const line = 5 * k + 2;
+    const merryY = 0;
+    const christmasY = line;
+    const merryX = locate(f, 'MERRY', k, merryY);
+    const christmasX = locate(f, 'CHRISTMAS', k, christmasY);
+    expect(merryX, 'MERRY with a 5-wide M').toBeDefined();
+    expect(christmasX, 'CHRISTMAS with a 5-wide M').toBeDefined();
+    expectWordAt(f, 'MERRY', k, merryX ?? 0, merryY);
+    expectWordAt(f, 'CHRISTMAS', k, christmasX ?? 0, christmasY);
+    expect(merryX).toBe((f.width - agreedTextWidth('MERRY', k)) >> 1);
+    expect(christmasX).toBe((f.width - agreedTextWidth('CHRISTMAS', k)) >> 1);
+  });
+
+  it('keeps the M of MERRY off the E: one blank scaled column, then E starts six font pixels after M', () => {
+    const f = countdownFrame(CHRISTMAS, true);
+    const k = s();
+    const x = locate(f, 'MERRY', k, 0);
+    expect(x).toBeDefined();
+    const mx = x ?? 0;
+    expect(mAt(f, k, mx, 0)).toBe(true);
+    expect(blank(f, mx + 5 * k, 0, k, 5 * k), 'column after M').toBe(true);
+    expect(matchesAt(f, 'E', k, mx + 6 * k, 0)).toBe(true);
+  });
+
+  it('draws exactly the ink of the greeting: every letter its glyph ink, M with 13 lit pixels, scaled', () => {
+    const f = countdownFrame(CHRISTMAS, true);
+    const k = s();
+    const inkOf = (ch: string): number => (ch === 'M' ? 13 : (glyph(ch)?.pixels.filter((p) => p !== 0).length ?? 0));
+    const want = [...'MERRYCHRISTMAS'].reduce((sum, ch) => sum + inkOf(ch), 0) * k * k;
+    expect(f.pixels.reduce((sum, p) => sum + p, 0)).toBe(want);
+  });
+
+  it('draws UNTIL CHRISTMAS at scale 1 with the 5-wide M, its ink spanning the agreed width, centred in the frame', () => {
+    const f = countdownFrame(left(12, 3, 4, 5), true);
+    const x = locate(f, 'UNTIL CHRISTMAS', 1, 0);
+    expect(x, 'UNTIL CHRISTMAS with a 5-wide M').toBeDefined();
+    expectWordAt(f, 'UNTIL CHRISTMAS', 1, x ?? 0, 0);
+    const [lo, hi] = inkSpan(f, 0, 5);
+    expect(hi - lo).toBe(agreedTextWidth('UNTIL CHRISTMAS', 1));
+    expect(lo).toBe((f.width - agreedTextWidth('UNTIL CHRISTMAS', 1)) >> 1);
+  });
+
+  it('draws the MIN label with the 5-wide M, I one blank column after it, under the minutes group', () => {
+    const f = countdownFrame(left(12, 3, 4, 5), true);
+    const k = s();
+    const cells = digitCells(k);
+    const labelsTop = (cells[0]?.y ?? 0) + 5 * k + 2;
+    const x = locate(f, 'MIN', 1, labelsTop);
+    expect(x, 'MIN with a 5-wide M').toBeDefined();
+    expectWordAt(f, 'MIN', 1, x ?? 0, labelsTop);
+    const groupLeft = cells[4]?.x ?? 0;
+    const groupRight = (cells[5]?.x ?? 0) + 3 * k;
+    expect(x ?? 0).toBeGreaterThanOrEqual(groupLeft);
+    expect((x ?? 0) + agreedTextWidth('MIN', 1)).toBeLessThanOrEqual(groupRight);
+    // Centred under its group, as the other labels are.
+    expect(x).toBe(groupLeft + ((groupRight - groupLeft - agreedTextWidth('MIN', 1)) >> 1));
+  });
+
+  it('keeps the digits and colons at their fixed pitch: the countdown frame width is unchanged by the wider M', () => {
+    const k = s();
+    const digitPair = (2 * 4 - 1) * k;
+    const colon = 3 * k;
+    expect(countdownFrame(ZERO, true).width).toBe(4 * digitPair + 3 * colon);
+    expect(countdownFrame(left(123, 4, 5, 6), true).width).toBe(4 * digitPair + 4 * k + 3 * colon);
   });
 });

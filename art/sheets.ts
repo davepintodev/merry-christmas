@@ -15,9 +15,12 @@ const GAP = 1;
 export const sheets: SheetSpec[] = [
   {
     file: 'font.png',
-    width: 156,
+    width: 161,
     height: 5,
-    drawings: [...FONT_CHARS].map((name, i) => ({ name, x: 4 * i, y: 0, width: 3, height: 5 })),
+    // M is 5 wide and sits at the end, so every other glyph keeps its slot at x = 4 * i.
+    drawings: [...FONT_CHARS].map((name, i) =>
+      name === 'M' ? { name, x: 156, y: 0, width: 5, height: 5 } : { name, x: 4 * i, y: 0, width: 3, height: 5 },
+    ),
   },
   objectSheet('house'),
   objectSheet('santa'),

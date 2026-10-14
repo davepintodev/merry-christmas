@@ -495,6 +495,122 @@ describe('sceneFrame: the lettering on the base', () => {
   });
 });
 
+// XMAS-34 "5-wide M": the base lettering advances by each glyph's own width
+// plus one column, so the three Ms of the text take 5 columns each. The
+// agreed widths and M's pattern are written out here, not read from the font.
+describe('sceneFrame: the lettering with the 5-wide M', () => {
+  const M_PATTERN = ['#...#', '##.##', '#.#.#', '#...#', '#...#'];
+  const AGREED_WIDTH = (ch: string): number => (ch === 'M' ? 5 : 3);
+  /** One lettering turn scrolls the text this many base columns (the period). */
+  const PERIOD = 116;
+
+  /** The agreed text bitmap, GLYPH_HEIGHT rows: 1 ink, 0 none; and the glyph index each column belongs to (-1 in a gap). */
+  function agreedText(): { width: number; ink: number[][]; owner: number[] } {
+    const width = [...TEXT].reduce((sum, ch) => sum + AGREED_WIDTH(ch) + 1, 0) - 1;
+    const ink = Array.from({ length: GLYPH_HEIGHT }, () => new Array<number>(width).fill(0));
+    const owner = new Array<number>(width).fill(-1);
+    let x0 = 0;
+    [...TEXT].forEach((ch, i) => {
+      const w = AGREED_WIDTH(ch);
+      for (let gx = 0; gx < w; gx++) owner[x0 + gx] = i;
+      for (let gy = 0; gy < GLYPH_HEIGHT; gy++) {
+        for (let gx = 0; gx < w; gx++) {
+          const lit = ch === 'M' ? M_PATTERN[gy]?.[gx] === '#' : ch !== ' ' && (glyph(ch)?.pixels[gy * 3 + gx] ?? 0) !== 0;
+          const row = ink[gy];
+          if (row !== undefined && lit) row[x0 + gx] = 1;
+        }
+      }
+      x0 += w + 1;
+    });
+    return { width, ink, owner };
+  }
+
+  /** Font ink per base pixel at one turn, rows of the base drawing. */
+  function baseInk(turn: number): number[][] {
+    const f = sceneFrame(input({ turn }));
+    const box = mustFindBase(f);
+    const out: number[][] = [];
+    for (let y = 0; y < (BASE?.height ?? 0); y++) {
+      const row: number[] = [];
+      for (let x = 0; x < (BASE?.width ?? 0); x++) row.push(inkAt(at(f, box.x + x, box.y + y), baseColour(x, y)) ?? Number.NaN);
+      out.push(row);
+    }
+    return out;
+  }
+
+  /** The offsets (ox, oy) in the base box at which the base's ink is exactly the agreed text shifted there (clipped to the box). */
+  function placements(cells: number[][], text: ReturnType<typeof agreedText>, minOx: number): { ox: number; oy: number }[] {
+    const bw = BASE?.width ?? 0;
+    const bh = BASE?.height ?? 0;
+    const hits: { ox: number; oy: number }[] = [];
+    for (let oy = 0; oy + GLYPH_HEIGHT <= bh; oy++) {
+      for (let ox = minOx; ox < bw; ox++) {
+        let ok = true;
+        for (let y = 0; y < bh && ok; y++) {
+          for (let x = 0; x < bw && ok; x++) {
+            const tx = x - ox;
+            const ty = y - oy;
+            const want = ty >= 0 && ty < GLYPH_HEIGHT && tx >= 0 && tx < text.width ? (text.ink[ty]?.[tx] ?? 0) : 0;
+            const got = cells[y]?.[x] ?? Number.NaN;
+            if (!(Math.abs(got - want) < 0.02)) ok = false;
+          }
+        }
+        if (ok) hits.push({ ox, oy });
+      }
+    }
+    return hits;
+  }
+
+  it('fits the whole text on the base: its width, sum(width + 1) - 1 with three 5-wide Ms, is no wider than the base', () => {
+    const text = agreedText();
+    expect(text.width).toBe(109);
+    expect(text.width).toBeLessThanOrEqual(BASE?.width ?? 0);
+  });
+
+  it(`writes "${TEXT}" at turn 0 column for column: every base column shows its own glyph's column, Ms 5 wide`, () => {
+    const text = agreedText();
+    const hits = placements(baseInk(0), text, 0);
+    expect(hits, 'offsets at which the base shows the agreed lettering exactly').toHaveLength(1);
+    const hit = hits[0];
+    expect(hit && hit.ox + text.width, 'the whole text faces the visitor at turn 0').toBeLessThanOrEqual(BASE?.width ?? 0);
+  });
+
+  it('carries exactly the ink of the agreed text at turn 0: every glyph its own lit pixels, each M 13', () => {
+    const text = agreedText();
+    const want = text.ink.flat().reduce((s, c) => s + c, 0);
+    const mInk = M_PATTERN.join('').split('').filter((c) => c === '#').length;
+    expect(mInk).toBe(13);
+    const fromGlyphs = [...TEXT].reduce((s, ch) => s + (ch === 'M' ? mInk : (glyph(ch)?.pixels.filter((p) => p !== 0).length ?? 0)), 0);
+    expect(want).toBe(fromGlyphs);
+    const total = baseInk(0).flat().reduce((s, c) => s + c, 0);
+    expect(Math.abs(total - want), `base ink ${total} vs text ink ${want}`).toBeLessThan(0.05);
+  });
+
+  it('keeps one blank column between every pair of letters, after each M too', () => {
+    const text = agreedText();
+    const cells = baseInk(0);
+    const hit = placements(cells, text, 0)[0];
+    expect(hit, 'the agreed lettering at turn 0').toBeDefined();
+    if (hit === undefined) return;
+    for (let tx = 0; tx < text.width; tx++) {
+      if (text.owner[tx] !== -1) continue;
+      for (let ty = 0; ty < GLYPH_HEIGHT; ty++) {
+        expect(cells[hit.oy + ty]?.[hit.ox + tx] ?? Number.NaN, `gap column ${tx} row ${ty}`).toBeLessThan(0.02);
+      }
+    }
+  });
+
+  it.each([1, 2, 3])('keeps the column mapping when the turn slides the text a whole %i columns: the same lettering, that many columns left', (k) => {
+    const text = agreedText();
+    const start = placements(baseInk(0), text, 0)[0];
+    expect(start, 'the agreed lettering at turn 0').toBeDefined();
+    if (start === undefined) return;
+    const turn = (k / PERIOD) * 2 * Math.PI;
+    const hits = placements(baseInk(turn), text, start.ox - k);
+    expect(hits.some((h) => h.ox === start.ox - k && h.oy === start.oy), `lettering ${k} columns left at turn ${turn}`).toBe(true);
+  });
+});
+
 describe('sceneFrame: turning the globe', () => {
   it('changes the picture with the turn (reflections and lettering move)', () => {
     const a = sceneFrame(input({ turn: 0 }));

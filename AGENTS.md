@@ -34,3 +34,12 @@ of every file.
   `vite preview` via the Playwright web server.
 - `pnpm dev` — Vite dev server. Set `HOST` to choose the bind address;
   unset stays on loopback.
+
+## Visual work
+
+- Before asking the owner to review anything visual (art, colours, layout,
+  text), take screenshots of the real result and look at every one yourself:
+  each changed picture, every phase, and both a wide and a phone-width view.
+  Fix what you see (clipping, touching edges, wrong colours, stale or error
+  banners, old and new mixed up) before asking. Say in the hand-back which
+  screenshots you checked and what you found and fixed.

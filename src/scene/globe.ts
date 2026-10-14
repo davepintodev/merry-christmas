@@ -9,7 +9,7 @@
 import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
-import { glyph, GLYPH_HEIGHT, GLYPH_WIDTH } from '../shared/font.ts';
+import { glyph, glyphWidth, GLYPH_HEIGHT } from '../shared/font.ts';
 import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
 import { drawSanta, santaPlacement } from './santa.ts';
@@ -47,12 +47,22 @@ const SHADOW_INK = 0x1a1433;
 const SHADOW_STEPS = 16;
 /** The lettering on the base, in the font's uppercase glyphs. */
 const LETTERING = 'FAM. PINTO MERRY CHRISTMAS';
-/** Art pixels per glyph: the 3-wide glyph and the font's one-column gap. */
-const GLYPH_STEP = GLYPH_WIDTH + 1;
+/** The font's one-column gap after each glyph. */
+const GLYPH_GAP = 1;
+/** Each letter's first column in the text: the widths and gaps of the letters before it. */
+const LETTER_STARTS: readonly number[] = ((): number[] => {
+  const starts: number[] = [];
+  let at = 0;
+  for (const char of LETTERING) {
+    starts.push(at);
+    at += glyphWidth(char) + GLYPH_GAP;
+  }
+  return starts;
+})();
 /** The whole text's width in art pixels: its last glyph's last column plus one. */
-const TEXT_WIDTH = (LETTERING.length - 1) * GLYPH_STEP + GLYPH_WIDTH;
+const TEXT_WIDTH = (LETTER_STARTS.at(-1) ?? 0) + glyphWidth(LETTERING.at(-1) ?? '');
 /** The lettering's first column in the base's box at turn 0, so the whole text faces the visitor. */
-const LETTER_X = 5;
+const LETTER_X = 2;
 /** The lettering's first row in the base's box: the middle of the base's face. */
 const LETTER_Y = 9;
 /** One turn scrolls the lettering this far: the text and the clear gap to its next copy. */
@@ -227,11 +237,12 @@ function paintCastShadow(picture: Uint32Array, width: number, layout: SceneLayou
 /** The text's lit pixels as runs of columns, one base row each: [base row, first column, past the last]. */
 const LETTER_RUNS: readonly (readonly [number, number, number])[] = ((): (readonly [number, number, number])[] => {
   const lit = (row: number, column: number): boolean => {
-    const index = Math.floor(column / GLYPH_STEP);
+    let index = 0;
+    while ((LETTER_STARTS[index + 1] ?? Infinity) <= column) index++;
     const stroke = glyph(LETTERING[index] ?? '');
-    const x = column - index * GLYPH_STEP;
-    if (stroke === undefined || x >= GLYPH_WIDTH) return false;
-    return (stroke.pixels[row * GLYPH_WIDTH + x] ?? 0) !== 0;
+    const x = column - (LETTER_STARTS[index] ?? 0);
+    if (stroke === undefined || x >= stroke.width) return false;
+    return (stroke.pixels[row * stroke.width + x] ?? 0) !== 0;
   };
   const runs: (readonly [number, number, number])[] = [];
   for (let row = 0; row < GLYPH_HEIGHT; row++) {

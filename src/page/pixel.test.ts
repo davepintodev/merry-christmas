@@ -42,6 +42,18 @@ describe('MIN_PICTURE', () => {
     expect(Number.isInteger(MIN_PICTURE.width)).toBe(true);
   });
 
+  it('fits the Christmas Day text with the 5-wide M (XMAS-34) at the narrowest picture, without widening it', () => {
+    // CHRISTMAS at the digit scale 4, each letter its own width (M 5, the rest 3) plus one gap.
+    const christmas = ([...'CHRISTMAS'].reduce((sum, ch) => sum + (ch === 'M' ? 5 : 3) + 1, 0) - 1) * 4;
+    const greeting = countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true);
+    expect(greeting.width, 'the greeting is as wide as CHRISTMAS with the 5-wide M').toBe(christmas);
+    expect(greeting.width).toBeLessThanOrEqual(MIN_PICTURE.width);
+    // The widest frame is still the three-digit-days countdown: digits and colons keep their pitch.
+    const threeDigitDays = countdownFrame({ christmasDay: false, days: 364, hours: 23, minutes: 59, seconds: 59 }, true).width;
+    expect(MIN_PICTURE.width).toBe(Math.max(2 * GLOBE_RADIUS, threeDigitDays, christmas));
+    expect(MIN_PICTURE.width).toBe(164);
+  });
+
   it('is a size the engine accepts', () => {
     expect(() => sceneLayout(MIN_PICTURE.width, MIN_PICTURE.height, 1)).not.toThrow();
   });

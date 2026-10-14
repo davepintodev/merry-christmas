@@ -10,3 +10,8 @@ export const GLYPH_HEIGHT = 5;
 export function glyph(char: string): Drawing | undefined {
   return Object.hasOwn(drawings, char) ? drawings[char] : undefined;
 }
+
+/** The width of a character's own glyph; the standard width for a character with none. */
+export function glyphWidth(char: string): number {
+  return glyph(char)?.width ?? GLYPH_WIDTH;
+}
