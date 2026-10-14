@@ -76,12 +76,12 @@ const GLASS_PARTS: readonly GlassPart[] = ['tint', 'light', 'floor', 'frost', 'r
 /** One phase's glass colours: the body tint, the lit top left, the floor seen through it, the frost at the foot, the rim, and the moon or sun mirrored in the glass. */
 const PHASE_GLASS: Record<PhaseName, Record<GlassPart, string>> = {
   dawn: {
-    tint: '#463682',
-    light: '#d49ab8',
-    floor: '#372b70',
-    frost: '#c3cef2',
+    tint: '#8f8ad0',
+    light: '#f0c0d8',
+    floor: '#463682',
+    frost: '#f0cfe0',
     rim: '#ffe9d0',
-    mirror: '#ffe9ee',
+    mirror: '#ffe9d0',
   },
   'frosty-morning': {
     tint: '#b0d6f4',

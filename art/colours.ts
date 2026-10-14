@@ -25,15 +25,18 @@ export const masterColours: readonly string[] = [
   '#fff3b0', '#aebcf0', '#3a0d2e', '#5a1440', '#7a1d52', '#9c2a66', '#bf3d7c', '#ffd9ec',
   '#4a1238', '#380d2a', '#f0b8d4', '#fff0f6', '#f08cc0', '#ffd0e6', '#d98cb4', '#9ff0d8',
   '#c06a98', '#f4cfe0', '#0b1026',
+  // Added by XMAS-35 for Dawn's sky ramp and ground shadow.
+  '#454389', '#6a5aa0', '#a874a8', '#e49aa6', '#ffd6a0', '#cdbde6',
 ];
 
 // XMAS-27: the sky and ink the countdown draws with, per phase. Every colour
 // is a master colour, so the art pass can redraw a phase without code changes.
-// Dawn's colours are a stand-in from the prototype's purple bands until the
-// art pass draws them; frosty-morning's sky is a calm pale winter blue, close
-// to the darkest sky the red ink still reaches 4.5:1 against (4.63:1).
+// Dawn's colours were a stand-in from the prototype's purple bands until the
+// art pass (XMAS-35) drew them: an indigo sky for the first light, gold ink;
+// frosty-morning's sky is a calm pale winter blue, close to the darkest sky
+// the red ink still reaches 4.5:1 against (4.63:1).
 export const phaseColours: Record<PhaseName, { sky: string; ink: string }> = {
-  dawn: { sky: '#2b225c', ink: '#ffe08a' },
+  dawn: { sky: '#372b70', ink: '#ffe08a' },
   'frosty-morning': { sky: '#d6e6f8', ink: '#c8102e' },
   sunset: { sky: '#2a1a4a', ink: '#ffe08a' },
   'purple-night': { sky: '#1a1433', ink: '#ffe08a' },
@@ -43,7 +46,7 @@ export const phaseColours: Record<PhaseName, { sky: string; ink: string }> = {
 // taken from the visual-direction prototype's themes (hex entries only). A
 // colour the house, pines, snowman, presents, base or Santa is drawn with is
 // never overridden, so those objects look the same in every phase. Purple
-// night overrides nothing; dawn's stand-in is the plain palette.
+// night overrides nothing; dawn deliberately uses the plain palette.
 export const phaseOverrides: Record<'frosty-morning' | 'sunset' | 'purple-night', Record<string, string>> = {
   'frosty-morning': {
     '#221a47': '#97c6ee',

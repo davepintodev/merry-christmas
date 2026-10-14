@@ -88,7 +88,7 @@ const SKY_BANDS = 5;
  * thing in the picture instead of the sky.
  */
 const SKY_RAMP: Record<PhaseName, readonly (readonly [number, string])[]> = {
-  dawn: [[0, '#2b225c'], [0.3, '#3d2f78'], [0.52, '#5f4893'], [0.72, '#9468a4'], [0.88, '#d494a6'], [1, '#ffd2a2']],
+  dawn: [[0, '#372b70'], [0.28, '#454389'], [0.5, '#6a5aa0'], [0.7, '#a874a8'], [0.86, '#e49aa6'], [1, '#ffd6a0']],
   'frosty-morning': [[0, '#d6e6f8'], [0.45, '#b0d6f4'], [1, '#97c6ee']],
   sunset: [[0, '#2a1a4a'], [0.3, '#5a2a6a'], [0.56, '#a03f78'], [0.8, '#e0637a'], [1, '#ffa07a']],
   'purple-night': [[0, '#1a1433'], [0.25, '#221a47'], [0.5, '#2b225c'], [0.75, '#372b70'], [1, '#463682']],
@@ -108,13 +108,13 @@ const BLEND_VIA: Partial<Record<`${PhaseName}>${PhaseName}`, readonly (readonly 
 const VIA_FADE = 0.25;
 /** The ground's two bands per phase: a shadow where it meets the sky, then snow. Frosty morning's snow is a soft ice white, not paper white. */
 const GROUND_SHADOW: Record<PhaseName, string> = {
-  dawn: '#c3b6e2',
+  dawn: '#cdbde6',
   'frosty-morning': '#c4d8f0',
   sunset: '#e8b4c8',
   'purple-night': '#aab6e6',
 };
 const GROUND_SNOW: Record<PhaseName, string> = {
-  dawn: '#f2e9fa',
+  dawn: '#fff0f6',
   'frosty-morning': '#e2f1fd',
   sunset: '#ffe9ee',
   'purple-night': '#dfe6ff',
@@ -124,7 +124,7 @@ const GROUND_SHADOW_ROWS = 3;
 const STAR_COLOUR = '#d9d2ff';
 /** How much of the star colour each phase shows: none in Frosty morning, faint at Dawn and Sunset, full in Purple night (spec 7.6). */
 const STAR_STRENGTH: Record<PhaseName, number> = {
-  dawn: 0.35,
+  dawn: 0.25,
   'frosty-morning': 0,
   sunset: 0.35,
   'purple-night': 1,
@@ -132,14 +132,14 @@ const STAR_STRENGTH: Record<PhaseName, number> = {
 /** The colour the sheet's disc warms towards: a moon at night, a sun by day. */
 const SUN_COLOUR = '#fff3b0';
 const SUN_SHARE: Record<PhaseName, number> = {
-  dawn: 0.25,
+  dawn: 0.4,
   'frosty-morning': 0.75,
   sunset: 0.4,
   'purple-night': 0,
 };
 /** The disc body's colour each phase: a cool moon at Purple night, the sheet's warm sun at Frosty morning, in between at Dawn and Sunset. */
 const DISC_BODY: Record<PhaseName, string> = {
-  dawn: '#ffe9ee',
+  dawn: '#ffe9d0',
   'frosty-morning': SUN_COLOUR,
   sunset: '#ffd9c8',
   'purple-night': '#d6e6f8',
@@ -219,7 +219,7 @@ export function sceneLayout(width: number, height: number, seed: number): SceneL
   return { width, height, groundTop, countdown, globe, disc, stars: placeStars(width, groundTop, globe, disc, countdown, seed) };
 }
 
-/** A scene colour after the phase's overrides; Dawn's stand-in is the plain palette. */
+/** A scene colour after the phase's overrides; Dawn deliberately uses the plain palette. */
 function override(phase: PhaseName, colour: string): string {
   if (phase === 'dawn') return colour;
   return phaseOverrides[phase][colour] ?? colour;

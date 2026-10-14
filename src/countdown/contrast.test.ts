@@ -138,15 +138,14 @@ describe('countdown ink contrast, every second of a blend', () => {
   });
 });
 
-describe('dawn stand-in', () => {
-  it('marks the dawn colours in art/colours.ts as a stand-in for the art pass', () => {
+describe('dawn colours after the art pass', () => {
+  it('no longer calls the dawn colours in art/colours.ts a stand-in', () => {
     const source = readFileSync(new URL('../../art/colours.ts', import.meta.url), 'utf8');
-    const table = source.slice(source.indexOf('export const phaseColours'));
-    const comment = source.slice(0, source.indexOf('export const phaseColours'));
-    const lastComment = comment.slice(comment.lastIndexOf('// XMAS-'));
-    expect(table.length, 'phaseColours table present').toBeGreaterThan(0);
-    expect(lastComment).toMatch(/dawn/i);
-    expect(lastComment).toMatch(/stand-in/i);
-    expect(lastComment).toMatch(/art pass/i);
+    expect(source.indexOf('export const phaseColours'), 'phaseColours table present').toBeGreaterThan(0);
+    // Past tense ("were a stand-in until ...") is fine; a present-tense claim is not.
+    const claims = /dawn's stand-in|\b(?:is|are) (?:a |the |still a )?stand-in|stand-in for the art pass/i;
+    expect(source).not.toMatch(claims);
+    const frame = readFileSync(new URL('../scene/frame.ts', import.meta.url), 'utf8');
+    expect(frame).not.toMatch(claims);
   });
 });
