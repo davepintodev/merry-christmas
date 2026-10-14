@@ -8,7 +8,7 @@ rules on its own.
   shade on bottom and right.
 - One outline rule: a dark master colour outlines every object, one art pixel
   thick. The walls, roofs and base fill their whole box and carry their
-  outline as the lit and shaded box edges instead. Santa (only 6 rows tall)
+  outline as the lit and shaded box edges instead. Santa (only 9 rows tall)
   and thin details (the snowman's arms, scarf and face, the lamp post, the
   disc) carry their own dark colour instead of a 1-pixel outline.
 - At most 10 colours per object. Transparent pixels count as no colour.

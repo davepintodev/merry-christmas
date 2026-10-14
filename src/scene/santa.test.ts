@@ -1,6 +1,6 @@
 // XMAS-32d "The globe", slice 4: Santa with his sleigh and two reindeer
 // circling high inside the globe (XMAS-32 acceptance criteria). He is one flat
-// drawing (santa-trot-1 / santa-trot-2, 31 x 6 art pixels, from the Santa
+// drawing (santa-trot-1 / santa-trot-2, 46 x 9 art pixels, from the Santa
 // sheet) with two trot frames, squeezed across by how far round his orbit he
 // is (never below 0.3, so he never vanishes), mirrored when flying the other
 // way, blended on the fixed grid so his motion never pops, clipped to the
@@ -172,11 +172,11 @@ function turnFor(angle: number, timeMs: number): number {
 /**
  * A (turn, time) at which Santa flies at depth `side` (+1 in front, -1
  * behind), so squeeze is 1 and x is 0, in trot frame `trot`, with his top
- * row on a whole art pixel: y + cy - 3 is whole. With a globe centre half a
- * pixel across, his left edge cx - 15.5 is whole too, so he lands on the grid.
+ * row on a whole art pixel: y + cy - 4.5 is whole. With a whole-pixel globe centre,
+ * his left edge cx - 23 is whole too, so he lands on the grid.
  */
 function onGrid(side: 1 | -1, trot: 0 | 1, layout: SceneLayout): { turn: number; time: number } {
-  const y = (t: number): number => layout.globe.cy - R * 0.46 + Math.sin(t * 1.3) * 2 + side * ORBIT * TILT - 3;
+  const y = (t: number): number => layout.globe.cy - R * 0.46 + Math.sin(t * 1.3) * 2 + side * ORBIT * TILT - 4.5;
   for (let m = 1; m < 200; m++) {
     const a = (2 * m + trot) / 7 + 0.01;
     const b = (2 * m + trot + 1) / 7 - 0.01;
@@ -199,9 +199,6 @@ function onGrid(side: 1 | -1, trot: 0 | 1, layout: SceneLayout): { turn: number;
   }
   throw new Error('no on-grid time found');
 }
-
-/** LAYOUT with the globe's centre moved half a pixel right, so a 31-wide Santa at x = 0 lands on whole columns. */
-const HALF: SceneLayout = { ...LAYOUT, globe: { ...LAYOUT.globe, cx: LAYOUT.globe.cx + 0.5 } };
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 const READINGS: [string, PhaseReading][] = [
@@ -365,9 +362,9 @@ describe('santaPlacement: where Santa flies', () => {
 });
 
 describe('the Santa drawings', () => {
-  it('are two 31 x 6 trot frames from the Santa sheet that differ, in the same colours', () => {
+  it('are two 46 x 9 trot frames from the Santa sheet that differ, in the same colours', () => {
     for (const d of TROT) {
-      expect([d.width, d.height]).toEqual([31, 6]);
+      expect([d.width, d.height]).toEqual([46, 9]);
       expect(d.sheet).toBe('santa.png');
     }
     expect(Array.from(TROT[0].pixels)).not.toEqual(Array.from(TROT[1].pixels));
@@ -379,14 +376,14 @@ describe('drawSanta: Santa in the picture', () => {
   it.each([[0, 'santa-trot-1'], [1, 'santa-trot-2']] as const)(
     'paints trot frame %s on the grid at squeeze 1 on the far side as %s, pixel for pixel, unmirrored',
     (trot, name) => {
-      const { turn, time } = onGrid(-1, trot, HALF);
+      const { turn, time } = onGrid(-1, trot, LAYOUT);
       const p = expected(turn, time);
       expect(p.trot).toBe(trot);
       expect(p.mirrored).toBe(false);
       const d = drawing(name);
-      const left = Math.round(HALF.globe.cx + p.x - d.width / 2);
-      const top = Math.round(HALF.globe.cy + p.y - d.height / 2);
-      const pic = drawn(turn, time, HALF);
+      const left = Math.round(LAYOUT.globe.cx + p.x - d.width / 2);
+      const top = Math.round(LAYOUT.globe.cy + p.y - d.height / 2);
+      const pic = drawn(turn, time, LAYOUT);
       const wrong: string[] = [];
       for (let y = 0; y < d.height; y++) {
         for (let x = 0; x < d.width; x++) {
@@ -409,14 +406,14 @@ describe('drawSanta: Santa in the picture', () => {
   it.each([[0, 'santa-trot-1'], [1, 'santa-trot-2']] as const)(
     'paints trot frame %s on the grid at squeeze 1 on the near side as the horizontal mirror of %s',
     (trot, name) => {
-      const { turn, time } = onGrid(1, trot, HALF);
+      const { turn, time } = onGrid(1, trot, LAYOUT);
       const p = expected(turn, time);
       expect(p.trot).toBe(trot);
       expect(p.mirrored).toBe(true);
       const d = drawing(name);
-      const left = Math.round(HALF.globe.cx + p.x - d.width / 2);
-      const top = Math.round(HALF.globe.cy + p.y - d.height / 2);
-      const pic = drawn(turn, time, HALF);
+      const left = Math.round(LAYOUT.globe.cx + p.x - d.width / 2);
+      const top = Math.round(LAYOUT.globe.cy + p.y - d.height / 2);
+      const pic = drawn(turn, time, LAYOUT);
       const wrong: string[] = [];
       for (let y = 0; y < d.height; y++) {
         for (let x = 0; x < d.width; x++) {
@@ -450,11 +447,11 @@ describe('drawSanta: Santa in the picture', () => {
       const p = expected(turn, time);
       const b = box(drawn(turn, time));
       const across = b.right - b.left + 1;
-      expect(across, `angle ${angle}: columns`).toBeGreaterThanOrEqual(Math.floor(31 * p.squeeze) - 1);
-      expect(across, `angle ${angle}: columns`).toBeLessThanOrEqual(Math.ceil(31 * p.squeeze) + 1);
+      expect(across, `angle ${angle}: columns`).toBeGreaterThanOrEqual(Math.floor(46 * p.squeeze) - 1);
+      expect(across, `angle ${angle}: columns`).toBeLessThanOrEqual(Math.ceil(46 * p.squeeze) + 1);
       const down = b.bottom - b.top + 1;
-      expect(down, `angle ${angle}: rows`).toBeGreaterThanOrEqual(6);
-      expect(down, `angle ${angle}: rows`).toBeLessThanOrEqual(7);
+      expect(down, `angle ${angle}: rows`).toBeGreaterThanOrEqual(9);
+      expect(down, `angle ${angle}: rows`).toBeLessThanOrEqual(10);
     }
   });
 
@@ -469,7 +466,7 @@ describe('drawSanta: Santa in the picture', () => {
     for (const angle of [0, Math.PI]) {
       const time = 3_210;
       const pic = drawn(turnFor(angle, time), time);
-      expect(box(pic).right - box(pic).left + 1, `angle ${angle}: squeezed to about 9 columns`).toBeLessThanOrEqual(11);
+      expect(box(pic).right - box(pic).left + 1, `angle ${angle}: squeezed to about 14 columns`).toBeLessThanOrEqual(16);
       expect(touchedIndexes(pic).length, `angle ${angle}`).toBeGreaterThan(0);
     }
   });
