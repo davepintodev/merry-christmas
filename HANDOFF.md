@@ -23,6 +23,8 @@ State and next steps for the next session. Ticket keys are in the planning store
 - Standing user rule: each deployable, e2e-testable state goes live on a real address; report the link.
 - Pipeline reminders: test-writer (Opus) -> `ticket-impl` -> own `pnpm check` -> fresh reviewer -> commit. ticket-impl exits 3 when a session passes 150k: restart with a full brief.
 
+- XMAS-41a done (pure drag model `src/page/drag.ts`: `createDrag`, `DRAG_SETTINGS`, pointer down/move/up/cancel in art pixels, `step(dt)` returns `{turn, lean, raise, push}`; 2D stir and push, motion-kicked lean spring, flick burst above 200 px/s capped at 3x). Next: XMAS-41b (pointer listeners in `src/page`, replace `autoTurn` with the drag turn, pass `lean` to the scene and draw it, hint "DRAG TO SPIN AND STIR" under the globe, attach input before `globe-ready`, `touch-action: none`, browser tests). Pass `step()` output to one snow step per frame only.
+
 ## Review log
 
 | Ticket | Round | Verdict | Findings |
@@ -70,3 +72,5 @@ State and next steps for the next session. Ticket keys are in the planning store
 | XMAS-38 | 1 | approve with nits | nit x2 (stale left-edge comment; `HALF` copy of LAYOUT) - fixed, owner-approved lane=full |
 | XMAS-39 | 1 | approve | nit x2 (.gitignore unrelated; STYLE.md silent on base edge shading) - owner-approved lane=full |
 | XMAS-40 | 1 | approve with nits | nit x2 (snowmanFaces doc comment displaced by new constants; no test for buttons hidden from behind) - left, owner-approved lane=full |
+| XMAS-41a | 1 | changes needed | spec x2 (stir/push horizontal only, lean aimed at press offset instead of kicked by motion), nit x1 (burst started at zero above the threshold) lane=full |
+| XMAS-41a | 2 | approve | none lane=full |
