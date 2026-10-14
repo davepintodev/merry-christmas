@@ -8,6 +8,7 @@ import { colours, masterColours, phaseColours, phaseOverrides } from '../../art/
 import { mixHex, skyAndInk } from '../countdown/colours.ts';
 import { countdownFrame } from '../countdown/render.ts';
 import { drawings } from '../shared/art.generated.ts';
+import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { drawGlobe } from './globe.ts';
 import type { GlobeSnow } from './snow.ts';
@@ -62,6 +63,8 @@ export interface SceneInput {
   height: number;
   /** The globe's snow (XMAS-36b1); absent draws no flakes. */
   snow?: GlobeSnow;
+  /** The outside snow (XMAS-36b2); absent draws none. */
+  outsideSnow?: OutsideSnow;
 }
 
 export interface SceneFrame {
@@ -417,6 +420,8 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   for (let y = groundTop; y < height; y++) {
     picture.fill(y < groundTop + GROUND_SHADOW_ROWS ? shadow : snow, y * width, (y + 1) * width);
   }
+  // The outside snow falls behind the globe, so the glass and objects cover it.
+  if (input.outsideSnow !== undefined) drawOutsideSnow(picture, width, layout, input.outsideSnow, input.time);
   // The globe sits on the ground's first row, on its base.
   drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow);
   paintDisc(picture, layout, input.phase, share);
