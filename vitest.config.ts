@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // The CPU renderers sweep many turns and zooms; a loaded runner needs more than the default 5 s.
+    // The CPU renderers sweep many turns and zooms; a loaded machine needs more than the default 5 s.
     testTimeout: 30_000,
     include: [
       'src/**/*.test.ts',

@@ -455,7 +455,7 @@ test.describe('?perf reports the layer\'s cost', () => {
     const text = (await page.locator('#perf-readout [data-perf="worst-frame"]').textContent()) ?? '';
     const worst = Number(/\d+(?:\.\d+)?/.exec(text)?.[0]);
     expect(worst).toBeGreaterThan(0);
-    // The 50 ms rule holds on a developer machine; shared CI runners stall for longer, so they get a looser bound.
+    // The 50 ms rule holds on a developer machine; shared CI machines stall for longer, so they get a looser bound.
     const limit = process.env.CI ? 250 : 50;
     expect(worst, `worst frame ${text}`).toBeLessThanOrEqual(limit);
     await context.close();
