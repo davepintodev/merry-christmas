@@ -46,26 +46,53 @@ function paintPixel(picture: Uint32Array, index: number, colour: number, coverag
 }
 
 /**
+ * One face's drawing in globe-centred art units: its sheet, its top left,
+ * top right and bottom left corners `a`, `b` and `d`, and a gable's triangle
+ * as the `clip` (absent for a four-corner face).
+ */
+export interface FaceDraw {
+  drawing: Drawing;
+  a: [number, number];
+  b: [number, number];
+  d: [number, number];
+  clip?: readonly (readonly [number, number])[];
+}
+
+/**
+ * Where a face's drawing lies on screen. A gable (three corners) shows the
+ * drawing hung from its apex's level, cut to the triangle.
+ */
+export function faceAxes(show: ProjectedFace): FaceDraw {
+  const drawing = sheet(show.drawing);
+  const ring = show.corners;
+  const [p, q, r, s] = ring;
+  if (ring.length === 4 && p !== undefined && q !== undefined && s !== undefined) return { drawing, a: [p[0], p[1]], b: [q[0], q[1]], d: [s[0], s[1]] };
+  if (ring.length !== 3 || p === undefined || q === undefined || r === undefined) throw new Error(`${show.drawing} needs three or four corners`);
+  const lift: [number, number] = [q[0] - (p[0] + r[0]) / 2, q[1] - (p[1] + r[1]) / 2];
+  const top: [number, number] = [p[0] + lift[0], p[1] + lift[1]];
+  return { drawing, a: top, b: [r[0] + lift[0], r[1] + lift[1]], d: [top[0], top[1] + drawing.height], clip: ring };
+}
+
+/** The art units a face's drawing can reach: the extent of its parallelogram, which holds a gable's triangle too. */
+function faceExtent(face: FaceDraw): { left: number; right: number; top: number; bottom: number } {
+  const { a, b, d } = face;
+  const xs = [a[0], b[0], d[0], b[0] + d[0] - a[0]];
+  const ys = [a[1], b[1], d[1], b[1] + d[1] - a[1]];
+  return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+}
+
+/**
  * One face laid into a shape's scratch: the drawing's own pixels over the
  * face's corners. Each drawing pixel covering a picture pixel is taken by its
  * share of that pixel, so a pixel an edge between two drawing pixels runs
  * through shows the in-between shade between them. A face only adds what the
  * faces laid before it (the nearer ones) left of a pixel, so a nearer face
  * hides a farther one while two faces meeting along an edge still blend.
+ * `zoom` picture pixels span each art pixel; the box is in picture pixels.
  */
-function coverFace(cover: Float64Array, box: Box, layout: SceneLayout, show: ProjectedFace): void {
-  const drawing = sheet(show.drawing);
+function coverFace(cover: Float64Array, box: Box, layout: SceneLayout, face: FaceDraw, zoom = 1): void {
+  const { drawing, a, b, d, clip } = face;
   const { cx, cy } = layout.globe;
-  const ring = show.corners;
-  // A gable (three corners) shows the drawing hung from its apex's level, cut to the triangle.
-  const [a, b, d] = ((): [readonly [number, number], readonly [number, number], readonly [number, number]] => {
-    const [p, q, r, s] = ring;
-    if (ring.length === 4 && p !== undefined && q !== undefined && s !== undefined) return [p, q, s];
-    if (ring.length !== 3 || p === undefined || q === undefined || r === undefined) throw new Error(`${show.drawing} needs three or four corners`);
-    const lift: [number, number] = [q[0] - (p[0] + r[0]) / 2, q[1] - (p[1] + r[1]) / 2];
-    const top: [number, number] = [p[0] + lift[0], p[1] + lift[1]];
-    return [top, [r[0] + lift[0], r[1] + lift[1]], [top[0], top[1] + drawing.height]];
-  })();
   // The affine map from the drawing's pixels to the screen, and its inverse;
   // one drawing pixel is one unit, so an inverse area is a covered share.
   const ax = (b[0] - a[0]) / drawing.width;
@@ -79,22 +106,22 @@ function coverFace(cover: Float64Array, box: Box, layout: SceneLayout, show: Pro
   const iuy = -bx / det;
   const ivx = -ay / det;
   const ivy = ax / det;
-  const xs = ring.map(([x]) => x);
-  const ys = ring.map(([, y]) => y);
-  const left = Math.max(box.left, Math.floor(cx + Math.min(...xs)));
-  const right = Math.min(box.left + box.width - 1, Math.ceil(cx + Math.max(...xs)));
-  const top = Math.max(box.top, Math.floor(cy + Math.min(...ys)));
-  const bottom = Math.min(box.top + box.height - 1, Math.ceil(cy + Math.max(...ys)));
+  const extent = faceExtent(face);
+  // One picture pixel of slack either side: the per-pixel test below decides what shows.
+  const left = Math.max(box.left, Math.floor((cx + extent.left) * zoom) - 1);
+  const right = Math.min(box.left + box.width - 1, Math.ceil((cx + extent.right) * zoom) + 1);
+  const top = Math.max(box.top, Math.floor((cy + extent.top) * zoom) - 1);
+  const bottom = Math.min(box.top + box.height - 1, Math.ceil((cy + extent.bottom) * zoom) + 1);
   const toDrawing = ([px, py]: readonly [number, number]): [number, number] => [iux * (px - a[0]) + iuy * (py - a[1]), ivx * (px - a[0]) + ivy * (py - a[1])];
-  const outline = ring.length === 3 ? ring.map(toDrawing) : undefined;
+  const outline = clip?.map(toDrawing);
   const slack = 1e-9;
   for (let y = top; y <= bottom; y++) {
     for (let x = left; x <= right; x++) {
       // The drawing pixel under the picture pixel's centre, taken whole: no
       // in-between shades, so every pixel the face shows is one of the sheet's
       // own colours and the picture stays crisp at any turn.
-      const dx = x + 0.5 - cx - a[0];
-      const dy = y + 0.5 - cy - a[1];
+      const dx = (x + 0.5) / zoom - cx - a[0];
+      const dy = (y + 0.5) / zoom - cy - a[1];
       const u = iux * dx + iuy * dy;
       const v = ivx * dx + ivy * dy;
       if (u < -slack || v < -slack || u >= drawing.width + slack || v >= drawing.height + slack) continue;
@@ -138,33 +165,34 @@ interface Box {
  * One shape over the picture: its faces (nearest first) are laid together first, so a pixel
  * their shared edge runs through shows the in-between shade of the two
  * drawings instead of a hairline of the glass under the shape, then painted
- * at once, each pixel the covered share of the colour they add up to.
+ * at once, each pixel the covered share of the colour they add up to. `width`
+ * is the picture's width in picture pixels, `zoom` of them to each art pixel.
  */
-function paintShape(picture: Uint32Array, width: number, layout: SceneLayout, faces: readonly ProjectedFace[]): void {
+export function paintShape(picture: Uint32Array, width: number, layout: SceneLayout, faces: readonly FaceDraw[], zoom = 1): void {
   const { cx, cy } = layout.globe;
   let left = Number.POSITIVE_INFINITY;
   let right = Number.NEGATIVE_INFINITY;
   let top = Number.POSITIVE_INFINITY;
   let bottom = Number.NEGATIVE_INFINITY;
   for (const face of faces) {
-    for (const [x, y] of face.corners) {
-      left = Math.min(left, x);
-      right = Math.max(right, x);
-      top = Math.min(top, y);
-      bottom = Math.max(bottom, y);
-    }
+    const extent = faceExtent(face);
+    left = Math.min(left, extent.left);
+    right = Math.max(right, extent.right);
+    top = Math.min(top, extent.top);
+    bottom = Math.max(bottom, extent.bottom);
   }
+  // Picture pixels: `zoom` per art pixel, one pixel of slack as coverFace has.
   const box: Box = {
-    left: Math.max(0, Math.floor(cx + left)),
-    top: Math.max(0, Math.floor(cy + top)),
+    left: Math.max(0, Math.floor((cx + left) * zoom) - 1),
+    top: Math.max(0, Math.floor((cy + top) * zoom) - 1),
     width: 0,
     height: 0,
   };
-  box.width = Math.max(0, Math.min(width, Math.ceil(cx + right) + 1) - box.left);
-  box.height = Math.max(0, Math.min(layout.height, Math.ceil(cy + bottom) + 1) - box.top);
+  box.width = Math.max(0, Math.min(width, Math.ceil((cx + right) * zoom) + 2) - box.left);
+  box.height = Math.max(0, Math.min(layout.height * zoom, Math.ceil((cy + bottom) * zoom) + 2) - box.top);
   if (box.width === 0 || box.height === 0) return;
   const cover = new Float64Array(box.width * box.height * 4);
-  for (const face of faces) coverFace(cover, box, layout, face);
+  for (const face of faces) coverFace(cover, box, layout, face, zoom);
   for (let y = box.top; y < box.top + box.height; y++) {
     for (let x = box.left; x < box.left + box.width; x++) {
       const index = ((y - box.top) * box.width + (x - box.left)) * 4;
@@ -209,10 +237,33 @@ function paintShadow(picture: Uint32Array, width: number, layout: SceneLayout, s
 }
 
 /**
+ * The shapes in the order they are painted at `turn`: far shapes first, so a
+ * nearer shape covers a farther one wherever they overlap, whatever order the
+ * caller lists them in.
+ */
+export function shapesFarFirst(shapes: readonly GlobeShape[], turn: number): GlobeShape[] {
+  const t = wrapTurn(turn);
+  const cos = Math.cos(t);
+  const sin = Math.sin(t);
+  return [...shapes].sort(
+    (a, b) =>
+      (a.x * sin + a.z * cos) - (b.x * sin + b.z * cos) ||
+      a.x - b.x ||
+      a.z - b.z ||
+      (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0) ||
+      (a.design ?? 0) - (b.design ?? 0),
+  );
+}
+
+/** Which of a shape's two layers to draw: its cast shadows, or both. */
+export type ShapeParts = 'all' | 'shadows';
+
+/**
  * Draws `shapes` (all of globeShapes by default) turned by `turn`, nearer
  * shapes over farther ones, with their cast shadows on the floor, over
- * whatever `picture` (width art pixels across) already holds. Throws a
- * RangeError for a non-finite turn and then leaves the picture alone.
+ * whatever `picture` (width art pixels across) already holds. `parts` of
+ * 'shadows' leaves out the bodies. Throws a RangeError for a non-finite turn and
+ * then leaves the picture alone.
  */
 export function drawShapes(
   picture: Uint32Array,
@@ -221,23 +272,13 @@ export function drawShapes(
   phase: PhaseReading,
   turn: number,
   shapes: readonly GlobeShape[] = globeShapes,
+  parts: ShapeParts = 'all',
 ): void {
   if (!Number.isFinite(turn)) throw new RangeError(`turn must be a finite number of radians, got ${turn}`);
   // The shapes carry the sheets' own colours in every phase: only the glass tints.
   void phase;
   const t = wrapTurn(turn);
-  const cos = Math.cos(t);
-  const sin = Math.sin(t);
-  // Far shapes first, so a nearer shape covers a farther one wherever they
-  // overlap, whatever order the caller lists them in.
-  const order = [...shapes].sort(
-    (a, b) =>
-      (a.x * sin + a.z * cos) - (b.x * sin + b.z * cos) ||
-      a.x - b.x ||
-      a.z - b.z ||
-      (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0) ||
-      (a.design ?? 0) - (b.design ?? 0),
-  );
+  const order = shapesFarFirst(shapes, t);
   for (const shape of order) paintShadow(picture, width, layout, shape, t);
-  for (const shape of order) paintShape(picture, width, layout, projectShape(shape, t));
+  if (parts !== 'shadows') for (const shape of order) paintShape(picture, width, layout, projectShape(shape, t).map((face) => faceAxes(face)));
 }

@@ -14,8 +14,8 @@ import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
 import { keepBackdrop, leanGlass } from './lean.ts';
 import { drawSanta, santaPlacement } from './santa.ts';
-import { drawShapes } from './shapes-draw.ts';
-import { floorDisc, projectPoint } from './shapes.ts';
+import { drawShapes, type ShapeParts } from './shapes-draw.ts';
+import { floorDisc, globeShapes, projectPoint } from './shapes.ts';
 import { drawSnowBehind, drawSnowFront } from './snow-draw.ts';
 import type { GlobeSnow } from './snow.ts';
 
@@ -616,8 +616,18 @@ function paintBase(picture: Uint32Array, width: number, base: Drawing, boxX: num
   paintLettering(picture, width, base, boxX, boxY, turn);
 }
 
-/** Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), the snow inside the glass when given, leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). */
-export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayout, phase: PhaseReading, turn: number, time: number, snow?: GlobeSnow, lean = 0): void {
+/** Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), the snow inside the glass when given, leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). `parts` of 'shadows' leaves the shapes' bodies out (XMAS-80). */
+export function drawGlobe(
+  picture: Uint32Array,
+  width: number,
+  layout: SceneLayout,
+  phase: PhaseReading,
+  turn: number,
+  time: number,
+  snow?: GlobeSnow,
+  lean = 0,
+  parts: ShapeParts = 'all',
+): void {
   const base = drawings['base'];
   if (base === undefined) throw new Error('the Base sheet has no base drawing');
   const spin = wrapTurn(turn);
@@ -631,7 +641,7 @@ export function drawGlobe(picture: Uint32Array, width: number, layout: SceneLayo
   paintReflections(picture, width, layout, glass, spin);
   if (snow !== undefined) drawSnowBehind(picture, width, layout, snow);
   if (behind) drawSanta(picture, width, layout, spin, time);
-  drawShapes(picture, width, layout, phase, spin);
+  drawShapes(picture, width, layout, phase, spin, globeShapes, parts);
   if (!behind) drawSanta(picture, width, layout, spin, time);
   if (snow !== undefined) drawSnowFront(picture, width, layout, snow, time);
   if (lean !== 0) leanGlass(picture, width, layout, lean);

@@ -12,6 +12,7 @@ import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { drawGlobe } from './globe.ts';
+import type { ShapeParts } from './shapes-draw.ts';
 import { paintHint } from './hint.ts';
 import { MAX_LEAN } from './lean.ts';
 import type { GlobeSnow } from './snow.ts';
@@ -80,6 +81,8 @@ export interface SceneInput {
   snow?: GlobeSnow;
   /** The outside snow (XMAS-36b2); absent draws none. */
   outsideSnow?: OutsideSnow;
+  /** Whether the shapes' bodies are drawn (XMAS-80); absent or true draws them, false leaves them out and keeps their shadows. */
+  shapeBodies?: boolean;
 }
 
 export interface SceneFrame {
@@ -463,7 +466,8 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   // The stars lie behind the globe too: a leaning glass covers them and shows them where it has left.
   paintStars(picture, layout, input, share, sky);
   // The globe sits on the ground's first row, on its base.
-  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0);
+  const parts: ShapeParts = input.shapeBodies === false ? 'shadows' : 'all';
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts);
   paintDisc(picture, layout, input.phase, share);
   paintHint(picture, layout, BASE_HEIGHT);
 }
