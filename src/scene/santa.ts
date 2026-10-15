@@ -1,28 +1,31 @@
 // XMAS-32d "The globe", slice 4: Santa with his sleigh and two reindeer
-// circling high inside the globe. One flat drawing (santa-trot-1 / -2), squeezed
-// across by how far round his orbit he is, mirrored when flying the other way,
-// and spread over the fixed grid by the share of each art pixel he covers, so
-// his motion never pops. Clipped to the glass; his colours never tint.
-import { masterColours } from '../../art/colours.ts';
+// circling high inside the globe. One flat drawing (santa-trot-1 / -2) at his
+// full width, mirrored when flying the other way, and spread over the fixed grid
+// by the share of each art pixel he covers, so his motion never pops. Clipped to
+// the glass; his colours never tint.
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from './frame.ts';
+import { paintSantaStep } from './santa-step.ts';
+import type { SantaDraw } from './shape-draw-list.ts';
 import { projectPoint } from './shapes.ts';
 
 /** The glass's radius the orbit is sized on, in art pixels. */
 const GLASS = 56;
-/** The orbit's reach: the glass less its rim, and the share of it Santa flies out to. */
-const LIMIT = GLASS - 3;
-const ORBIT = LIMIT * 0.42;
+/** The furthest an opaque pixel's centre may sit from the glass's centre: the glass less a 2 art pixel margin, inside its rim. */
+const LIMIT = GLASS - 2;
 /** How high Santa flies, up from the globe's centre. */
 const HEIGHT = GLASS * 0.46;
 /** Radians a second round the orbit, and the bob's rate and reach. */
 const SPEED = 0.45;
 const BOB_RATE = 1.3;
 const BOB = 2;
+/** Santa's sprite, in art pixels: its outer pixel centres sit half a pixel in from its edges. */
+const SPRITE_W = 48;
+const SPRITE_H = 12;
 /** Trot frames a second. */
 const TROT_RATE = 7;
-/** The narrowest he is squeezed: never so thin he vanishes. */
-const MIN_SQUEEZE = 0.3;
+/** Santa's reach along the orbit: at the ends (depth 0, the bob at its lowest) his farthest pixel centre is LIMIT from the middle. */
+const ORBIT = Math.sqrt(LIMIT ** 2 - (HEIGHT + BOB + SPRITE_H / 2 - 0.5) ** 2) - (SPRITE_W / 2 - 0.5);
 /** A step towards the visitor moves a floor point this far down, as the shapes tilt it. */
 const TILT = projectPoint(0, 1, 0, 0)[1] - projectPoint(0, 0, 0, 0)[1];
 
@@ -34,7 +37,7 @@ export interface SantaPlacement {
   y: number;
   /** -1 (far side) to 1 (near side). */
   depth: number;
-  /** The share of his width he shows, from 0.3 to 1. */
+  /** The share of his width he shows: always 1, he is never squeezed (he mirrors at the turn). */
   squeeze: number;
   /** Whether he flies towards the left, drawn the other way round. */
   mirrored: boolean;
@@ -51,38 +54,30 @@ export function santaPlacement(turn: number, timeMs: number): SantaPlacement {
   const depth = Math.sin(angle);
   return {
     angle,
-    x: Math.cos(angle) * ORBIT,
+    x: ORBIT * (2 / Math.PI) * Math.asin(Math.cos(angle)),
     y: -HEIGHT + Math.sin(t * BOB_RATE) * BOB + depth * ORBIT * TILT,
     depth,
-    squeeze: Math.max(MIN_SQUEEZE, Math.abs(depth)),
+    squeeze: 1,
     mirrored: depth > 0,
     trot: (Math.floor(t * TROT_RATE) % 2) as 0 | 1,
   };
 }
 
-function colourOf(n: number): number {
-  return Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16);
+/** Santa's depth as the shapes measure theirs (their nearness along the turn, in art pixels): his orbit's reach times his depth. */
+export function santaNearness(place: SantaPlacement): number {
+  return place.depth * ORBIT;
 }
 
-/** Draws Santa into picture (width art pixels across). Throws a RangeError for a non-finite turn or time, before drawing. */
+/** The trot drawing Santa shows: santa-trot-1 or santa-trot-2. Throws a plain Error if the sheet lacks it. */
+export function santaSprite(trot: 0 | 1): Drawing {
+  const body: Drawing | undefined = drawings[trot === 0 ? 'santa-trot-1' : 'santa-trot-2'];
+  if (body === undefined) throw new Error('the Santa sheet has no trot drawings');
+  return body;
+}
+
+/** Draws Santa into picture (width art pixels across), as the one step paintSantaStep paints at zoom 1. Throws a RangeError for a non-finite turn or time, before drawing. */
 export function drawSanta(picture: Uint32Array, width: number, layout: SceneLayout, turn: number, timeMs: number): void {
   const place = santaPlacement(turn, timeMs);
-  const body: Drawing | undefined = drawings[place.trot === 0 ? 'santa-trot-1' : 'santa-trot-2'];
-  if (body === undefined) throw new Error('the Santa sheet has no trot drawings');
-  const { cx, cy, radius } = layout.globe;
-  const span = Math.max(1, Math.round(body.width * place.squeeze));
-  const left = Math.round(cx + place.x - span / 2);
-  const top = Math.round(cy + place.y - body.height / 2);
-  // Whole picture pixels only: each takes the one drawing pixel under its centre, so Santa is crisp at every angle.
-  for (let py = Math.max(0, top); py < Math.min(layout.height, top + body.height); py++) {
-    for (let px = Math.max(0, left); px < Math.min(width, left + span); px++) {
-      const dx = px + 0.5 - cx;
-      const dy = py + 0.5 - cy;
-      if (dx * dx + dy * dy > radius * radius) continue;
-      const sx = Math.min(body.width - 1, Math.floor(((px - left + 0.5) / span) * body.width));
-      const n = body.pixels[(py - top) * body.width + (place.mirrored ? body.width - 1 - sx : sx)] ?? 0;
-      if (n === 0) continue;
-      picture[py * width + px] = colourOf(n);
-    }
-  }
+  const step: SantaDraw = { sprite: santaSprite(place.trot), x: place.x, y: place.y, squeeze: place.squeeze, mirrored: place.mirrored };
+  paintSantaStep(picture, width, layout, step, 1);
 }

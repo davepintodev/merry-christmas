@@ -12,7 +12,6 @@ import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawings } from '../shared/art.generated.ts';
 import { phaseAt, type PhaseName, type PhaseReading } from '../shared/clock.ts';
 import { DISC_MARGIN, DISC_SIZE, GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
-import { NO_FRONT } from './globe.ts';
 import { createGlobeSnow, stepGlobeSnow, type Flake, type GlobeSnow } from './snow.ts';
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
@@ -897,19 +896,18 @@ describe('globe snow is not in the scene picture (XMAS-84)', () => {
     });
   }
 
-  it('the front layer, with the shapes left out, holds only Santa: no flake is in it', () => {
+  it('the frame with the shapes left out carries no picture of Santa or the flakes: they are the page\'s steps (XMAS-83, XMAS-84)', () => {
     const snow = settledSnow();
     const withSnow = sceneFrame(input({ snow, shapeBodies: false }));
     const without = sceneFrame(input({ shapeBodies: false }));
-    expect(withSnow.front).toEqual(without.front);
-    expect(withSnow.behind).toEqual(without.behind);
-    expect(withSnow.front?.some((c) => c === 0xffffff)).toBe(false);
+    expect(withSnow).toEqual(without);
+    expect(Object.keys(withSnow).sort()).toEqual(['height', 'layout', 'picture', 'width']);
   });
 
   it('one flake in front and one behind leave the picture exactly as it was', () => {
     const snow: GlobeSnow = { flakes: [flake(10.25, -20.75, 20), flake(-5, 5, -20)], stir: 0 };
     expect(sceneFrame(input({ snow })).picture).toEqual(sceneFrame(input()).picture);
-    expect(sceneFrame(input({ snow, shapeBodies: false })).front?.every((c) => c === NO_FRONT || c !== 0xffffff)).toBe(true);
+    expect(sceneFrame(input({ snow, shapeBodies: false })).picture).toEqual(sceneFrame(input({ shapeBodies: false })).picture);
   });
 });
 

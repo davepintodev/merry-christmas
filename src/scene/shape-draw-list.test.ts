@@ -84,14 +84,14 @@ function expectedStep(face: { drawing: string; corners: readonly (readonly [numb
 }
 
 /**
- * Counts the pixels where the list laid over a bodiless frame is not today's frame. Santa flies in front of the bodies and is in
- * the bodiless frame already, so where the list painted a pixel the whole frame may hold either the body or (unchanged from the
- * bodiless frame) Santa; where the list painted nothing the two frames must agree. Also reports how many body pixels matched.
+ * Counts the pixels where the list (bodies and Santa, XMAS-83) laid over a bodiless frame is not today's frame. The bodiless frame
+ * holds no Santa, so where the list painted a pixel the whole frame must hold it; where the list painted nothing the two frames
+ * must agree. Also reports how many painted pixels matched.
  */
 function overlayMismatch(turn: number, phase: PhaseReading = NIGHT): { bad: number; matched: number } {
   const whole = sceneFrame(sceneInput({ turn, phase }));
   const bare = sceneFrame(withBodies(false, { turn, phase }));
-  const list = rendered(turn, 1, FILL);
+  const list = renderedWithSanta(turn, 1);
   let bad = 0;
   let matched = 0;
   for (let i = 0; i < whole.picture.length; i++) {
@@ -99,9 +99,16 @@ function overlayMismatch(turn: number, phase: PhaseReading = NIGHT): { bad: numb
     if (list[i] === FILL) {
       if (w !== bare.picture[i]) bad += 1;
     } else if (w === list[i]) matched += 1;
-    else if (w !== bare.picture[i]) bad += 1;
+    else bad += 1;
   }
   return { bad, matched };
+}
+
+/** The bodies and Santa (at time T, as sceneInput has it) in depth order, laid on `fill`. */
+function renderedWithSanta(turn: number, zoom: number, colour = FILL): Uint32Array {
+  const picture = filled(LAYOUT, zoom, colour);
+  renderDrawList(picture, LAYOUT.width, LAYOUT, shapeDrawList(turn, globeShapes, T), zoom);
+  return picture;
 }
 
 function plainDrawing(width: number, height: number, pixels: number[]): Drawing {
@@ -426,7 +433,7 @@ describe('the list at zoom 1 is today\'s drawShapes bodies', () => {
     }
   });
 
-  it('equals sceneFrame\'s whole picture when laid over the frame without bodies (Santa in front aside), over the whole sweep', () => {
+  it('equals sceneFrame\'s whole picture when laid over the frame without bodies (Santa in its depth order), over the whole sweep', () => {
     for (const turn of SWEEP) {
       const { bad, matched } = overlayMismatch(turn);
       expect(bad).toBe(0);
@@ -566,12 +573,12 @@ describe('sceneFrame: the shapeBodies option', () => {
     for (const turn of [0, 1.1, 4.0]) {
       const whole = sceneFrame(sceneInput({ turn }));
       const bare = sceneFrame(withBodies(false, { turn }));
-      const covered = rendered(turn, 1, FILL);
+      const covered = renderedWithSanta(turn, 1);
       let differing = 0;
       for (let i = 0; i < whole.picture.length; i++) {
         if (whole.picture[i] !== bare.picture[i]) {
           differing += 1;
-          expect(covered[i]).not.toBe(FILL); // a body pixel
+          expect(covered[i]).not.toBe(FILL); // a body or Santa pixel
         }
       }
       expect(differing).toBeGreaterThan(0);
@@ -585,7 +592,7 @@ describe('sceneFrame: the shapeBodies option', () => {
     const bodies = rendered(turn, 1, FILL);
     // Laying the bodies back over the bare frame restores today's picture exactly, shadows included.
     const back = Uint32Array.from(bare.picture);
-    renderDrawList(back, W, bare.layout, shapeDrawList(turn), 1);
+    renderDrawList(back, W, bare.layout, shapeDrawList(turn, globeShapes, T), 1);
     expect(back).toEqual(whole.picture);
     expect(bodies.some((p) => p !== FILL)).toBe(true);
   });

@@ -1,11 +1,11 @@
 // XMAS-81 "Fine layer on the page: the shapes", in the built page (vite preview of dist/).
 //
-// Two canvases follow #scene in the page: the shapes at the screen's own pixel
-// size, laid exactly over the glass, and over it an art pixel layer holding what
-// Santa drew. The flakes sit on the screen's pixel grid too (XMAS-84): behind the
-// glass centre they are on the shapes layer, under the faces, and in front on a
-// layer of their own over Santa. They are read from the page the way a visitor
-// sees them: by their on-screen boxes and their pixels, with no test hook.
+// Two canvases follow #scene in the page, both at the screen's own pixel size and
+// laid exactly over the glass: the shapes, with Santa among them in depth order
+// (XMAS-83) and the flakes behind the glass centre under them all (XMAS-84), and
+// over it a layer holding only the flakes in front. They are read from the page
+// the way a visitor sees them: by their on-screen boxes and their pixels, with no
+// test hook.
 //
 // Alignment is read from the boxes: the layer's left and top land on whole
 // device pixels, its canvas pixels are device pixels one to one, and its box
@@ -19,19 +19,22 @@
 // every row of the leaning shapes is the upright row moved by a whole number of
 // art pixels, and those moves are one lean's moves (rowShift of a single lean).
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { masterColours } from '../../art/colours.ts';
 import { leanBox, rowShift } from '../../src/scene/lean.ts';
+import { santaPlacement } from '../../src/scene/santa.ts';
 import { sceneLayout } from '../../src/scene/frame.ts';
 import { DRAG_SETTINGS } from '../../src/page/drag.ts';
 import { pagePixels } from '../../src/page/pixel.ts';
 import { shapeDrawList, renderDrawList } from '../../src/scene/shape-draw-list.ts';
 import { globeShapes, type GlobeShape } from '../../src/scene/shapes.ts';
 import { shapesFarFirst } from '../../src/scene/shapes-draw.ts';
-import { masterColours } from '../../art/colours.ts';
 import { drawings } from '../../src/shared/art.generated.ts';
 
 const NOW = '2026-12-01T22:00:00';
 const SEED = 1; // src/page/scene.ts
 const STEP_MS = 16;
+/** The master colour number (1 based) only Santa's trot drawings use; no shape's drawing has it. */
+const SANTA_ONLY = 48;
 
 type Rect = { x: number; y: number; width: number; height: number };
 type Viewport = { width: number; height: number };
@@ -46,11 +49,10 @@ async function openLive(browser: Browser, viewport: Viewport, dpr: number, searc
   return { context, page };
 }
 
-/** The shapes and front canvases that follow #scene. */
+/** The shapes canvas that follows #scene. */
 const SHAPES = "canvas#scene + canvas";
+/** The flakes in front, over the shapes and Santa: a screen pixel layer that holds nothing but those flakes (XMAS-84). */
 const FRONTS = "canvas#scene + canvas + canvas";
-/** The flakes in front, over Santa's layer: a screen pixel layer that holds nothing but those flakes (XMAS-84). */
-const SNOW_FRONTS = "canvas#scene + canvas + canvas + canvas";
 
 async function layersReady(page: Page): Promise<void> {
   await expect(page.locator(SHAPES)).toHaveCount(1, { timeout: 10_000 });
@@ -102,7 +104,7 @@ async function expectLinedUp(page: Page, viewport: Viewport, dpr: number): Promi
   // (the browser's layout reports sizes and offsets in 1/64 CSS pixel steps)
   expect(Math.abs(shapes.width - want.width)).toBeLessThan(0.02);
   expect(Math.abs(shapes.height - want.height)).toBeLessThan(0.02);
-  // The front layer is the very same box.
+  // The flakes' layer is the very same box.
   for (const key of ['x', 'y', 'width', 'height'] as const) expect(fronts[key], `front ${key}`).toBeCloseTo(shapes[key], 4);
   // Whole device pixels: no half pixel left or top (which would double or shift every edge).
   for (const v of [shapes.x * dpr, shapes.y * dpr]) expect(Math.abs(v - Math.round(v)), 'whole device pixel').toBeLessThanOrEqual(0.02); // within the layout's 1/64 px steps, so paint snaps it to the same device pixel
@@ -111,10 +113,10 @@ async function expectLinedUp(page: Page, viewport: Viewport, dpr: number): Promi
   expect(Math.abs(size.width - shapes.width * dpr)).toBeLessThan(0.05);
   expect(Math.abs(size.height - shapes.height * dpr)).toBeLessThan(0.05);
   expect(size.width % want.scale).toBe(0);
-  // One art pixel per canvas pixel for the front layer.
-  const art = await sizeOf(page, FRONTS);
-  expect(art.width).toBe(size.width / want.scale);
-  expect(art.height).toBe(size.height / want.scale);
+  // The flakes' layer is at the screen's pixel size too.
+  const flakes = await sizeOf(page, FRONTS);
+  expect(flakes.width).toBe(size.width);
+  expect(flakes.height).toBe(size.height);
 }
 
 /** The shapes layer's opaque pixels as art-pixel offsets from the globe's centre, read through the layer's on-screen box. */
@@ -336,9 +338,19 @@ test.describe('the layer follows the lean while dragging', () => {
     expect(leaning).toHaveLength(box.bottom - box.top);
     expect(upright).toHaveLength(leaning.length);
     // The turn is the same at both moments (the release has settled), so only the lean differs. Find one lean that moves every row.
-    const rows = leaning.map((row, n) => ({ y: box.top + n, shifts: fits(row, upright[n] ?? '', scale) })).filter((r) => r.shifts.length > 0);
+    // Santa flies between the two captures and is painted on this canvas, sheared with the shapes: leave out the art rows he can be on
+    // (his whole orbit's reach of y, his 12 rows tall, and the bob) rather than any shape row.
+    let santaTop = Infinity;
+    let santaBottom = -Infinity;
+    for (let a = 0; a < 64; a++) {
+      const y = layout.globe.cy + santaPlacement(a * ((2 * Math.PI) / 64) - 2, 0).y;
+      santaTop = Math.min(santaTop, y);
+      santaBottom = Math.max(santaBottom, y);
+    }
+    const santaRow = (y: number): boolean => y >= santaTop - 6 - 3 && y <= santaBottom + 6 + 3;
+    const rows = leaning.map((row, n) => ({ y: box.top + n, shifts: fits(row, upright[n] ?? '', scale) })).filter((r) => r.shifts.length > 0 && !santaRow(r.y));
     expect(rows.length, 'rows with shape pixels to compare').toBeGreaterThan(30);
-    const inexact = leaning.map((row, n) => ({ n, has: (upright[n] ?? '').split(',').filter((c) => c !== '.').length >= 20 })).filter((r) => r.has && !rows.some((x) => x.y === box.top + r.n));
+    const inexact = leaning.map((row, n) => ({ n, has: (upright[n] ?? '').split(',').filter((c) => c !== '.').length >= 20 })).filter((r) => r.has && !santaRow(box.top + r.n) && !rows.some((x) => x.y === box.top + r.n));
     expect(inexact.map((r) => r.n), 'rows that are not the upright row moved by whole art pixels').toEqual([]);
     // A row's whole shift holds over a lean window 1 / (its height above the ground line) wide, so the rows near the top
     // (about 70 art px up) leave a window under 0.0005 wide: the search steps finer than that.
@@ -354,12 +366,12 @@ test.describe('the layer follows the lean while dragging', () => {
     // Settled, the layer is upright: every row is its own upright row.
     await idle(page, 4000);
     const settled = await shapeRows(page, scale);
-    expect(settled.filter((row, n) => !sameRow(row, upright[n] ?? '')).length).toBeLessThanOrEqual(2);
+    expect(settled.filter((row, n) => !sameRow(row, upright[n] ?? '') && !santaRow(box.top + n)).length).toBeLessThanOrEqual(2);
     await context.close();
   });
 });
 
-test.describe('Santa and the front snow show in front of the shapes', () => {
+test.describe('the front snow shows in front of the shapes and Santa', () => {
   test('after a flick the front layer holds opaque white snow, and only fully opaque or fully clear pixels', async ({ browser }) => {
     const viewport = { width: 800, height: 600 };
     const { scale, width, height } = pagePixels(viewport, 1);
@@ -375,7 +387,7 @@ test.describe('Santa and the front snow show in front of the shapes', () => {
     }
     await page.mouse.up();
     await idle(page, 400);
-    const counts = await page.locator(SNOW_FRONTS).evaluate((el) => {
+    const counts = await page.locator(FRONTS).evaluate((el) => {
       const c = el as HTMLCanvasElement;
       const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
       let white = 0;
@@ -390,28 +402,34 @@ test.describe('Santa and the front snow show in front of the shapes', () => {
       }
       return { white, opaque, partial };
     });
-    expect(counts.partial, 'no half-transparent pixel: art pixels are hard').toBe(0);
+    expect(counts.partial, 'no half-transparent pixel: flakes are hard blocks').toBe(0);
     expect(counts.opaque, 'something is drawn in front of the shapes').toBeGreaterThan(0);
     expect(counts.white, 'the front snow is white').toBeGreaterThan(0);
     await context.close();
   });
 
-  test('Santa is on the front layer at some moment of his flight, and the shapes layer has no Santa colours of its own', async ({ browser }) => {
+  test('Santa is on the shapes canvas at some moment of his flight, and the front canvas has none of his colours', async ({ browser }) => {
     const { context, page } = await boot(browser, { width: 800, height: 600 });
-    let max = 0;
-    for (let t = 0; t < 40; t++) {
-      await idle(page, 500);
-      const opaque = await page.locator(FRONTS).evaluate((el) => {
+    // The master colour only Santa's two trot drawings use (no shape's drawing has it), as 0xRRGGBB.
+    const santaColour = Number.parseInt(masterColours[SANTA_ONLY - 1]!.slice(1), 16);
+    const countOf = (selector: string): Promise<number> =>
+      page.locator(selector).evaluate((el, colour) => {
         const c = el as HTMLCanvasElement;
         const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+        const [r, g, b] = [(colour >> 16) & 255, (colour >> 8) & 255, colour & 255];
         let n = 0;
-        for (let i = 3; i < data.length; i += 4) if (data[i] === 255) n++;
+        for (let i = 0; i < data.length; i += 4) if (data[i] === r && data[i + 1] === g && data[i + 2] === b && data[i + 3] === 255) n++;
         return n;
-      });
-      max = Math.max(max, opaque);
-      if (max > 0) break;
+      }, santaColour);
+    let onShapes = 0;
+    let onFront = 0;
+    for (let t = 0; t < 40 && onShapes === 0; t++) {
+      await idle(page, 500);
+      onShapes = Math.max(onShapes, await countOf(SHAPES));
+      onFront = Math.max(onFront, await countOf(FRONTS));
     }
-    expect(max, 'Santa or snow drew in front of the shapes within 20 s').toBeGreaterThan(0);
+    expect(onShapes, 'Santa drew on the shapes canvas within 20 s').toBeGreaterThan(0);
+    expect(onFront, 'the front canvas holds the snow in front, not Santa').toBe(0);
     await context.close();
   });
 });

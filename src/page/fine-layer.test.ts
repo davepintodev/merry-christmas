@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { keepBackdrop, leanBox, leanGlass, rowShift } from '../scene/lean.ts';
 import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
-import { NO_FRONT } from '../scene/globe.ts';
-import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
+import { shapeDrawList } from '../scene/shape-draw-list.ts';
+import type { FaceDraw } from '../scene/shapes-draw.ts';
 import { flakeSize, type SnowStep } from '../scene/snow-draw-list.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
 
@@ -167,14 +167,11 @@ function setup(): { main: FakeCanvas; layer: ReturnType<typeof makeFineLayer> } 
   return { main, layer: makeFineLayer(main as unknown as HTMLCanvasElement) };
 }
 
-function emptyFront(): Uint32Array {
-  return new Uint32Array(W * H).fill(NO_FRONT);
-}
-
 function frame(over: Partial<FineFrame> = {}): FineFrame {
-  return { layout: LAYOUT, width: W, turn: 0.4, lean: 0, front: emptyFront(), ...over };
+  return { layout: LAYOUT, width: W, turn: 0.4, lean: 0, ...over };
 }
 
+/** The canvases the layer makes: the shapes (with the flakes behind and Santa on them) and, after it, the flakes in front. */
 function layersOf(main: FakeCanvas): { shapes: FakeCanvas; fronts: FakeCanvas } {
   const at = page.order.indexOf(main);
   const shapes = page.order[at + 1];
@@ -183,9 +180,9 @@ function layersOf(main: FakeCanvas): { shapes: FakeCanvas; fronts: FakeCanvas } 
   return { shapes, fronts };
 }
 
-/** The layer of the flakes in front (XMAS-84), over the front layer. */
+/** The layer of the flakes in front (XMAS-84), over the shapes and Santa. */
 function snowFrontOf(main: FakeCanvas): FakeCanvas {
-  const snow = page.order[page.order.indexOf(main) + 3];
+  const snow = page.order[page.order.indexOf(main) + 2];
   if (snow === undefined) throw new Error('the snow layer is not on the page');
   return snow;
 }
@@ -201,7 +198,7 @@ function px(value: number): number {
 }
 
 /** The matrix and clip the layer should use for a step, worked out from the step alone. */
-function expectedMatrix(step: DrawStep, k: number): Matrix {
+function expectedMatrix(step: FaceDraw, k: number): Matrix {
   const ox = (LAYOUT.globe.cx - BOX.left) * k;
   const oy = (LAYOUT.globe.cy - BOX.top) * k;
   const { a, b, d, drawing } = step;
@@ -221,7 +218,7 @@ function through(m: readonly number[], x: number, y: number): Point {
 }
 
 /** The device corners (top-left, top-right, bottom-left, bottom-right) the layer should cover for a step: the drawing's own footprint. */
-function expectedQuad(step: DrawStep, k: number): Point[] {
+function expectedQuad(step: FaceDraw, k: number): Point[] {
   const m = expectedMatrix(step, k);
   const { width: w, height: h } = step.drawing;
   return [through(m, 0, 0), through(m, w, 0), through(m, 0, h), through(m, w, h)];
@@ -237,13 +234,13 @@ function drawnQuad(call: Call): Point[] | undefined {
 }
 
 /** How far a face's drawn quad may stray from its footprint: about one art pixel (or one bitmap pixel, if larger) of growth or padding. */
-function slack(step: DrawStep, k: number): number {
+function slack(step: FaceDraw, k: number): number {
   const m = expectedMatrix(step, k);
   return 2 * Math.max(k, Math.hypot(m[0] ?? 0, m[1] ?? 0), Math.hypot(m[2] ?? 0, m[3] ?? 0));
 }
 
 /** Whether a drawn call is the step's face: same place, within the slack, corner for corner. */
-function isFace(call: Call, step: DrawStep, k: number): boolean {
+function isFace(call: Call, step: FaceDraw, k: number): boolean {
   const quad = drawnQuad(call);
   if (quad === undefined) return false;
   const want = expectedQuad(step, k);
@@ -252,7 +249,7 @@ function isFace(call: Call, step: DrawStep, k: number): boolean {
 }
 
 /** Finds each step's face among the calls, in draw order (extra calls between are allowed); returns the matched calls. */
-function findFaces(calls: Call[], steps: DrawStep[], k: number): Call[] {
+function findFaces(calls: Call[], steps: FaceDraw[], k: number): Call[] {
   const found: Call[] = [];
   let at = 0;
   steps.forEach((step, i) => {
@@ -272,14 +269,15 @@ describe('makeFineLayer: what it puts on the page', () => {
     expect(page.order).toHaveLength(1);
   });
 
-  it('puts the shapes canvas right after the scene canvas and the front canvas right after that', () => {
+  it('puts the shapes canvas right after the scene canvas and the flakes-in-front canvas right after that', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { shapes, fronts } = layersOf(main);
     expect(page.order.slice(0, 3)).toEqual([main, shapes, fronts]);
     expect(shapes).not.toBe(fronts);
-    // The flakes in front (XMAS-84) sit on a layer of their own, over Santa's front layer.
-    expect(page.order[3]).toBe(snowFrontOf(main));
+    // The flakes in front (XMAS-84) sit on a layer of their own, over the shapes, which hold Santa (XMAS-83) and the flakes behind.
+    expect(page.order[2]).toBe(snowFrontOf(main));
+    expect(page.order).toHaveLength(3);
   });
 
   it('makes the two layers once: a second draw adds no canvas to the page', () => {
@@ -325,7 +323,7 @@ describe('makeFineLayer: lined up with the glass', () => {
       }
     });
 
-    it(`${name}: the shapes canvas has one pixel per device pixel, the front canvas one per art pixel`, () => {
+    it(`${name}: the shapes canvas has one pixel per device pixel, the flakes-in-front canvas one per device pixel too`, () => {
       const { main, layer } = setup();
       layer.draw(frame(), site);
       const { shapes, fronts } = layersOf(main);
@@ -334,8 +332,8 @@ describe('makeFineLayer: lined up with the glass', () => {
       // A device pixel is 1 / ratio CSS pixels: the canvas's CSS size times the ratio is its pixel size.
       expect(px(shapes.style.width as unknown as number) * site.ratio).toBeCloseTo(shapes.width, 6);
       expect(px(shapes.style.height as unknown as number) * site.ratio).toBeCloseTo(shapes.height, 6);
-      expect(fronts.width).toBe(BW);
-      expect(fronts.height).toBe(BH);
+      expect(fronts.width).toBe(BW * site.scale);
+      expect(fronts.height).toBe(BH * site.scale);
     });
 
     it(`${name}: the layer's left edge lands on a whole device pixel when the picture's does`, () => {
@@ -353,12 +351,12 @@ describe('makeFineLayer: lined up with the glass', () => {
     layer.draw(frame(), SITE);
     const wide = sceneLayout(W + 40, H, 7);
     const wideBox = leanBox(W + 40, wide);
-    layer.draw({ layout: wide, width: W + 40, turn: 0.4, lean: 0, front: new Uint32Array((W + 40) * H).fill(NO_FRONT) }, { scale: 2, ratio: 2, left: 3 });
+    layer.draw({ layout: wide, width: W + 40, turn: 0.4, lean: 0 }, { scale: 2, ratio: 2, left: 3 });
     const { shapes, fronts } = layersOf(main);
     expect(shapes.width).toBe((wideBox.right - wideBox.left + 1) * 2);
-    expect(fronts.width).toBe(wideBox.right - wideBox.left + 1);
+    expect(fronts.width).toBe((wideBox.right - wideBox.left + 1) * 2);
     expect(px(shapes.style.left as unknown as number)).toBeCloseTo(3 + wideBox.left * 1, 6);
-    layer.draw({ layout: wide, width: W + 40, turn: 0.4, lean: 0, front: new Uint32Array((W + 40) * H).fill(NO_FRONT) }, { scale: 2, ratio: 1, left: 3 });
+    layer.draw({ layout: wide, width: W + 40, turn: 0.4, lean: 0 }, { scale: 2, ratio: 1, left: 3 });
     expect(px(shapes.style.left as unknown as number)).toBeCloseTo(3 + wideBox.left * 2, 6);
     expect(px(shapes.style.width as unknown as number)).toBeCloseTo((wideBox.right - wideBox.left + 1) * 2, 6);
   });
@@ -614,107 +612,122 @@ describe('makeFineLayer: the lean shifts rows by whole art pixels, as leanGlass 
     expect(ctx.clears.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('agrees with leanGlass on where each row goes, for the layer\'s front pixels', () => {
+  it('agrees with leanGlass on where each row goes, for the flakes in front', () => {
+    // Sparse rows, so the flakes' blocks (a few screen pixels tall) of one row never touch another row's.
+    const STEP = 8;
+    const k = SITE.scale;
+    const size = flakeSize(k);
     for (const lean of [0.08, 0.31, -0.22, 0.5, -0.5]) {
       const { main, layer } = setup();
       const { cx, cy, radius } = LAYOUT.globe;
-      // leanGlass on a picture with a marker at the globe's centre column on every row of the glass.
+      // leanGlass on a picture with a marker at the globe's centre column on every row of the glass; a flake in front on the same rows.
       const picture = new Uint32Array(W * H);
       keepBackdrop(picture, W, LAYOUT);
-      const front = emptyFront();
+      const flakes: SnowStep[] = [];
       const rows: number[] = [];
-      for (let y = Math.ceil(cy - radius + 2); y < cy + radius - 2; y++) {
+      for (let y = Math.ceil(cy - radius + 2); y < cy + radius - 2; y += STEP) {
         picture[y * W + cx] = 0x100000 + y;
-        front[y * W + cx] = 0x100000 + y;
+        flakes.push({ x: 0, y: y - cy, colour: 0xffffff, shape: [[0, 0]], depth: 20 });
         rows.push(y);
       }
       leanGlass(picture, W, LAYOUT, lean);
-      layer.draw(frame({ lean, front }), SITE);
+      layer.draw(frame({ lean, snowFront: flakes }), SITE);
       const image = ctxOf(layersOf(main).fronts).puts.at(-1);
       expect(image).toBeDefined();
       let checked = 0;
       for (const y of rows) {
         const want = picture.indexOf(0x100000 + y, y * W) - y * W; // where leanGlass put the marker on its row
-        const seen = Array.from({ length: BW }, (_, i) => i).filter((i) => (image?.data[((y - BOX.top) * BW + i) * 4 + 3] ?? 0) !== 0);
-        expect(seen, `row ${y} at lean ${lean}`).toEqual([want - BOX.left]);
+        const row = (y - BOX.top) * k;
+        const seen = Array.from({ length: BW * k }, (_, i) => i).filter((i) => (image?.data[(row * BW * k + i) * 4 + 3] ?? 0) !== 0);
+        expect(seen, `row ${y} at lean ${lean}`).toEqual(Array.from({ length: size }, (_, i) => (want - BOX.left) * k + i));
         checked++;
       }
-      expect(checked).toBeGreaterThan(80);
+      expect(checked).toBeGreaterThan(10);
     }
   });
 });
 
-describe('makeFineLayer: Santa and the snow in front', () => {
-  const rgba = (image: Put | undefined, x: number, y: number): number[] => Array.from(image?.data.slice(((y - BOX.top) * BW + (x - BOX.left)) * 4, ((y - BOX.top) * BW + (x - BOX.left)) * 4 + 4) ?? []);
+// XMAS-83 and XMAS-84: there is no art pixel front picture any more. Santa is a step among the faces on the shapes canvas,
+// and the flakes in front are steps on the screen's grid on a canvas of their own over it; these are the front canvas's
+// old checks (clear where nothing drew, a pixel at its place and colour, the lean's row shifts, nothing kept, the size)
+// put to the flakes in front.
+describe('makeFineLayer: the flakes in front', () => {
+  const k = SITE.scale;
+  const size = flakeSize(k);
+  const cx = LAYOUT.globe.cx - BOX.left;
+  const cy = LAYOUT.globe.cy - BOX.top;
+  const step = (x: number, y: number, colour: number): SnowStep => ({ x, y, colour, shape: [[0, 0]], depth: 20 });
+  /** The RGBA of device pixel (x, y) of an image of the box at the screen's size. */
+  const rgba = (image: Put | undefined, x: number, y: number): number[] => Array.from(image?.data.slice((y * BW * k + x) * 4, (y * BW * k + x) * 4 + 4) ?? []);
+  const opaqueCount = (image: Put | undefined): number => {
+    let n = 0;
+    for (let i = 3; i < (image?.data.length ?? 0); i += 4) if (image?.data[i] === 255) n++;
+    return n;
+  };
 
-  it('is clear where the front layer drew nothing', () => {
+  it('is clear where no flake drew: the canvas is the box at the screen\'s size, cleared, with nothing put on it', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
-    const image = ctxOf(layersOf(main).fronts).puts.at(-1);
-    expect(image?.width).toBe(BW);
-    expect(image?.height).toBe(BH);
-    expect(image?.data.every((v) => v === 0)).toBe(true);
+    const ctx = ctxOf(layersOf(main).fronts);
+    expect(layersOf(main).fronts.width).toBe(BW * k);
+    expect(layersOf(main).fronts.height).toBe(BH * k);
+    expect(ctx.clears.at(-1)).toEqual([0, 0, BW * k, BH * k]);
+    expect(ctx.puts.every((put) => put.data.every((v) => v === 0))).toBe(true);
   });
 
-  it('puts a front pixel opaque, with its own red, green and blue, at its place in the box', () => {
+  it('puts a flake opaque, with its own red, green and blue, at its place in the box', () => {
     const { main, layer } = setup();
-    const front = emptyFront();
-    const { cx, cy } = LAYOUT.globe;
-    front[cy * W + cx] = 0x112233;
-    front[(cy + 3) * W + cx - 5] = 0xfdfcfb;
-    front[(cy - 9) * W + cx + 4] = 0x000000; // black is a colour, not "nothing"
-    layer.draw(frame({ front }), SITE);
+    layer.draw(frame({ snowFront: [step(0, 0, 0x112233), step(-5, 3, 0xfdfcfb), step(4, -9, 0x000000) /* black is a colour, not "nothing" */] }), SITE);
     const image = ctxOf(layersOf(main).fronts).puts.at(-1);
-    expect(rgba(image, cx, cy)).toEqual([0x11, 0x22, 0x33, 255]);
-    expect(rgba(image, cx - 5, cy + 3)).toEqual([0xfd, 0xfc, 0xfb, 255]);
-    expect(rgba(image, cx + 4, cy - 9)).toEqual([0, 0, 0, 255]);
-    let opaque = 0;
-    for (let i = 3; i < (image?.data.length ?? 0); i += 4) if (image?.data[i] === 255) opaque++;
-    expect(opaque).toBe(3);
+    expect(rgba(image, k * cx, k * cy)).toEqual([0x11, 0x22, 0x33, 255]);
+    expect(rgba(image, k * (cx - 5), k * (cy + 3))).toEqual([0xfd, 0xfc, 0xfb, 255]);
+    expect(rgba(image, k * (cx + 4), k * (cy - 9))).toEqual([0, 0, 0, 255]);
+    expect(opaqueCount(image)).toBe(3 * size * size);
   });
 
-  it('shifts a front pixel by its row\'s lean and no other pixel moves', () => {
+  it('shifts a flake by its row\'s lean and no other pixel moves', () => {
     const { main, layer } = setup();
     const lean = 0.3;
-    const front = emptyFront();
-    const { cx } = LAYOUT.globe;
-    const ys = [BOX.top, BOX.top + 20, BOX.top + 60, BOX.bottom - 1];
-    ys.forEach((y, i) => (front[y * W + cx] = 0x010203 + i));
-    layer.draw(frame({ front, lean }), SITE);
+    const rows = [0, 20, 60, BH - 2]; // a flake is a few screen pixels tall: the last row would be cut by the canvas edge
+    const flakes = rows.map((row, i) => step(0, row - cy, 0x010203 + i));
+    layer.draw(frame({ snowFront: flakes, lean }), SITE);
     const image = ctxOf(layersOf(main).fronts).puts.at(-1);
-    ys.forEach((y, i) => {
-      const shift = Math.round(lean * (BOX.bottom - y - 0.5));
-      expect(rgba(image, cx + shift, y)).toEqual([0x01, 0x02, 0x03 + i, 255]);
-      if (shift !== 0) expect(rgba(image, cx, y)[3]).toBe(0);
+    rows.forEach((row, i) => {
+      const shift = rowShift(lean, BOX.bottom, BOX.top + row);
+      expect(rgba(image, k * (cx + shift), k * row)).toEqual([0x01, 0x02, 0x03 + i, 255]);
+      if (shift !== 0) expect(rgba(image, k * cx, k * row)[3]).toBe(0);
     });
+    expect(opaqueCount(image)).toBe(rows.length * size * size);
   });
 
-  it('drops a front pixel the lean pushes out of the box instead of wrapping it onto the next row', () => {
+  it('drops a flake the lean pushes out of the box instead of wrapping it onto the next row', () => {
     const { main, layer } = setup();
-    const front = emptyFront();
-    front[BOX.top * W + BOX.right] = 0xabcdef;
-    front[(BOX.top + 1) * W + BOX.left] = 0xfedcba;
-    layer.draw(frame({ front, lean: 0.5 }), SITE);
+    // The right edge flake on the top row would move right out of the box; the left one ten rows down moves right, in.
+    layer.draw(frame({ snowFront: [step(BW - 1 - cx, -cy, 0xabcdef), step(-cx, 10 - cy, 0xfedcba)], lean: 0.5 }), SITE);
     const image = ctxOf(layersOf(main).fronts).puts.at(-1);
-    // The right edge pixel on the top row would move right out of the box; the left one on the next row moves right, in.
     const seenRows = new Set<number>();
-    for (let i = 0; i < (image?.data.length ?? 0); i += 4) if (image?.data[i + 3] === 255) seenRows.add(Math.floor(i / 4 / BW));
-    expect(seenRows.has(0)).toBe(false);
-    expect(seenRows.has(1)).toBe(true);
-    expect([...seenRows]).toEqual([1]);
+    const width = BW * k;
+    for (let i = 0; i < (image?.data.length ?? 0); i += 4) if (image?.data[i + 3] === 255) seenRows.add(Math.floor(i / 4 / width));
+    expect(seenRows.size).toBeGreaterThan(0);
+    for (const row of seenRows) {
+      expect(row, 'only the second flake\'s rows are lit').toBeGreaterThanOrEqual(10 * k);
+      expect(row).toBeLessThan(10 * k + size);
+    }
   });
 
-  it('does not keep the last frame\'s front pixels: a pixel gone from the front layer is gone from the canvas', () => {
+  it('does not keep the last frame\'s flakes: a flake gone from the frame is cleared from the canvas and nothing is put back', () => {
     const { main, layer } = setup();
-    const front = emptyFront();
-    front[LAYOUT.globe.cy * W + LAYOUT.globe.cx] = 0x445566;
-    layer.draw(frame({ front }), SITE);
-    layer.draw(frame({ front: emptyFront() }), SITE);
-    const image = ctxOf(layersOf(main).fronts).puts.at(-1);
-    expect(image?.data.every((v) => v === 0)).toBe(true);
+    layer.draw(frame({ snowFront: [step(0, 0, 0x445566)] }), SITE);
+    const ctx = ctxOf(layersOf(main).fronts);
+    const puts = ctx.puts.length;
+    const clears = ctx.clears.length;
+    layer.draw(frame(), SITE);
+    expect(ctx.clears.length).toBe(clears + 1);
+    expect(ctx.clears.at(-1)).toEqual([0, 0, BW * k, BH * k]);
+    expect(ctx.puts.length).toBe(puts);
   });
 
-  it('puts the whole front canvas in front of the shapes: the shapes layer comes first in the page', () => {
+  it('puts the flakes canvas in front of the shapes: the shapes layer comes first in the page', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { shapes, fronts } = layersOf(main);
@@ -722,21 +735,21 @@ describe('makeFineLayer: Santa and the snow in front', () => {
     expect(page.order.indexOf(main)).toBeLessThan(page.order.indexOf(shapes));
   });
 
-  it('survives a front array shorter than the picture: the missing pixels are clear', () => {
+  it('survives a frame with no flake lists at all: nothing is lit on either canvas', () => {
     const { main, layer } = setup();
-    expect(() => layer.draw(frame({ front: new Uint32Array(10).fill(NO_FRONT) }), SITE)).not.toThrow();
-    expect(ctxOf(layersOf(main).fronts).puts.at(-1)?.data.every((v) => v === 0)).toBe(true);
+    expect(() => layer.draw(frame({ snowFront: undefined, snowBehind: undefined }), SITE)).not.toThrow();
+    expect(ctxOf(layersOf(main).fronts).puts.every((put) => put.data.every((v) => v === 0))).toBe(true);
   });
 
-  it('draws the front after a different-sized frame without keeping the old image size', () => {
+  it('draws the flakes after a different-sized frame without keeping the old image size', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const wide = sceneLayout(W + 60, H, 7);
     const wideBox = leanBox(W + 60, wide);
-    layer.draw({ layout: wide, width: W + 60, turn: 0.4, lean: 0, front: new Uint32Array((W + 60) * H).fill(NO_FRONT) }, SITE);
+    layer.draw({ layout: wide, width: W + 60, turn: 0.4, lean: 0, snowFront: [step(0, 0, 0x445566)] }, SITE);
     const image = ctxOf(layersOf(main).fronts).puts.at(-1);
-    expect(image?.width).toBe(wideBox.right - wideBox.left + 1);
-    expect(image?.height).toBe(wideBox.bottom - wideBox.top);
+    expect(image?.width).toBe((wideBox.right - wideBox.left + 1) * k);
+    expect(image?.height).toBe((wideBox.bottom - wideBox.top) * k);
   });
 });
 
@@ -801,7 +814,7 @@ describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () =
   });
 });
 
-describe('makeFineLayer: the behind layers go under the faces (XMAS-84), in one ordered record', () => {
+describe('makeFineLayer: the flakes behind go under the faces (XMAS-84), in one ordered record', () => {
   const k = SITE.scale;
   const WHITE_BEHIND = 0xaebcf0;
   const cx = LAYOUT.globe.cx - BOX.left;
@@ -816,11 +829,6 @@ describe('makeFineLayer: the behind layers go under the faces (XMAS-84), in one 
   /** Where the log has the first lit put on `canvas`, and the first face drawn on it (-1 for none). */
   const firstLitPut = (canvas: FakeCanvas): number => page.log.findIndex((o) => o.canvas === canvas && o.op === 'put' && lit(o.put) > 0);
   const firstDraw = (canvas: FakeCanvas): number => page.log.findIndex((o) => o.canvas === canvas && o.op === 'draw');
-  const santaBehind = (): Uint32Array => {
-    const behind = emptyFront();
-    behind[LAYOUT.globe.cy * W + LAYOUT.globe.cx] = 0x112233;
-    return behind;
-  };
 
   it('puts the behind flakes on the shapes before the first face is drawn', () => {
     const { main, layer } = setup();
@@ -831,27 +839,25 @@ describe('makeFineLayer: the behind layers go under the faces (XMAS-84), in one 
     expect(firstLitPut(shapes)).toBeLessThan(firstDraw(shapes));
   });
 
-  it('puts Santa behind the glass centre on the shapes before the first face, at his own pixel, k by k', () => {
-    const { main, layer } = setup();
-    layer.draw(frame({ behind: santaBehind() }), SITE);
-    const { shapes } = layersOf(main);
-    expect(firstLitPut(shapes)).toBeGreaterThanOrEqual(0);
-    expect(firstLitPut(shapes)).toBeLessThan(firstDraw(shapes));
-    const put = (page.log[firstLitPut(shapes)] as { put: Put }).put;
-    expect(lit(put)).toBe(k * k);
-    expect(litAt(put, cx * k, cy * k)).toBe(true);
-  });
-
-  it('puts nothing lit under the faces when no snow or Santa is behind', () => {
+  it('puts nothing lit under the faces when no snow is behind', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     expect(firstLitPut(layersOf(main).shapes)).toBe(-1);
   });
 
-  it('under a lean puts the behind flakes and Santa on the unleaned copy before its faces, and none straight on the shapes', () => {
+  it('puts a flake behind the glass centre at its own pixel, a flake-sized block', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ snowBehind: [flake(0, 0)] }), SITE);
+    const { shapes } = layersOf(main);
+    const put = (page.log[firstLitPut(shapes)] as { put: Put }).put;
+    expect(lit(put)).toBe(flakeSize(k) ** 2);
+    expect(litAt(put, cx * k, cy * k)).toBe(true);
+  });
+
+  it('under a lean puts the behind flakes on the unleaned copy before its faces, and none straight on the shapes', () => {
     const lean = 0.3;
     const { main, layer } = setup();
-    layer.draw(frame({ lean, snowBehind: [flake(10, -5)], behind: santaBehind() }), SITE);
+    layer.draw(frame({ lean, snowBehind: [flake(10, -5)] }), SITE);
     const { shapes } = layersOf(main);
     const flat = ctxOf(shapes).calls[0]?.source as unknown as FakeCanvas;
     expect(flat).not.toBe(shapes);
@@ -861,17 +867,15 @@ describe('makeFineLayer: the behind layers go under the faces (XMAS-84), in one 
     expect(firstLitPut(shapes)).toBe(-1);
     const lastFlatOp = page.log.map((o) => o.canvas).lastIndexOf(flat);
     expect(firstDraw(shapes)).toBeGreaterThan(lastFlatOp);
-    // The flake's row and Santa's row are each copied by their own whole art pixel shift.
+    // The flake's row is copied by its own whole art pixel shift.
     const put = (page.log[firstLitPut(flat)] as { put: Put }).put;
     expect(litAt(put, (cx + 10) * k, (cy - 5) * k)).toBe(true);
-    expect(litAt(put, cx * k, cy * k)).toBe(true);
-    for (const row of [Math.floor(LAYOUT.globe.cy - 5), LAYOUT.globe.cy]) {
-      const copy = ctxOf(shapes).calls[row - BOX.top];
-      const shift = rowShift(lean, BOX.bottom, row);
-      expect(shift).not.toBe(0);
-      expect(copy?.source).toBe(flat as unknown as HTMLCanvasElement);
-      expect(copy?.args[4]).toBe(shift * k);
-    }
+    const row = Math.floor(LAYOUT.globe.cy - 5);
+    const copy = ctxOf(shapes).calls[row - BOX.top];
+    const shift = rowShift(lean, BOX.bottom, row);
+    expect(shift).not.toBe(0);
+    expect(copy?.source).toBe(flat as unknown as HTMLCanvasElement);
+    expect(copy?.args[4]).toBe(shift * k);
   });
 });
 

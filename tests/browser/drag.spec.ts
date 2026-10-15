@@ -26,8 +26,8 @@ import { leanBox } from '../../src/scene/lean.ts';
 const NOW = '2026-12-01T22:00:00';
 const VIEWPORT = { width: 800, height: 600 };
 const STEP_MS = 16; // Playwright's fake requestAnimationFrame interval
-/** The flakes in front, over Santa's layer: an art pixel layer that holds nothing but those flakes (XMAS-84). */
-const SNOW_FRONTS = "canvas#scene + canvas + canvas + canvas";
+/** The flakes in front, over the shapes and Santa: a screen pixel layer that holds nothing but those flakes (XMAS-84, XMAS-83). */
+const SNOW_FRONTS = "canvas#scene + canvas + canvas";
 
 type Geometry = { art: (x: number, y: number) => { x: number; y: number }; cx: number; cy: number; radius: number; baseTop: number; baseBottom: number; scale: number; boxLeft: number; boxTop: number };
 type Point = { x: number; y: number };

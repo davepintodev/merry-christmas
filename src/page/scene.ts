@@ -168,6 +168,8 @@ const scene: LoopScene = {
       snowDrawList(globeSnow, snowBefore, fraction, 'behind', time, snowBehind);
       snowDrawList(globeSnow, snowBefore, fraction, 'front', time, snowFront);
     }
+    // The frame leaves the shapes' bodies, Santa and the flakes to the fine layer while it drew them last time; one that cannot draw them gets them in the picture.
+    const onFine = fineDrew;
     const frame = frames(
       {
         time,
@@ -181,17 +183,17 @@ const scene: LoopScene = {
         snow: globeSnow ?? undefined,
         snowSteps: { behind: snowBehind, front: snowFront },
         outsideSnow: snow.outsideSnow ?? undefined,
-        shapeBodies: !fineDrew,
+        shapeBodies: !onFine,
       },
       buffers.picture,
     );
-    // The shapes go over the scene canvas, then the flakes behind and Santa over them, then Santa and the flakes in front.
+    // The shapes go over the scene canvas, then the flakes behind under them, Santa among them by depth, and the flakes in front over all.
     // The fine layer is timed only for the readout, which is the only thing that reads the time.
     const timed = readout !== undefined;
     const begin = timed ? performance.now() : 0;
-    if (fine !== null && frame.front !== undefined) {
+    if (fine !== null && onFine) {
       fineDrew = fine.draw(
-        { layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, front: frame.front, behind: frame.behind, snowBehind, snowFront },
+        { layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, santaTimeMs: time, snowBehind, snowFront },
         { scale, ratio: dpr, left },
       );
     }

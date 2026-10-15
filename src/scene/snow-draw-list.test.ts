@@ -306,16 +306,13 @@ describe('renderSnowSteps: the screen pixel grid', () => {
 describe('the page wiring: the old art pixel snow layer goes away', () => {
   const SNOW = snowOf([flake(10.25, -20.75, 20), flake(5.25, -8.75, 52)]);
 
-  it('drawGlobe puts no snow into the front picture (only Santa may be there)', () => {
+  it('drawGlobe takes no front picture any more (Santa is a draw step, the flakes steps): with the bodies left out, snow or not, the picture is the same', () => {
     const withSnow = new Uint32Array(W * H);
     const noSnow = new Uint32Array(W * H);
-    const frontA = new Uint32Array(W * H);
-    const frontB = new Uint32Array(W * H);
     const phase = { from: 'purple-night', to: 'purple-night', share: 0 } as const;
-    drawGlobe(withSnow, W, LAYOUT, phase, 0.4, 5000, SNOW, 0, 'all', frontA);
-    drawGlobe(noSnow, W, LAYOUT, phase, 0.4, 5000, undefined, 0, 'all', frontB);
-    expect(frontA).toEqual(frontB);
-    expect(frontA.length).toBe(frontB.length);
+    drawGlobe(withSnow, W, LAYOUT, phase, 0.4, 5000, SNOW, 0, 'shadows');
+    drawGlobe(noSnow, W, LAYOUT, phase, 0.4, 5000, undefined, 0, 'shadows');
+    expect(withSnow).toEqual(noSnow);
     expect(NO_FRONT).toBe(0xffffffff);
   });
 

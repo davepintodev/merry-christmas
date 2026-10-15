@@ -83,7 +83,7 @@ export interface SceneInput {
   snowSteps?: SnowFlakes;
   /** The outside snow (XMAS-36b2); absent draws none. */
   outsideSnow?: OutsideSnow;
-  /** Whether the shapes' bodies are drawn (XMAS-80); absent or true draws them, false leaves them out and keeps their shadows, and the frame then carries the layers Santa is drawn on alone (SceneFrame.behind and front). */
+  /** Whether the shapes' bodies, and Santa with them, are drawn (XMAS-80, XMAS-83); absent or true draws them, false leaves them out and keeps their shadows: the page's fine layer draws the bodies, Santa and the snow on the screen's pixel grid. */
   shapeBodies?: boolean;
 }
 
@@ -93,10 +93,6 @@ export interface SceneFrame {
   /** width * height colour numbers, 0xRRGGBB, row by row from the top left. */
   picture: Uint32Array;
   layout: SceneLayout;
-  /** With shapeBodies false (XMAS-81): what Santa drew in front of the glass centre, before the lean, NO_FRONT where nothing did; kept until the next frame. */
-  front?: Uint32Array;
-  /** With shapeBodies false (XMAS-84): what Santa drew behind the glass centre, before the lean, NO_FRONT where nothing did; kept until the next frame. */
-  behind?: Uint32Array;
 }
 
 /**
@@ -436,8 +432,8 @@ function twinkles(index: number, time: number): boolean {
   return Math.floor(time / 1000 + index * 0.37) % 2 === 0;
 }
 
-/** Writes every pixel: sky bands, ground, the disc, then the lit stars. `figures`, when given, takes Santa's behind and front layers. */
-function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput, figures?: { behind: Uint32Array; front: Uint32Array }): void {
+/** Writes every pixel: sky bands, ground, the disc, then the lit stars. */
+function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): void {
   const { width, height, groundTop, countdown } = layout;
   const share = shareOf(input.phase);
   const { from, to } = input.phase;
@@ -473,14 +469,10 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput, fig
   paintStars(picture, layout, input, share, sky);
   // The globe sits on the ground's first row, on its base.
   const parts: ShapeParts = input.shapeBodies === false ? 'shadows' : 'all';
-  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts, figures?.front, figures?.behind, parts === 'all' ? input.snowSteps : undefined);
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts, parts === 'all' ? input.snowSteps : undefined);
   paintDisc(picture, layout, input.phase, share);
   paintHint(picture, layout, BASE_HEIGHT);
 }
-
-/** The front and behind layers kept for the page's fine layer (XMAS-81, XMAS-84), reused while the picture size holds. */
-let frontKept = new Uint32Array(0);
-let behindKept = new Uint32Array(0);
 
 export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: SceneLayout): SceneFrame {
   if (!Number.isFinite(input.time)) {
@@ -500,13 +492,6 @@ export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: Sce
     throw new RangeError(`target must hold ${size} colour numbers, got ${target.length}`);
   }
   const picture = target ?? new Uint32Array(size);
-  // The layers are kept between frames, like the layout: a frame asks for them only when the page draws the shapes itself.
-  if (input.shapeBodies === false) {
-    if (frontKept.length !== size) frontKept = new Uint32Array(size);
-    if (behindKept.length !== size) behindKept = new Uint32Array(size);
-    paint(picture, used, input, { behind: behindKept, front: frontKept });
-    return { width: used.width, height: used.height, picture, layout: used, front: frontKept, behind: behindKept };
-  }
   paint(picture, used, input);
   return { width: used.width, height: used.height, picture, layout: used };
 }
