@@ -88,9 +88,11 @@ function resize(target: HTMLCanvasElement, ratioNow: number): { scale: number; w
   if (target.style.width !== cssWidth) target.style.width = cssWidth;
   if (target.style.height !== cssHeight) target.style.height = cssHeight;
   // Left edge on a whole device pixel, so every art pixel stays a whole number of device pixels (crisp at fractional ratios).
-  const left = `${Math.round(((window.innerWidth - (width * scale) / ratioNow) / 2) * ratioNow) / ratioNow}px`;
-  if (target.style.transform !== 'none') target.style.transform = 'none';
-  if (target.style.left !== left) target.style.left = left;
+  // The layout keeps `left: 50%` so the box does not jump when the scene arrives; the rounding goes into the translate.
+  // That assumes no scrollbar, so `left: 50%` is innerWidth / 2 (index.html sets overflow hidden).
+  const left = Math.round(((window.innerWidth - (width * scale) / ratioNow) / 2) * ratioNow) / ratioNow;
+  const transform = `translateX(${left - window.innerWidth / 2}px)`;
+  if (target.style.transform !== transform) target.style.transform = transform;
   return { scale, width, height };
 }
 

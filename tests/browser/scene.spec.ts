@@ -387,6 +387,25 @@ test.describe('one art pixel size, whole physical pixels, hard edges', () => {
     });
   }
 
+  for (const [dpr, viewport] of [
+    [1, { width: 1365, height: 768 }],
+    [1.5, { width: 375, height: 667 }],
+    [2, { width: 1365, height: 768 }],
+    [3, { width: 375, height: 667 }],
+  ] as const) {
+    test(`at ${dpr}, ${viewport.width} wide: the scene canvas starts on a whole device pixel`, async ({ browser }) => {
+      const { context, page } = await sized(browser, viewport, dpr);
+      await open(page);
+      await globeReady(page);
+      // Its left edge, in device pixels, is a whole number, so every art pixel is a whole number of device pixels.
+      // The offset is a 32-bit transform, so it lands within about 1e-5 device pixels; a 1/64 px miss would show as 0.0156.
+      const box = await rect(page, 'canvas#scene');
+      const device = box.x * dpr;
+      expect(Math.abs(device - Math.round(device))).toBeLessThanOrEqual(1e-4);
+      await context.close();
+    });
+  }
+
   test('hard edges on screen: colours change only on art pixel boundaries', async ({ browser }) => {
     const viewport = { width: 800, height: 600 };
     const dpr = 2;
