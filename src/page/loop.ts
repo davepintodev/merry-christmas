@@ -35,8 +35,9 @@ export interface LoopScene {
    * Draws the scene as it stands, `fraction` (0 to 1) of the way from its last
    * step to the next one, for the same frame time the steps were counted for.
    * Left out, it draws the last step as it stood (fraction 1).
+   * Returns the milliseconds the fine layer took inside the draw, when the scene times them.
    */
-  draw(fraction?: number): void;
+  draw(fraction?: number): number | void;
 }
 
 export interface SceneLoop {
@@ -74,9 +75,9 @@ export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopOb
       scene.draw(fraction);
     } else {
       const begin = clock();
-      scene.draw(fraction);
+      const layerMs = scene.draw(fraction);
       const workMs = clock() - begin;
-      observeSafely(observer, (watch) => watch.frame(time, workMs));
+      observeSafely(observer, (watch) => watch.frame(time, workMs, typeof layerMs === 'number' ? layerMs : 0));
     }
     if (!marked) {
       marked = true;

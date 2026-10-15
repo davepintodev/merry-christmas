@@ -19,6 +19,9 @@ function markTime(name: string): number | null {
 /** Shows the readout; `version` is the scene's getter, since this file cannot share the scene's version.ts. */
 export function startReadout({ version }: { version: () => VersionName }): LoopObserver {
   const stats = createPerfStats({ version });
+  // The fine layer's share of the same frames: its workMs is the layer's average. Its own stats, fed the same
+  // frames and restarts, so its window is the scene draw's window.
+  const layer = createPerfStats({ version });
   let globeKnown = false;
 
   /** Feeds the two launch marks to the stats as soon as they exist. */
@@ -28,30 +31,39 @@ export function startReadout({ version }: { version: () => VersionName }): LoopO
     const ready = markTime('globe-ready');
     if (ready !== null) {
       stats.setGlobeReady(ready);
+      layer.setGlobeReady(ready);
       globeKnown = true;
     }
   }
 
-  const readout = mountReadout(() => stats.restartWindow(performance.now()));
+  const readout = mountReadout(() => {
+    const now = performance.now();
+    stats.restartWindow(now);
+    layer.restartWindow(now);
+  });
 
   function refresh(): void {
     readMarks();
-    readout.show(stats.snapshot(performance.now()));
+    const now = performance.now();
+    readout.show(stats.snapshot(now), layer.snapshot(now).workMs);
   }
 
   refresh();
   setInterval(refresh, REFRESH_MS);
 
   return {
-    frame(time, workMs) {
+    frame(time, workMs, layerMs = 0) {
       if (!globeKnown) readMarks(); // the globe mark can land after this file has loaded
       stats.frame(time, workMs);
+      layer.frame(time, layerMs);
     },
     pause() {
       stats.pause();
+      layer.pause();
     },
     resume() {
       stats.resume();
+      layer.resume();
     },
   };
 }

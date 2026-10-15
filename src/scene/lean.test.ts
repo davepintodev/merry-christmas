@@ -5,6 +5,7 @@
 // moves, only what turns is blended on it).
 import { describe, expect, it } from 'vitest';
 import { sceneFrame, sceneLayout, GLOBE_RADIUS, type SceneFrame, type SceneInput } from './frame.ts';
+import { keepBackdrop, leanBox, leanGlass, rowShift, MAX_LEAN } from './lean.ts';
 import { createGlobeSnow, stepGlobeSnow } from './snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 
@@ -214,5 +215,70 @@ describe('lean with the other inputs', () => {
   it('draws a leaned frame at the shortest picture without throwing, hint or not', () => {
     const f = sceneFrame(input({ width: 112, height: 160, lean: 0.5 }));
     expect(f.picture.length).toBe(112 * 160);
+  });
+});
+
+describe('rowShift and leanBox (XMAS-81: the fine layer shifts its rows as the glass does)', () => {
+  const layout = sceneLayout(W, H, SEED);
+
+  it('is the lean times the row\'s height above the ground line (its middle), rounded to a whole pixel', () => {
+    const bottom = layout.groundTop;
+    expect(rowShift(0, bottom, 10)).toBe(0);
+    expect(rowShift(0.2, bottom, bottom - 1)).toBe(Math.round(0.2 * 0.5));
+    expect(rowShift(0.2, bottom, bottom - 51)).toBe(10);
+    expect(rowShift(-0.2, bottom, bottom - 51)).toBe(-10);
+    expect(Math.abs(rowShift(0.5, bottom, bottom - 1))).toBeLessThanOrEqual(1);
+  });
+
+  it('grows with height and takes the lean\'s sign', () => {
+    const bottom = layout.groundTop;
+    for (const lean of [0.13, 0.5, -0.31]) {
+      let last = 0;
+      for (let y = bottom - 1; y >= layout.globe.cy - GLOBE_RADIUS; y--) {
+        const shift = rowShift(lean, bottom, y);
+        expect(Math.abs(shift)).toBeGreaterThanOrEqual(Math.abs(last));
+        if (shift !== 0) expect(Math.sign(shift)).toBe(Math.sign(lean));
+        last = shift;
+      }
+    }
+  });
+
+  it('moves every row of the glass exactly as leanGlass does', () => {
+    for (const lean of [0.07, 0.26, -0.18, MAX_LEAN, -MAX_LEAN]) {
+      const picture = new Uint32Array(W * H);
+      keepBackdrop(picture, W, layout);
+      const { cx, cy } = layout.globe;
+      const box = leanBox(W, layout);
+      const rows: number[] = [];
+      for (let y = cy - GLOBE_RADIUS + 3; y < cy + GLOBE_RADIUS - 3 && y < box.bottom; y++) {
+        picture[y * W + cx] = 0x200000 + y;
+        rows.push(y);
+      }
+      leanGlass(picture, W, layout, lean);
+      for (const y of rows) {
+        expect(picture[y * W + cx + rowShift(lean, box.bottom, y)], `row ${y} at lean ${lean}`).toBe(0x200000 + y);
+      }
+    }
+  });
+
+  it('boxes every pixel a lean within the limit can reach, inside the picture', () => {
+    for (const width of [112, 240, 400]) {
+      const l = sceneLayout(width, 200, SEED);
+      const box = leanBox(width, l);
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(width - 1);
+      expect(box.top).toBeGreaterThanOrEqual(0);
+      expect(box.bottom).toBe(l.groundTop);
+      for (const lean of [MAX_LEAN, -MAX_LEAN]) {
+        for (let y = box.top; y < box.bottom; y++) {
+          const shift = rowShift(lean, box.bottom, y);
+          // The glass's own edge, moved by the lean, stays inside the box (or the picture's edge when the box is clipped by it).
+          const edge = shift > 0 ? Math.ceil(l.globe.cx + l.globe.radius) + shift : Math.floor(l.globe.cx - l.globe.radius) + shift;
+          const kept = Math.min(width - 1, Math.max(0, edge));
+          expect(kept).toBeGreaterThanOrEqual(box.left);
+          expect(kept).toBeLessThanOrEqual(box.right);
+        }
+      }
+    }
   });
 });

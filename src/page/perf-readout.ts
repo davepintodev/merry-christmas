@@ -5,7 +5,7 @@
 import type { PerfSnapshot } from './perf-stats.ts';
 
 /** What the readout shows; each value is a span with data-perf set to its key. */
-type Key = 'countdown-visible' | 'globe-ready' | 'fps-now' | 'fps-window' | 'worst-frame' | 'work' | 'version' | 'window';
+type Key = 'countdown-visible' | 'globe-ready' | 'fps-now' | 'fps-window' | 'worst-frame' | 'work' | 'fine-layer' | 'version' | 'window';
 
 const ROWS: readonly [Key, string][] = [
   ['countdown-visible', 'countdown shown'],
@@ -14,6 +14,7 @@ const ROWS: readonly [Key, string][] = [
   ['fps-window', 'fps, window'],
   ['worst-frame', 'worst frame'],
   ['work', 'scene draw'],
+  ['fine-layer', 'fine layer'],
   ['version', 'version'],
   ['window', 'window'],
 ];
@@ -50,8 +51,8 @@ const CSS = `
 `;
 
 export interface Readout {
-  /** Puts one snapshot on screen and keeps the readout just below the countdown. */
-  show(snapshot: PerfSnapshot): void;
+  /** Puts one snapshot on screen, with the fine layer's average milliseconds, and keeps the readout just below the countdown. */
+  show(snapshot: PerfSnapshot, fineMs: number | null): void;
 }
 
 /** A number with its unit, or the dash while nothing is measured yet. */
@@ -60,7 +61,7 @@ function quantity(value: number | null, digits: number, unit: string): string {
 }
 
 /** The text of every field for one snapshot. */
-function fields(snap: PerfSnapshot): Record<Key, string> {
+function fields(snap: PerfSnapshot, fineMs: number | null): Record<Key, string> {
   return {
     'countdown-visible': quantity(snap.countdownVisibleMs, 0, 'ms'),
     'globe-ready': quantity(snap.globeReadyMs, 0, 'ms'),
@@ -68,6 +69,7 @@ function fields(snap: PerfSnapshot): Record<Key, string> {
     'fps-window': quantity(snap.fpsWindow, 1, 'fps'),
     'worst-frame': quantity(snap.worstFrameMs, 1, 'ms'),
     work: quantity(snap.workMs, 2, 'ms'),
+    'fine-layer': quantity(fineMs, 2, 'ms'),
     version: snap.version,
     window: `${(snap.windowElapsedMs / 1000).toFixed(1)} of 30 s${snap.windowDone ? ', done' : ''}`,
   };
@@ -104,8 +106,8 @@ export function mountReadout(onRestart: () => void): Readout {
   document.body.append(root);
 
   return {
-    show(snap) {
-      const text = fields(snap);
+    show(snap, fineMs) {
+      const text = fields(snap, fineMs);
       for (const [key, value] of values) value.textContent = text[key];
       const countdown = document.querySelector('canvas#countdown');
       root.style.top = `${countdown?.getBoundingClientRect().bottom ?? 0}px`;

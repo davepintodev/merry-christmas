@@ -10,14 +10,17 @@
 // snow. The pointer is attached before the loop starts, so before globe-ready.
 // XMAS-79 "Smooth between steps": the globe, its lean and Santa are drawn partway
 // between the last two steps, so motion follows real time and not whole steps.
+// XMAS-81 "Fine layer on the page: the shapes": the scene canvas leaves the shapes'
+// bodies out and fine-layer.ts draws them on the screen's own pixel grid over it.
 import { makeClock, phaseAt, timeLeft } from '../shared/clock.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
 import { createDrag } from './drag.ts';
+import { makeFineLayer, type FineLayer } from './fine-layer.ts';
 import { runSceneLoop, type LoopHost, type LoopScene } from './loop.ts';
 import { attachPointer } from './pointer.ts';
 import { wantsPerf } from './perf-option.ts';
 import { readoutLink } from './scene-perf.ts';
-import { pagePixels } from './pixel.ts';
+import { pagePixels, pictureLeft } from './pixel.ts';
 import { makePoseTrack, smoothTime } from './pose.ts';
 import { makeSnowRuntime } from './snow-runtime.ts';
 import { STEPS_PER_SECOND } from './steps.ts';
@@ -35,8 +38,14 @@ const PERF_URL = '%PERF_URL%';
 const clock = makeClock(location.search);
 const canvas = document.querySelector<HTMLCanvasElement>('canvas#scene');
 const context = canvas === null ? null : canvas.getContext('2d');
+const fine: FineLayer | null = canvas === null ? null : makeFineLayer(canvas);
 const frames: FrameSource = makeFrameSource();
 const snow = makeSnowRuntime(SEED);
+/**
+ * Whether the fine layer drew the shapes on the last frame. The scene canvas keeps
+ * the shapes' bodies until it has, so a page whose layers get no 2d context still shows them.
+ */
+let fineDrew = fine !== null;
 let drag = createDrag(START_TURN);
 /** The art pixel size the drag was started under, and how to take its pointer back off. */
 let dragScale = 0;
@@ -81,8 +90,8 @@ function startDrag(target: HTMLCanvasElement, scale: number): void {
   detachPointer = attachPointer(target, drag, (x, y) => artPoint(target, x, y), () => performance.now() / 1000);
 }
 
-/** One picture size in canvas pixels and CSS pixels; the canvas is re-sized only when it changes. */
-function resize(target: HTMLCanvasElement, ratioNow: number): { scale: number; width: number; height: number } {
+/** One picture size in canvas pixels and CSS pixels, and its left edge in CSS pixels; the canvas is re-sized only when it changes. */
+function resize(target: HTMLCanvasElement, ratioNow: number): { scale: number; width: number; height: number; left: number } {
   const { scale, width, height } = windowPixels(ratioNow);
   if (target.width !== width) target.width = width;
   if (target.height !== height) target.height = height;
@@ -90,13 +99,13 @@ function resize(target: HTMLCanvasElement, ratioNow: number): { scale: number; w
   const cssHeight = `${(height * scale) / ratioNow}px`;
   if (target.style.width !== cssWidth) target.style.width = cssWidth;
   if (target.style.height !== cssHeight) target.style.height = cssHeight;
-  // Left edge on a whole device pixel, so every art pixel stays a whole number of device pixels (crisp at fractional ratios).
+  // Left edge on a whole device pixel (pictureLeft), so every art pixel stays a whole number of device pixels (crisp at fractional ratios).
   // The layout keeps `left: 50%` so the box does not jump when the scene arrives; the rounding goes into the translate.
   // That assumes no scrollbar, so `left: 50%` is innerWidth / 2 (index.html sets overflow hidden).
-  const left = Math.round(((window.innerWidth - (width * scale) / ratioNow) / 2) * ratioNow) / ratioNow;
+  const left = pictureLeft(window.innerWidth, width, scale, ratioNow);
   const transform = `translateX(${left - window.innerWidth / 2}px)`;
   if (target.style.transform !== transform) target.style.transform = transform;
-  return { scale, width, height };
+  return { scale, width, height, left };
 }
 
 const scene: LoopScene = {
@@ -114,10 +123,10 @@ const scene: LoopScene = {
       push: out.push,
     });
   },
-  draw(fraction = 1): void {
+  draw(fraction = 1): number | void {
     if (canvas === null || context === null) return;
     const dpr = ratio();
-    const { scale, width, height } = resize(canvas, dpr);
+    const { scale, width, height, left } = resize(canvas, dpr);
     if (scale !== dragScale) startDrag(canvas, scale);
     const size = width * height;
     if (buffers === null || buffers.picture.length !== size) {
@@ -139,11 +148,20 @@ const scene: LoopScene = {
         lean: blended.lean,
         snow: snow.snow ?? undefined,
         outsideSnow: snow.outsideSnow ?? undefined,
+        shapeBodies: !fineDrew,
       },
       buffers.picture,
     );
     toRgba(frame.picture, buffers.rgba);
     context.putImageData(buffers.image, 0, 0);
+    // The shapes go over the scene canvas, then Santa and the snow in front over them.
+    // The fine layer is timed only for the readout, which is the only thing that reads the time.
+    const timed = readout !== undefined;
+    const begin = timed ? performance.now() : 0;
+    if (fine !== null && frame.front !== undefined) {
+      fineDrew = fine.draw({ layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, front: frame.front }, { scale, ratio: dpr, left });
+    }
+    return timed ? performance.now() - begin : undefined;
   },
 };
 

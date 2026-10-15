@@ -85,3 +85,14 @@ export function pagePixels(viewport: { width: number; height: number }, dpr: num
     digitScale: digitScaleFor(width),
   };
 }
+
+/**
+ * The picture's left edge in CSS pixels: `width` art pixels at `scale` physical
+ * pixels each, centred in a window `windowWidth` CSS pixels across. The edge
+ * lands on a whole device pixel, so every art pixel stays a whole number of
+ * device pixels (crisp at fractional ratios); the scene canvas and the fine
+ * layer both place themselves by it.
+ */
+export function pictureLeft(windowWidth: number, width: number, scale: number, ratio: number): number {
+  return Math.round(((windowWidth - (width * scale) / ratio) / 2) * ratio) / ratio;
+}

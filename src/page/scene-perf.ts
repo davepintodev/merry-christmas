@@ -22,7 +22,7 @@ export interface ReadoutLink {
 /** How many of the latest frames are kept while the file loads. */
 const KEPT_FRAMES = 600;
 
-type Heard = { kind: 'frame'; time: number; workMs: number } | { kind: 'pause' } | { kind: 'resume' };
+type Heard = { kind: 'frame'; time: number; workMs: number; layerMs: number } | { kind: 'pause' } | { kind: 'resume' };
 type Frame = Extract<Heard, { kind: 'frame' }>;
 
 export function readoutLink(importFile: (url: string) => Promise<ReadoutModule> = (url) => import(/* @vite-ignore */ url)): ReadoutLink {
@@ -68,9 +68,9 @@ export function readoutLink(importFile: (url: string) => Promise<ReadoutModule> 
 
   const link: ReadoutLink = {
     observer: {
-      frame(time, workMs) {
-        if (watch !== undefined) watch.frame(time, workMs);
-        else keep({ kind: 'frame', time, workMs });
+      frame(time, workMs, layerMs = 0) {
+        if (watch !== undefined) watch.frame(time, workMs, layerMs);
+        else keep({ kind: 'frame', time, workMs, layerMs });
       },
       pause() {
         if (watch !== undefined) watch.pause();
@@ -90,7 +90,7 @@ export function readoutLink(importFile: (url: string) => Promise<ReadoutModule> 
           const heard = replay(kept ?? []);
           kept = undefined;
           for (const event of heard) {
-            if (event.kind === 'frame') observer.frame(event.time, event.workMs);
+            if (event.kind === 'frame') observer.frame(event.time, event.workMs, event.layerMs);
             else if (event.kind === 'pause') observer.pause();
             else observer.resume();
           }

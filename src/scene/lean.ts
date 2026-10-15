@@ -9,7 +9,7 @@ import type { SceneLayout } from './frame.ts';
 export const MAX_LEAN = 0.5;
 
 /** The rows and columns one lean can move: the globe's box, widened by the largest shear. */
-interface LeanBox {
+export interface LeanBox {
   left: number;
   right: number;
   top: number;
@@ -24,7 +24,8 @@ let glass: Uint32Array<ArrayBuffer> = new Uint32Array(0);
 let keptLayout: SceneLayout | undefined;
 let keptWidth = 0;
 
-function boxOf(width: number, layout: SceneLayout): LeanBox {
+/** The box the glass and all in it can reach at any lean in ±MAX_LEAN, for a picture `width` art pixels across. */
+export function leanBox(width: number, layout: SceneLayout): LeanBox {
   const { cx, cy, radius } = layout.globe;
   const top = Math.max(0, Math.floor(cy - radius));
   const bottom = layout.groundTop;
@@ -35,6 +36,11 @@ function boxOf(width: number, layout: SceneLayout): LeanBox {
     top,
     bottom,
   };
+}
+
+/** How far row y moves under `lean`, in whole art pixels: the lean times the row's height above the ground line `bottom`, rounded. */
+export function rowShift(lean: number, bottom: number, y: number): number {
+  return Math.round(lean * (bottom - y - 0.5));
 }
 
 /** `buffer` when it holds `size` colour numbers, else a new one. */
@@ -52,7 +58,7 @@ function copyBox(picture: Uint32Array, width: number, box: LeanBox, into: Uint32
 
 /** Keeps what lies under the glass, so a leaning glass can show it where the glass has left. Call before the glass is painted; leanGlass needs it for the same layout and width. */
 export function keepBackdrop(picture: Uint32Array, width: number, layout: SceneLayout): void {
-  const box = boxOf(width, layout);
+  const box = leanBox(width, layout);
   backdrop = holding(backdrop, (box.right - box.left + 1) * (box.bottom - box.top));
   copyBox(picture, width, box, backdrop);
   keptLayout = layout;
@@ -73,7 +79,7 @@ export function leanGlass(picture: Uint32Array, width: number, layout: SceneLayo
     throw new Error('leanGlass needs keepBackdrop for the same layout and width first');
   }
   keptLayout = undefined;
-  const box = boxOf(width, layout);
+  const box = leanBox(width, layout);
   const boxWidth = box.right - box.left + 1;
   glass = holding(glass, boxWidth * (box.bottom - box.top));
   copyBox(picture, width, box, glass);
@@ -81,7 +87,7 @@ export function leanGlass(picture: Uint32Array, width: number, layout: SceneLayo
   // paintGlass paints pixel centres up to half a pixel inside the radius.
   const inner = radius - 0.5;
   for (let y = box.top; y < box.bottom; y++) {
-    const shift = Math.round(lean * (box.bottom - y - 0.5));
+    const shift = rowShift(lean, box.bottom, y);
     // The painted circle's half width on this row, measured on pixel centres; a row it does not reach has none.
     const dy = y + 0.5 - cy;
     const half = Math.abs(dy) < inner ? Math.sqrt(inner * inner - dy * dy) : -1;

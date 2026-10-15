@@ -57,7 +57,8 @@ async function instrument(page: Page): Promise<void> {
     for (const name of ['putImageData', 'drawImage'] as const) {
       const real = proto[name] as (...args: unknown[]) => void;
       (proto as unknown as Record<string, unknown>)[name] = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
-        if (this.canvas.id !== 'countdown') probe.draws++;
+        // XMAS-81: only the scene canvas counts; the fine layer's canvases draw many faces per frame.
+        if (this.canvas.id === 'scene') probe.draws++;
         return real.apply(this, args);
       };
     }

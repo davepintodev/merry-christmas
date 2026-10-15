@@ -4,8 +4,8 @@
 
 /** The ?perf readout's ears. */
 export interface LoopObserver {
-  /** One drawn frame: its rAF time and the milliseconds scene.draw() took. */
-  frame(time: number, workMs: number): void;
+  /** One drawn frame: its rAF time, the milliseconds scene.draw() took, and the part of that the fine layer took (0 without one). */
+  frame(time: number, workMs: number, layerMs?: number): void;
   /** The tab hid: no frames until resume. */
   pause(): void;
   /** The tab came back. */

@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { countdownFrame } from '../countdown/render.ts';
 import { GLOBE_RADIUS, MIN_HEIGHT, sceneLayout } from '../scene/frame.ts';
-import { MIN_PICTURE, pagePixels } from './pixel.ts';
+import { MIN_PICTURE, pagePixels, pictureLeft } from './pixel.ts';
 
 type Viewport = { width: number; height: number };
 
@@ -233,6 +233,60 @@ describe('pagePixels: digitScale', () => {
     for (const dpr of [0, -2, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(pagePixels({ width: 360, height: 700 }, dpr).digitScale).toBe(pagePixels({ width: 360, height: 700 }, 1).digitScale);
       expect(Number.isFinite(pagePixels({ width: 360, height: 700 }, dpr).digitScale)).toBe(true);
+    }
+  });
+});
+
+describe('pictureLeft (XMAS-81: where the scene canvas and the fine layer both start)', () => {
+  const VIEWPORTS: Viewport[] = [{ width: 360, height: 700 }, { width: 1920, height: 1130 }, { width: 1366, height: 768 }, { width: 1023, height: 611 }, { width: 112, height: 400 }];
+
+  it('is a whole number of device pixels, so every art pixel is a whole number of device pixels', () => {
+    for (const dpr of [1, 1.25, 1.5, 2, 2.625, 3]) {
+      for (const viewport of VIEWPORTS) {
+        const { scale, width } = pagePixels(viewport, dpr);
+        const device = pictureLeft(viewport.width, width, scale, dpr) * dpr;
+        expect(Math.abs(device - Math.round(device)), `${viewport.width} at ${dpr}`).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it('centres the picture to within half a device pixel', () => {
+    for (const dpr of [1, 1.25, 1.5, 2, 2.625, 3]) {
+      for (const viewport of VIEWPORTS) {
+        const { scale, width } = pagePixels(viewport, dpr);
+        const left = pictureLeft(viewport.width, width, scale, dpr);
+        const middle = left + (width * scale) / dpr / 2;
+        expect(Math.abs(middle - viewport.width / 2), `${viewport.width} at ${dpr}`).toBeLessThanOrEqual(0.5 / dpr + 1e-9);
+      }
+    }
+  });
+
+  it('is exactly the centring where it already lands on a device pixel', () => {
+    expect(pictureLeft(1000, 200, 2, 1)).toBe(300);
+    expect(pictureLeft(360, 60, 6, 2)).toBe(90);
+  });
+
+  it('rounds a half device pixel one way, the same way for every window, and never to a fraction of a device pixel', () => {
+    // 101 wide window, 100 css wide picture at ratio 2: the centring is 0.5 css = 1 device pixel.
+    expect(pictureLeft(101, 100, 1, 1)).toBe(1); // 0.5 css rounds to 1 device pixel
+    expect(pictureLeft(101, 100, 2, 2) * 2).toBe(Math.round(pictureLeft(101, 100, 2, 2) * 2));
+  });
+
+  it('goes negative when the picture overhangs a narrow window, still on a whole device pixel', () => {
+    const left = pictureLeft(100, 112, 3, 1);
+    expect(left).toBeLessThan(0);
+    expect(left).toBe(-118);
+    expect(pictureLeft(100.5, 112, 3, 2) * 2).toBe(Math.round(pictureLeft(100.5, 112, 3, 2) * 2));
+  });
+
+  it('leaves the picture centred on both sides: the gap on the right is within one device pixel of the gap on the left', () => {
+    for (const dpr of [1, 1.25, 2, 3]) {
+      for (const viewport of VIEWPORTS) {
+        const { scale, width } = pagePixels(viewport, dpr);
+        const left = pictureLeft(viewport.width, width, scale, dpr);
+        const right = viewport.width - left - (width * scale) / dpr;
+        expect(Math.abs(left - right)).toBeLessThanOrEqual(1 / dpr + 1e-9);
+      }
     }
   });
 });
