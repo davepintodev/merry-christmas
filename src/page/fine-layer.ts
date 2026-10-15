@@ -1,14 +1,16 @@
 // XMAS-81 "Fine layer on the page: the shapes": the globe's turning shapes drawn
 // on the screen's own pixel grid, over the scene canvas, which leaves their
-// bodies out (SceneInput.shapeBodies false). Two canvases are laid exactly over
-// the glass, where the scene canvas's picture is:
-// - the shapes, at the screen's pixel size: each face is one image of its
+// bodies and floor shadows out (SceneInput.shapeBodies false). Two canvases are
+// laid exactly over the glass, where the scene canvas's picture is:
+// - the shapes, at the screen's pixel size: first each shape's floor shadow
+//   (XMAS-82), a flat shade clipped to the floor disc, over the flakes behind
+//   and under the bodies; then each face is one image of its
 //   drawing, with a one-pixel border of its own edge, under a canvas transform
 //   with no smoothing, clipped to the face. A face's clip also takes the parts
 //   of its border that lie inside a face drawn after it, so the nearer face
 //   covers the overlap and no pair of antialiased edges leaves a half-clear
 //   seam, whatever part of an edge the two share; the rows are then shifted by
-//   the lean in whole art pixels, as leanGlass shifts glass. Santa's step is
+//   the lean in whole art pixels, as leanGlass shifts glass, shadows with them. Santa's step is
 //   among the faces in the draw list's order (XMAS-83), so the shapes cover or
 //   pass in front of him by depth, and the lean shears him with them.
 // XMAS-84 "Snow inside the glass on the fine layer": the snow is drawn too as
@@ -20,14 +22,21 @@ import type { Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
 import { leanBox, rowShift } from '../scene/lean.ts';
-import { drawListOf, turnBodies, type SantaDraw, type TurnBodies } from '../scene/shape-draw-list.ts';
-import type { FaceDraw } from '../scene/shapes-draw.ts';
+import { drawListOf, shadowDrawList, turnBodies, type SantaDraw, type ShadowStep, type TurnBodies } from '../scene/shape-draw-list.ts';
+import { SHADOW_INK, SHADOW_STRENGTH, type FaceDraw } from '../scene/shapes-draw.ts';
+import { floorDiscRing } from '../scene/shapes.ts';
 import { flakeSize, renderSnowSteps, type SnowStep } from '../scene/snow-draw-list.ts';
 import { paintSantaOver, type SantaSprite } from './fine-layer-santa.ts';
 import { opaqueWord, type Pixels } from './fine-layer-pixels.ts';
 
 /** The master list's colours as numbers, so a drawing's colour number is a colour. */
 const COLOUR_NUMBERS: readonly number[] = masterColours.map((colour) => Number.parseInt(colour.slice(1), 16));
+
+/** The floor disc's rim as a polygon of this many points: its clip for the shadows, within about a hundredth of an art pixel of the disc. */
+const DISC_POINTS = 128;
+const FLOOR_RING = floorDiscRing(DISC_POINTS);
+/** The shadow's fill: the shadow ink, as the canvas's colour style. */
+const SHADOW_STYLE = `#${SHADOW_INK.toString(16).padStart(6, '0')}`;
 
 /** The border of each bitmap, in drawing pixels: it repeats the drawing's edge, and it is all a gable's clip may reach past its drawing. */
 const PAD = 1;
@@ -393,10 +402,10 @@ function clipsOf(steps: readonly FaceDraw[]): Clip[] {
 }
 
 /**
- * Traces `rings` as one clip in device pixels, as the path of the context's current transform,
- * which is the identity here: the union of the rings, the first being the face's own region.
+ * Traces `rings` as the context's path in device pixels, under the identity transform: the union of the rings.
+ * (XMAS-82: the rings may be a shadow's polygon as well as a face's clip.)
  */
-function traceRings(ctx: CanvasRenderingContext2D, rings: readonly Ring[], k: number, ox: number, oy: number): void {
+function tracePath(ctx: CanvasRenderingContext2D, rings: readonly (readonly (readonly [number, number])[])[], k: number, ox: number, oy: number): void {
   ctx.beginPath();
   for (const ring of rings) {
     for (let n = 0; n < ring.length; n++) {
@@ -407,7 +416,30 @@ function traceRings(ctx: CanvasRenderingContext2D, rings: readonly Ring[], k: nu
     }
     ctx.closePath();
   }
+}
+
+/** Traces `rings` as one clip in device pixels, the first being the face's own region. */
+function traceRings(ctx: CanvasRenderingContext2D, rings: readonly Ring[], k: number, ox: number, oy: number): void {
+  tracePath(ctx, rings, k, ox, oy);
   ctx.clip();
+}
+
+/**
+ * Fills each shadow's polygon in the shadow ink at its strength, under the identity transform, clipped to the
+ * floor disc, before any face is drawn: the bodies then cover the shade where they stand. Each polygon is filled
+ * in turn, so overlapping shades add up as drawShapes' do. The context's state is restored after.
+ */
+function paintShadows(ctx: CanvasRenderingContext2D, shadows: readonly ShadowStep[], k: number, ox: number, oy: number): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  traceRings(ctx, [FLOOR_RING], k, ox, oy);
+  ctx.fillStyle = SHADOW_STYLE;
+  ctx.globalAlpha = SHADOW_STRENGTH;
+  for (const shadow of shadows) {
+    tracePath(ctx, [shadow.polygon], k, ox, oy);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /**
@@ -597,8 +629,8 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
   let flat: Layer | null = null;
   /** The bordered bitmap of each drawing, shared by every face and every frame. */
   const bitmaps = new Map<Drawing, HTMLCanvasElement>();
-  /** The bodies of the last turn drawn and their clips, so a still picture makes neither anew. */
-  let kept: { turn: number; bodies: TurnBodies; clips: Clip[] } | null = null;
+  /** The bodies of the last turn drawn their clips and their shadows, so a still picture makes neither anew. */
+  let kept: { turn: number; bodies: TurnBodies; clips: Clip[]; shadows: ShadowStep[] } | null = null;
   /** Santa's scratch layer, made by the first frame with a time, and the buffers his pixels go through, kept while their size holds. */
   let santa: Layer | null = null;
   let santaColours: Uint32Array | null = null;
@@ -610,7 +642,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       // Santa's step moves every frame, so a frame with a time splices him into them by depth.
       if (kept === null || turn !== kept.turn) {
         const bodies = turnBodies(turn);
-        kept = { turn, bodies, clips: clipsOf(bodies.faces) };
+        kept = { turn, bodies, clips: clipsOf(bodies.faces), shadows: shadowDrawList(turn) };
       }
       const { bodies, clips } = kept;
       const list = drawListOf(bodies, santaTimeMs);
@@ -659,6 +691,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
 
       // The shapes: drawn straight onto the layer, or, while leaning, onto the flat copy
       // and then copied row by row, each row moved by its own whole art pixel shift.
+      // The shadows go first, under the faces.
       sizeTo(shapes.canvas, bw * k, bh * k);
       shapesContext.clearRect(0, 0, bw * k, bh * k);
       // The flakes behind the glass centre lie under the faces and Santa: they are drawn first, unshifted,
@@ -671,6 +704,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       if (behindDirty !== null) wordsFrom(colours, behindPixels.words, bw * k, behindDirty);
       if (!leaning) {
         putDirty(shapesContext, behindPixels.image, behindDirty);
+        paintShadows(shapesContext, kept.shadows, k, ox, oy);
         paintFaces(shapesContext, list, clips, k, ox, oy, bitmaps, sprite);
       } else {
         const flatLayer = flat as Layer;
@@ -678,6 +712,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
         sizeTo(flatLayer.canvas, bw * k, bh * k);
         flatContext.clearRect(0, 0, bw * k, bh * k);
         putDirty(flatContext, behindPixels.image, behindDirty);
+        paintShadows(flatContext, kept.shadows, k, ox, oy);
         paintFaces(flatContext, list, clips, k, ox, oy, bitmaps, sprite);
         shapesContext.imageSmoothingEnabled = false;
         for (let y = box.top; y < box.bottom; y++) {

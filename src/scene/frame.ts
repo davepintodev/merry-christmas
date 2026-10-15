@@ -83,7 +83,7 @@ export interface SceneInput {
   snowSteps?: SnowFlakes;
   /** The outside snow (XMAS-36b2); absent draws none. */
   outsideSnow?: OutsideSnow;
-  /** Whether the shapes' bodies, and Santa with them, are drawn (XMAS-80, XMAS-83); absent or true draws them, false leaves them out and keeps their shadows: the page's fine layer draws the bodies, Santa and the snow on the screen's pixel grid. */
+  /** Whether the shapes' bodies, and Santa with them, are drawn (XMAS-80, XMAS-83); absent or true draws them, false leaves them out, and their floor shadows too (XMAS-82): the page's fine layer draws the shadows, bodies, Santa and the snow on the screen's pixel grid. */
   shapeBodies?: boolean;
 }
 
@@ -468,7 +468,7 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   // The stars lie behind the globe too: a leaning glass covers them and shows them where it has left.
   paintStars(picture, layout, input, share, sky);
   // The globe sits on the ground's first row, on its base.
-  const parts: ShapeParts = input.shapeBodies === false ? 'shadows' : 'all';
+  const parts: ShapeParts = input.shapeBodies === false ? 'none' : 'all';
   drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts, parts === 'all' ? input.snowSteps : undefined);
   paintDisc(picture, layout, input.phase, share);
   paintHint(picture, layout, BASE_HEIGHT);

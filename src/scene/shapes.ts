@@ -399,3 +399,11 @@ export function onFloor(x: number, y: number): boolean {
   const deep = (y - floorDisc.y) / TILT;
   return x * x + deep * deep <= floorDisc.radius * floorDisc.radius;
 }
+
+/** XMAS-82: the floor disc's rim as `points` points in art units, relative to the globe's centre: the ellipse onFloor tests. */
+export function floorDiscRing(points: number): [number, number][] {
+  return Array.from({ length: points }, (_, n) => {
+    const angle = (n * 2 * Math.PI) / points;
+    return [floorDisc.radius * Math.cos(angle), floorDisc.y + TILT * floorDisc.radius * Math.sin(angle)];
+  });
+}

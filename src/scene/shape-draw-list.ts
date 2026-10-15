@@ -3,12 +3,14 @@
 // drawShapes paints, in the same order, so the list at zoom 1 is its bodies.
 // XMAS-83: with a time, Santa joins the list as one sprite step, placed among
 // the shapes by depth.
+// XMAS-82: the shapes' floor shadows the same way, one flat polygon per shape,
+// drawn under the bodies and clipped to the floor disc.
 import type { Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from './frame.ts';
 import { paintSantaStep } from './santa-step.ts';
 import { santaNearness, santaPlacement, santaSprite } from './santa.ts';
 import { globeShapes, projectShape, wrapTurn, type GlobeShape } from './shapes.ts';
-import { faceAxes, nearness, paintShape, shapesFarFirst, type FaceDraw } from './shapes-draw.ts';
+import { faceAxes, nearness, paintShadowStripe, paintShape, shadowPolygon, shapesFarFirst, type FaceDraw } from './shapes-draw.ts';
 
 /** Santa as one sprite: his trot drawing, its centre relative to the globe's centre in art units (unrounded), squeezed across and mirrored as he flies. */
 export interface SantaDraw {
@@ -79,6 +81,15 @@ export function shapeDrawList(turn: number, shapes: readonly GlobeShape[] = glob
   return drawListOf(turnBodies(turn, shapes), santaTimeMs);
 }
 
+/** Throws a RangeError for a zoom that is not a whole number of at least 1, or a picture of the wrong size; returns the picture's width in picture pixels. */
+function checkPicture(picture: Uint32Array, width: number, layout: SceneLayout, zoom: number): number {
+  if (!Number.isInteger(zoom) || zoom < 1) throw new RangeError(`zoom must be a whole number of at least 1, got ${zoom}`);
+  const side = width * zoom;
+  const size = side * layout.height * zoom;
+  if (picture.length !== size) throw new RangeError(`picture must hold ${size} colour numbers, got ${picture.length}`);
+  return side;
+}
+
 /**
  * Draws `steps` in order over `picture`, which is `width` art pixels across
  * at `zoom` picture pixels to each art pixel, so `width * zoom` wide, with
@@ -88,13 +99,34 @@ export function shapeDrawList(turn: number, shapes: readonly GlobeShape[] = glob
  * whole number of at least 1, or a picture of the wrong size.
  */
 export function renderDrawList(picture: Uint32Array, width: number, layout: SceneLayout, steps: readonly DrawStep[], zoom: number): void {
-  if (!Number.isInteger(zoom) || zoom < 1) throw new RangeError(`zoom must be a whole number of at least 1, got ${zoom}`);
-  const side = width * zoom;
-  const size = side * layout.height * zoom;
-  if (picture.length !== size) throw new RangeError(`picture must hold ${size} colour numbers, got ${picture.length}`);
+  const side = checkPicture(picture, width, layout, zoom);
   // Each step paints over what the steps before it left, so a near face covers a far one.
   for (const step of steps) {
     if ('sprite' in step) paintSantaStep(picture, side, layout, step, zoom);
     else paintShape(picture, side, layout, [step], zoom);
   }
+}
+
+/** XMAS-82: one shape's floor shadow, a flat polygon in globe-centred art units (fractional allowed), before the floor disc clip. */
+export type ShadowStep = { polygon: readonly (readonly [number, number])[] };
+
+/**
+ * One floor shadow per shape of `shapes` (all of globeShapes by default) turned
+ * by `turn`, in the order the bodies are drawn in: far shapes first. Throws a
+ * RangeError for a non-finite turn.
+ */
+export function shadowDrawList(turn: number, shapes: readonly GlobeShape[] = globeShapes): ShadowStep[] {
+  if (!Number.isFinite(turn)) throw new RangeError(`turn must be a finite number of radians, got ${turn}`);
+  const t = wrapTurn(turn);
+  return shapesFarFirst(shapes, t).map((shape) => ({ polygon: shadowPolygon(shape, t) }));
+}
+
+/**
+ * Paints the shadow `steps` over `picture`, clipped to the floor disc, with the
+ * same shade and strength drawShapes uses for the shadows on the art grid. The
+ * picture is laid out as renderDrawList's, and the zoom and size are checked the same way.
+ */
+export function renderShadowSteps(picture: Uint32Array, width: number, layout: SceneLayout, steps: readonly ShadowStep[], zoom: number): void {
+  const side = checkPicture(picture, width, layout, zoom);
+  for (const step of steps) paintShadowStripe(picture, side, layout, step.polygon, zoom);
 }

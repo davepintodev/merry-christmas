@@ -88,6 +88,7 @@ class FakeStyle {
 class FakeContext {
   imageSmoothingEnabled = true;
   fillStyle: string = '#000000';
+  globalAlpha = 1;
   matrix: Matrix = [...IDENTITY];
   private saved: { matrix: Matrix; clips: number }[] = [];
   private clipPolys: Point[][] = [];
@@ -132,6 +133,8 @@ class FakeContext {
     for (let i = 0; i < 90; i++) this.lineTo(x + r * Math.cos((i * Math.PI) / 45), y + r * Math.sin((i * Math.PI) / 45));
   }
   closePath(): void {}
+  /** The shadows' fill (XMAS-82) is not under test here: Santa's pixels are, so it paints nothing. */
+  fill(): void {}
   clip(): void {
     this.clipPolys.push([...this.path]);
   }

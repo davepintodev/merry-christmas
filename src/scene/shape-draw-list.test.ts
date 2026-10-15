@@ -10,9 +10,9 @@ import type { Drawing } from '../shared/art.generated.ts';
 import type { PhaseReading } from '../shared/clock.ts';
 import { masterColours } from '../../art/colours.ts';
 import { sceneFrame, sceneLayout, type SceneInput, type SceneLayout } from './frame.ts';
-import { renderDrawList, shapeDrawList, type DrawStep } from './shape-draw-list.ts';
+import { renderDrawList, renderShadowSteps, shadowDrawList, shapeDrawList, type DrawStep, type ShadowStep } from './shape-draw-list.ts';
 import { drawShapes } from './shapes-draw.ts';
-import { globeShapes, projectShape, sheet, wrapTurn, type GlobeShape } from './shapes.ts';
+import { globeShapes, onFloor, projectShape, sheet, wrapTurn, type GlobeShape } from './shapes.ts';
 
 const W = 240;
 const H = 180;
@@ -43,6 +43,12 @@ function filled(layout: SceneLayout, zoom: number, colour: number, width = layou
 function rendered(turn: number, zoom: number, colour = FILL, layout = LAYOUT, shapes: readonly GlobeShape[] = globeShapes): Uint32Array {
   const picture = filled(layout, zoom, colour);
   renderDrawList(picture, layout.width, layout, shapeDrawList(turn, shapes), zoom);
+  return picture;
+}
+
+function shadowsOn(turn: number, zoom: number, colour = FILL, layout = LAYOUT, shapes: readonly GlobeShape[] = globeShapes): Uint32Array {
+  const picture = filled(layout, zoom, colour);
+  renderShadowSteps(picture, layout.width, layout, shadowDrawList(turn, shapes), zoom);
   return picture;
 }
 
@@ -92,14 +98,17 @@ function overlayMismatch(turn: number, phase: PhaseReading = NIGHT): { bad: numb
   const whole = sceneFrame(sceneInput({ turn, phase }));
   const bare = sceneFrame(withBodies(false, { turn, phase }));
   const list = renderedWithSanta(turn, 1);
+  // XMAS-82: the bodiless frame has no shadows either; where the shadows go, the whole frame may hold them over the bare one.
+  const shaded = Uint32Array.from(bare.picture);
+  renderShadowSteps(shaded, W, bare.layout, shadowDrawList(turn), 1);
   let bad = 0;
   let matched = 0;
   for (let i = 0; i < whole.picture.length; i++) {
     const w = whole.picture[i];
     if (list[i] === FILL) {
-      if (w !== bare.picture[i]) bad += 1;
+      if (w !== shaded[i] && w !== bare.picture[i]) bad += 1;
     } else if (w === list[i]) matched += 1;
-    else bad += 1;
+    else if (w !== bare.picture[i] && w !== shaded[i]) bad += 1;
   }
   return { bad, matched };
 }
@@ -569,32 +578,60 @@ describe('sceneFrame: the shapeBodies option', () => {
     expect(yes.picture).toEqual(absent.picture);
   });
 
-  it('draws no shape bodies when false: the frame differs from the default only where the bodies are', () => {
+  it('draws no shape bodies when false: the frame differs from the default only where the bodies and shadows are', () => {
     for (const turn of [0, 1.1, 4.0]) {
       const whole = sceneFrame(sceneInput({ turn }));
       const bare = sceneFrame(withBodies(false, { turn }));
       const covered = renderedWithSanta(turn, 1);
+      const shadowed = shadowsOn(turn, 1, FILL);
       let differing = 0;
       for (let i = 0; i < whole.picture.length; i++) {
         if (whole.picture[i] !== bare.picture[i]) {
           differing += 1;
-          expect(covered[i]).not.toBe(FILL); // a body or Santa pixel
+          expect(covered[i] !== FILL || shadowed[i] !== FILL).toBe(true); // a body, Santa or a shadow pixel
         }
       }
       expect(differing).toBeGreaterThan(0);
     }
   });
 
-  it('leaves the rest of the picture unchanged: no pixel outside the shapes moves, and the shadows stay', () => {
+  it('leaves the rest of the picture unchanged: no pixel outside the shapes and their shadows moves, and the shadows go too', () => {
+    for (const turn of [2.4, 0.2, 5.1]) {
+      const whole = sceneFrame(sceneInput({ turn }));
+      const bare = sceneFrame(withBodies(false, { turn }));
+      const bodies = renderedWithSanta(turn, 1);
+      const shadows = shadowsOn(turn, 1, FILL);
+      let shadowOnly = 0;
+      let shadowOnlyGone = 0;
+      for (let i = 0; i < whole.picture.length; i++) {
+        const covered = bodies[i] !== FILL || shadows[i] !== FILL;
+        if (!covered) expect(bare.picture[i]).toBe(whole.picture[i]);
+        if (bodies[i] === FILL && shadows[i] !== FILL) {
+          shadowOnly += 1;
+          // A shadow-only pixel of the whole frame is shaded; the bare frame has no shade there (Santa included).
+          if (whole.picture[i] !== bare.picture[i]) shadowOnlyGone += 1;
+        }
+      }
+      expect(shadowOnly).toBeGreaterThan(0);
+      expect(shadowOnlyGone).toBeGreaterThan(shadowOnly / 2);
+      expect(bodies.some((p) => p !== FILL)).toBe(true);
+    }
+  });
+
+  it('with the shadows laid back and then the bodies, restores the whole frame (Santa included)', () => {
     const turn = 2.4;
     const whole = sceneFrame(sceneInput({ turn }));
     const bare = sceneFrame(withBodies(false, { turn }));
-    const bodies = rendered(turn, 1, FILL);
-    // Laying the bodies back over the bare frame restores today's picture exactly, shadows included.
+    const bodies = renderedWithSanta(turn, 1);
+    // Laying the shadows back over the bare frame and then the bodies and Santa restores today's picture exactly.
     const back = Uint32Array.from(bare.picture);
+    renderShadowSteps(back, W, bare.layout, shadowDrawList(turn), 1);
     renderDrawList(back, W, bare.layout, shapeDrawList(turn, globeShapes, T), 1);
     expect(back).toEqual(whole.picture);
     expect(bodies.some((p) => p !== FILL)).toBe(true);
+    const { bad, matched } = overlayMismatch(turn);
+    expect(bad).toBe(0);
+    expect(matched).toBeGreaterThan(0);
   });
 
   it('works with a handed-in target and layout, and does not change the layout', () => {
@@ -608,5 +645,281 @@ describe('sceneFrame: the shapeBodies option', () => {
 
   it('still throws for a non-finite turn when false', () => {
     expect(() => sceneFrame(withBodies(false, { turn: Number.NaN }))).toThrow(RangeError);
+  });
+});
+
+const AWKWARD = [0, 0.5, 1.5, 2.5, 4, Math.PI / 4, (3 * Math.PI) / 4];
+const PHASES: PhaseReading[] = [NIGHT, { from: 'dawn', to: 'dawn', share: 0 }, { from: 'sunset', to: 'sunset', share: 0 }, { from: 'frosty-morning', to: 'sunset', share: 0.25 }];
+
+/** A shadow step that covers a whole box around the globe, to see only the floor disc's clip. */
+function wideStep(layout: SceneLayout): ShadowStep {
+  const { cx, cy } = layout.globe;
+  return { polygon: [[-cx - 50, -cy - 50], [layout.width - cx + 50, -cy - 50], [layout.width - cx + 50, layout.height - cy + 50], [-cx - 50, layout.height - cy + 50]] };
+}
+
+describe('shadowDrawList: the list', () => {
+  it('throws a RangeError for a turn that is not finite', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) expect(() => shadowDrawList(bad)).toThrow(RangeError);
+  });
+
+  it('has one step per shape, each a flat polygon of at least three finite vertices', () => {
+    for (const turn of SWEEP) {
+      const steps = shadowDrawList(turn);
+      expect(steps).toHaveLength(globeShapes.length);
+      for (const step of steps) {
+        expect(step.polygon.length).toBeGreaterThanOrEqual(3);
+        for (const [x, y] of step.polygon) {
+          expect(Number.isFinite(x)).toBe(true);
+          expect(Number.isFinite(y)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('is empty for no shapes', () => {
+    expect(shadowDrawList(0.3, [])).toEqual([]);
+  });
+
+  it('is far shapes first: each shape\'s step sits at its far-first place', () => {
+    for (const turn of [0, 0.4, 1.7, 3.0, 5.9]) {
+      const order = farFirst(globeShapes, turn);
+      const all = shadowDrawList(turn);
+      order.forEach((shape, n) => {
+        const alone = shadowDrawList(turn, [shape])[0];
+        expect(alone).toBeDefined();
+        const mine = all[n]?.polygon ?? [];
+        expect(mine).toHaveLength(alone?.polygon.length ?? -1);
+        mine.forEach((v, i) => expect(near(v, alone?.polygon[i] ?? [])).toBe(true));
+      });
+    }
+  });
+
+  it('is the same for a turn and a whole turn more, and for a negative turn', () => {
+    for (const turn of [0.3, 2.2]) {
+      const base = shadowDrawList(turn);
+      for (const other of [turn + FULL, turn - FULL, turn + 5 * FULL]) {
+        const again = shadowDrawList(other);
+        again.forEach((step, n) => step.polygon.forEach((v, i) => expect(near(v, base[n]?.polygon[i] ?? [])).toBe(true)));
+      }
+    }
+  });
+
+  it('does not change the shapes it is given', () => {
+    const shapes = [...globeShapes].reverse();
+    const before = shapes.map((s) => ({ ...s }));
+    shadowDrawList(1.1, shapes);
+    expect(shapes).toEqual(before);
+  });
+
+  it('is smooth: a small turn moves a vertex by a fraction of an art unit, and the vertices are not on whole art units', () => {
+    let fractional = 0;
+    let moved = 0;
+    for (const turn of [0.123, 1.7, 3.0, 5.9]) {
+      const a = shadowDrawList(turn);
+      const b = shadowDrawList(turn + 0.002);
+      a.forEach((step, n) => {
+        step.polygon.forEach(([x, y], i) => {
+          const [bx = 0, by = 0] = b[n]?.polygon[i] ?? [];
+          const d = Math.hypot(bx - x, by - y);
+          expect(d).toBeLessThan(1);
+          if (d > 1e-9) moved += 1;
+          if (Math.abs(x - Math.round(x)) > 1e-6 || Math.abs(y - Math.round(y)) > 1e-6) fractional += 1;
+        });
+      });
+    }
+    expect(moved).toBeGreaterThan(0);
+    expect(fractional).toBeGreaterThan(0);
+  });
+});
+
+describe('renderShadowSteps: at zoom 1 it is today\'s drawShapes shadows', () => {
+  it('equals the shadows drawShapes paints, pixel for pixel, over two fills, at the awkward turns', () => {
+    let painted = 0;
+    for (const turn of AWKWARD) {
+      for (const fill of [FILL, FILL_B]) {
+        const today = filled(LAYOUT, 1, fill);
+        drawShapes(today, W, LAYOUT, NIGHT, turn, globeShapes, 'shadows');
+        const mine = shadowsOn(turn, 1, fill);
+        expect(mine).toEqual(today);
+        painted += mine.filter((p) => p !== fill).length;
+      }
+    }
+    expect(painted).toBeGreaterThan(0);
+  });
+
+  it('holds in every phase and over the whole sweep', () => {
+    for (const phase of PHASES) {
+      for (const turn of SWEEP) {
+        const today = filled(LAYOUT, 1, FILL);
+        drawShapes(today, W, LAYOUT, phase, turn, globeShapes, 'shadows');
+        const mine = shadowsOn(turn, 1, FILL);
+        let first = -1;
+        for (let i = 0; i < mine.length; i++) if (mine[i] !== today[i]) { first = i; break; }
+        expect(first, `phase ${phase.from}->${phase.to}, turn ${turn}`).toBe(-1);
+        expect(mine.length).toBe(today.length);
+      }
+    }
+  }, 30000);
+
+  it('holds on another layout and over a picture already holding colours of the palette', () => {
+    const layout = sceneLayout(320, 200, 99);
+    for (const turn of [0.7, 3.3]) {
+      const today = new Uint32Array(layout.width * layout.height).map((_, i) => COLOURS[i % COLOURS.length] ?? 0);
+      const mine = Uint32Array.from(today);
+      drawShapes(today, layout.width, layout, NIGHT, turn, globeShapes, 'shadows');
+      renderShadowSteps(mine, layout.width, layout, shadowDrawList(turn), 1);
+      expect(mine).toEqual(today);
+    }
+  });
+
+  it('paints a shadow over a body already there as a blend (the shadow goes under the bodies by the order the caller draws)', () => {
+    const turn = 0.5;
+    const today = filled(LAYOUT, 1, FILL);
+    drawShapes(today, W, LAYOUT, NIGHT, turn, globeShapes, 'shadows');
+    const painted = today.filter((p) => p !== FILL);
+    expect(painted.length).toBeGreaterThan(0);
+    // One flat shade, over one fill: every shadow pixel is the same colour, not the fill and not a body colour.
+    expect(new Set(painted).size).toBeLessThanOrEqual(2);
+  });
+
+  it('an empty list leaves the picture alone', () => {
+    const picture = filled(LAYOUT, 1, FILL);
+    renderShadowSteps(picture, W, LAYOUT, [], 1);
+    expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+  });
+});
+
+describe('renderShadowSteps: the floor disc', () => {
+  it('paints no pixel whose centre is off the floor disc, at zoom 1, 2 and 5, at every turn', () => {
+    const { cx, cy } = LAYOUT.globe;
+    for (const zoom of [1, 2, 5]) {
+      for (const turn of [0, 0.5, 1.5, 2.5, 4, 5.9]) {
+        const picture = shadowsOn(turn, zoom);
+        const side = W * zoom;
+        let painted = 0;
+        picture.forEach((p, i) => {
+          if (p === FILL) return;
+          painted += 1;
+          const dx = ((i % side) + 0.5) / zoom - cx;
+          const dy = (Math.floor(i / side) + 0.5) / zoom - cy;
+          expect(onFloor(dx, dy), `pixel ${i % side},${Math.floor(i / side)} at zoom ${zoom}`).toBe(true);
+        });
+        expect(painted).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('a step covering the whole picture paints exactly the floor disc, at zoom 1 and 3', () => {
+    const { cx, cy } = LAYOUT.globe;
+    for (const zoom of [1, 3]) {
+      const picture = filled(LAYOUT, zoom, FILL);
+      renderShadowSteps(picture, W, LAYOUT, [wideStep(LAYOUT)], zoom);
+      const side = W * zoom;
+      let inside = 0;
+      let mismatches = 0;
+      for (let i = 0; i < picture.length; i++) {
+        const dx = ((i % side) + 0.5) / zoom - cx;
+        const dy = (Math.floor(i / side) + 0.5) / zoom - cy;
+        const want = onFloor(dx, dy);
+        if (want) inside += 1;
+        if ((picture[i] !== FILL) !== want) mismatches += 1;
+      }
+      expect(inside).toBeGreaterThan(100);
+      expect(mismatches).toBe(0);
+    }
+  });
+
+  it('a step wholly off the disc paints nothing, and one far outside the picture is harmless', () => {
+    const picture = filled(LAYOUT, 1, FILL);
+    const far: ShadowStep = { polygon: [[900, 900], [950, 900], [950, 950], [900, 950]] };
+    const negative: ShadowStep = { polygon: [[-900, -900], [-850, -900], [-850, -850]] };
+    renderShadowSteps(picture, W, LAYOUT, [far, negative], 1);
+    expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+  });
+
+  it('a step half off the picture\'s edge paints its on-disc part without wrapping to the other side', () => {
+    const { cx, cy } = LAYOUT.globe;
+    const picture = filled(LAYOUT, 1, FILL);
+    // A box that starts left of the picture and ends at the globe's centre.
+    renderShadowSteps(picture, W, LAYOUT, [{ polygon: [[-cx - 40, -10], [0, -10], [0, 10], [-cx - 40, 10]] }], 1);
+    let painted = 0;
+    picture.forEach((p, i) => {
+      if (p === FILL) return;
+      painted += 1;
+      expect((i % W) + 0.5 - cx).toBeLessThanOrEqual(0);
+      expect(Math.abs(Math.floor(i / W) + 0.5 - cy)).toBeLessThanOrEqual(10);
+    });
+    expect(painted).toBeGreaterThan(0);
+  });
+
+  it('a polygon with a degenerate shape (a line, a point) paints nothing and does not throw', () => {
+    const picture = filled(LAYOUT, 1, FILL);
+    const line: ShadowStep = { polygon: [[0, 0], [10, 0], [20, 0]] };
+    const point: ShadowStep = { polygon: [[3, 3], [3, 3], [3, 3]] };
+    expect(() => renderShadowSteps(picture, W, LAYOUT, [line, point], 1)).not.toThrow();
+    expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+  });
+});
+
+describe('renderShadowSteps: zoom and size', () => {
+  it('has, at the centre of each zoom x zoom block, the zoom 1 picture (zoom 3 and 5)', () => {
+    for (const zoom of [3, 5]) {
+      for (const turn of AWKWARD) {
+        const one = shadowsOn(turn, 1);
+        const many = shadowsOn(turn, zoom);
+        const centre = (zoom - 1) / 2;
+        let mismatches = 0;
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) if (many[(y * zoom + centre) * W * zoom + x * zoom + centre] !== one[y * W + x]) mismatches += 1;
+        }
+        expect(mismatches).toBe(0);
+      }
+    }
+  });
+
+  it('throws a RangeError for a zoom that is not a whole number of at least 1, leaving the picture alone', () => {
+    for (const zoom of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const picture = filled(LAYOUT, 1, FILL);
+      expect(() => renderShadowSteps(picture, W, LAYOUT, shadowDrawList(0.5), zoom)).toThrow(RangeError);
+      expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+    }
+  });
+
+  it('throws a RangeError for a picture of the wrong size', () => {
+    expect(() => renderShadowSteps(new Uint32Array(W * H - 1), W, LAYOUT, shadowDrawList(0.5), 1)).toThrow(RangeError);
+    expect(() => renderShadowSteps(new Uint32Array(W * H), W, LAYOUT, shadowDrawList(0.5), 2)).toThrow(RangeError);
+  });
+
+  it('moves smoothly at zoom 5: over a run of tiny turns the shadow changes on more frames than at zoom 1, and by under an art pixel', () => {
+    let changed1 = 0;
+    let changed5 = 0;
+    let prev1 = shadowsOn(0.3, 1);
+    let prev5 = shadowsOn(0.3, 5);
+    for (let n = 1; n <= 40; n++) {
+      const turn = 0.3 + n * 0.002;
+      const one = shadowsOn(turn, 1);
+      const five = shadowsOn(turn, 5);
+      if (one.some((p, i) => p !== prev1[i])) changed1 += 1;
+      if (five.some((p, i) => p !== prev5[i])) changed5 += 1;
+      prev1 = one;
+      prev5 = five;
+    }
+    expect(changed5).toBeGreaterThan(changed1);
+    expect(changed5).toBeGreaterThanOrEqual(30);
+  });
+
+  it('a shadow at zoom 5 is not the zoom 1 shadow blown up in whole art pixels (its edges are on the finer grid)', () => {
+    let off = 0;
+    for (const turn of [0.123, 1.7, 3.0, 5.9]) {
+      const five = shadowsOn(turn, 5);
+      const side = W * 5;
+      for (let y = 0; y < H * 5; y++) {
+        for (let x = 0; x < side; x++) {
+          const blockFirst = five[(y - (y % 5)) * side + x - (x % 5)];
+          if (five[y * side + x] !== blockFirst) off += 1;
+        }
+      }
+    }
+    expect(off).toBeGreaterThan(0);
   });
 });

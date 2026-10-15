@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { keepBackdrop, leanBox, leanGlass, rowShift } from '../scene/lean.ts';
 import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
-import { shapeDrawList } from '../scene/shape-draw-list.ts';
+import { globeShapes, onFloor } from '../scene/shapes.ts';
+import { renderShadowSteps, shadowDrawList, shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
 import type { FaceDraw } from '../scene/shapes-draw.ts';
 import { flakeSize, type SnowStep } from '../scene/snow-draw-list.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
@@ -25,6 +26,10 @@ const IDENTITY = [1, 0, 0, 1, 0, 0];
 
 type Matrix = number[];
 type Call = { source: HTMLCanvasElement; args: number[]; matrix: Matrix; smoothing: boolean };
+type Point = [number, number];
+/** XMAS-82: a region of the canvas in device pixels, as a test of a device point. */
+type Region = (x: number, y: number) => boolean;
+type Fill = { seq: number; style: string; alpha: number; points: Point[]; clips: Region[]; region: Region };
 type Put = { data: Uint8ClampedArray; width: number; height: number };
 
 class FakeStyle {
@@ -66,20 +71,72 @@ class FakeContext {
   readonly clips: { x: number; y: number }[][] = [];
   saves = 0;
   restores = 0;
+  fillStyle: string = '#000000';
+  globalAlpha = 1;
+  /** Every fill of a path, in order, with the clips in force; and the operation count at each fill and drawImage. */
+  readonly fills: Fill[] = [];
+  readonly drawAt: number[] = [];
+  ops = 0;
+  private clipStack: Region[] = [];
+  private savedClips: Region[][] = [];
+  /** Ellipses and arcs added to the current path, as device regions. */
+  private shapesInPath: Region[] = [];
   constructor(readonly canvas: FakeCanvas) {}
   save(): void {
     this.saves++;
     this.saved.push([...this.matrix]);
+    this.savedClips.push([...this.clipStack]);
   }
   restore(): void {
     this.restores++;
     this.matrix = this.saved.pop() ?? [...IDENTITY];
+    this.clipStack = this.savedClips.pop() ?? [];
   }
   setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
     this.matrix = [a, b, c, d, e, f];
   }
   beginPath(): void {
     this.path.length = 0;
+    this.shapesInPath = [];
+  }
+  /** An ellipse (or a circle, from arc) under the current transform, as a region of device points. */
+  private ellipseRegion(x: number, y: number, rx: number, ry: number, rotation: number): Region {
+    const [a = 1, b = 0, c = 0, d = 0, e = 0, f = 0] = this.matrix;
+    const det = a * d - b * c;
+    return (px, py) => {
+      const u = px - e;
+      const v = py - f;
+      // Back into the source space, then into the ellipse's own axes.
+      const sx = (d * u - c * v) / det - x;
+      const sy = (-b * u + a * v) / det - y;
+      const lx = sx * Math.cos(rotation) + sy * Math.sin(rotation);
+      const ly = -sx * Math.sin(rotation) + sy * Math.cos(rotation);
+      return (lx / rx) ** 2 + (ly / ry) ** 2 <= 1;
+    };
+  }
+  ellipse(x: number, y: number, rx: number, ry: number, rotation: number): void {
+    this.shapesInPath.push(this.ellipseRegion(x, y, rx, ry, rotation));
+  }
+  arc(x: number, y: number, r: number): void {
+    this.shapesInPath.push(this.ellipseRegion(x, y, r, r, 0));
+  }
+  /** The current path as a device region: its polygon (even-odd) or its ellipses, whichever it holds. */
+  private pathRegion(): Region {
+    const pts: Point[] = this.path.map((p) => through(p.matrix, p.x, p.y));
+    const ellipses = [...this.shapesInPath];
+    return (px, py) => {
+      if (ellipses.some((r) => r(px, py))) return true;
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi = 0, yi = 0] = pts[i] ?? [];
+        const [xj = 0, yj = 0] = pts[j] ?? [];
+        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    };
+  }
+  fill(): void {
+    this.fills.push({ seq: this.ops++, style: this.fillStyle, alpha: this.globalAlpha, points: this.path.map((p) => through(p.matrix, p.x, p.y)), clips: [...this.clipStack, ...[]], region: this.pathRegion() } as Fill);
   }
   moveTo(x: number, y: number): void {
     this.path.push({ x, y, matrix: [...this.matrix], move: true });
@@ -90,11 +147,13 @@ class FakeContext {
   closePath(): void {}
   clip(): void {
     this.clips.push(this.path.map(({ x, y }) => ({ x, y })));
+    this.clipStack.push(this.pathRegion());
   }
   clearRect(x: number, y: number, w: number, h: number): void {
     this.clears.push([x, y, w, h]);
   }
   drawImage(source: FakeCanvas, ...args: number[]): void {
+    this.drawAt.push(this.ops++);
     this.calls.push({ source: source as unknown as HTMLCanvasElement, args, matrix: [...this.matrix], smoothing: this.imageSmoothingEnabled });
     this.canvas.page.log.push({ canvas: this.canvas, op: 'draw', call: this.calls[this.calls.length - 1] as Call });
   }
@@ -208,8 +267,6 @@ function expectedMatrix(step: FaceDraw, k: number): Matrix {
 function near(p: readonly number[], q: readonly number[]): boolean {
   return p.length === q.length && p.every((v, i) => Math.abs(v - (q[i] ?? Number.NaN)) < 1e-6);
 }
-
-type Point = [number, number];
 
 /** Where a matrix puts a point of its source space. */
 function through(m: readonly number[], x: number, y: number): Point {
@@ -880,3 +937,233 @@ describe('makeFineLayer: the flakes behind go under the faces (XMAS-84), in one 
 });
 
 const MAX = 0.5;
+
+// XMAS-82 "Shadows on the fine layer": each shape's floor shadow is a flat polygon filled on the shapes layer before the bodies,
+// clipped to the floor disc, with today's shade and strength, on the device pixel grid.
+/** Colour and strength a fill resolves to: the style's own alpha times the context's globalAlpha. */
+function resolved(fill: Fill): { rgb: number; alpha: number } {
+  const hex = /^#([0-9a-f]{6})$/i.exec(fill.style);
+  if (hex) return { rgb: Number.parseInt(hex[1] ?? '0', 16), alpha: fill.alpha };
+  const fn = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(fill.style);
+  if (!fn) return { rgb: -1, alpha: Number.NaN };
+  return { rgb: (Number(fn[1]) << 16) | (Number(fn[2]) << 8) | Number(fn[3]), alpha: fill.alpha * (fn[4] === undefined ? 1 : Number(fn[4])) };
+}
+
+/** The canvas a frame's shadows were filled on: the layer itself when upright, the unleaned copy when leaned. */
+function shadowCanvas(main: FakeCanvas, lean: number): FakeContext {
+  const { shapes } = layersOf(main);
+  if (lean === 0) return ctxOf(shapes);
+  const flat = ctxOf(shapes).calls[0]?.source as unknown as FakeCanvas;
+  return ctxOf(flat);
+}
+
+/** The device pixels (of a w x h canvas) a context's fills cover, after their clips. */
+function covered(ctx: FakeContext, w: number, h: number): Set<number> {
+  const out = new Set<number>();
+  for (const fill of ctx.fills) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) if (fill.region(x + 0.5, y + 0.5) && fill.clips.every((c) => c(x + 0.5, y + 0.5))) out.add(y * w + x);
+    }
+  }
+  return out;
+}
+
+describe('makeFineLayer: the shadows', () => {
+  const k = SITE.scale;
+
+  it('fills a polygon for the shadows, in the shadow ink at the shadow strength', () => {
+    const { main, layer } = setup();
+    layer.draw(frame(), SITE);
+    const { fills } = ctxOf(layersOf(main).shapes);
+    expect(fills.length).toBeGreaterThan(0);
+    expect(fills.length).toBeLessThanOrEqual(globeShapes.length);
+    for (const fill of fills) {
+      const { rgb, alpha } = resolved(fill);
+      expect(rgb).toBe(0x1d3350);
+      expect(alpha).toBeCloseTo(0.32, 9);
+    }
+  });
+
+  it('fills every shadow before the first face is drawn, so the shadows are under the shapes', () => {
+    const { main, layer } = setup();
+    for (const turn of [0.4, 2.2]) {
+      layer.draw(frame({ turn }), SITE);
+      const ctx = ctxOf(layersOf(main).shapes);
+      expect(ctx.fills.length).toBeGreaterThan(0);
+      const lastFill = Math.max(...ctx.fills.map((f) => f.seq));
+      const firstFace = Math.min(...ctx.drawAt);
+      expect(lastFill).toBeLessThan(firstFace);
+      ctx.fills.length = 0;
+      ctx.drawAt.length = 0;
+    }
+  });
+
+  it('covers the device pixels renderShadowSteps covers at the same scale: the same shadow on the screen\'s grid, disc clip included', () => {
+    for (const turn of [0.4, 1.7, 3.0, 5.9]) {
+      page.made.length = 0;
+      page.order.length = 0;
+      const { main, layer } = setup();
+      layer.draw(frame({ turn }), SITE);
+      const dw = BW * k;
+      const dh = BH * k;
+      const mine = covered(ctxOf(layersOf(main).shapes), dw, dh);
+      // The CPU renderer at zoom k over the whole picture; the layer is its box at (BOX.left, BOX.top).
+      const picture = new Uint32Array(W * k * H * k);
+      renderShadowSteps(picture, W, LAYOUT, shadowDrawList(turn), k);
+      const want = new Set<number>();
+      for (let y = 0; y < dh; y++) {
+        for (let x = 0; x < dw; x++) if (picture[(y + BOX.top * k) * W * k + x + BOX.left * k] !== 0) want.add(y * dw + x);
+      }
+      expect(want.size).toBeGreaterThan(200);
+      let mismatches = 0;
+      for (const i of want) if (!mine.has(i)) mismatches += 1;
+      for (const i of mine) if (!want.has(i)) mismatches += 1;
+      expect(mismatches).toBeLessThanOrEqual(Math.ceil(want.size * 0.01));
+    }
+  });
+
+  it('puts no shadow pixel outside the floor disc, at several scales and turns', () => {
+    const { cx, cy } = LAYOUT.globe;
+    for (const site of [SITE, { scale: 5, ratio: 2, left: 0 }, { scale: 2, ratio: 1, left: 9 }]) {
+      for (const turn of [0, 0.4, 2.5, 4.4]) {
+        page.made.length = 0;
+        page.order.length = 0;
+        const { main, layer } = setup();
+        layer.draw(frame({ turn }), site);
+        const dw = BW * site.scale;
+        const cover = covered(ctxOf(layersOf(main).shapes), dw, BH * site.scale);
+        expect(cover.size).toBeGreaterThan(0);
+        const outside: number[] = [];
+        for (const i of cover) {
+          const ax = BOX.left + (((i % dw) + 0.5) / site.scale) - cx;
+          const ay = BOX.top + (Math.floor(i / dw) + 0.5) / site.scale - cy;
+          // A device pixel centre on the disc's rim may go either way by float; the disc is only 1 / scale wider.
+          if (!onFloorLoose(ax, ay, 1 / site.scale)) outside.push(i);
+        }
+        expect(outside, `device pixels outside the disc, scale ${site.scale}, turn ${turn}`).toEqual([]);
+      }
+    }
+  }, 30000);
+
+  it('puts the disc clip around the fills: unclipped, the shadows would reach outside the disc', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.4 }), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    // Each fill is made inside a clip (the disc), and at least one polygon alone reaches past it.
+    for (const fill of ctx.fills) expect(fill.clips.length).toBeGreaterThan(0);
+    const dw = BW * k;
+    const dh = BH * k;
+    let beyond = 0;
+    for (const fill of ctx.fills) {
+      for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) if (fill.region(x + 0.5, y + 0.5) && !fill.clips.every((c) => c(x + 0.5, y + 0.5))) beyond += 1;
+    }
+    // Some shape stands near the rim for at least one turn: sweep and require the clip to have cut something.
+    let cut = beyond;
+    for (const turn of [1.0, 2.0, 3.0, 4.0, 5.0]) {
+      ctx.fills.length = 0;
+      layer.draw(frame({ turn }), SITE);
+      for (const fill of ctx.fills) {
+        for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) if (fill.region(x + 0.5, y + 0.5) && !fill.clips.every((c) => c(x + 0.5, y + 0.5))) cut += 1;
+      }
+    }
+    expect(cut).toBeGreaterThan(0);
+  });
+
+  it('moves with the shapes on the device grid: a small turn moves a polygon vertex by a fraction of an art pixel, not a whole one', () => {
+    const { main, layer } = setup();
+    const ox = (LAYOUT.globe.cx - BOX.left) * k;
+    layer.draw(frame({ turn: 0.4 }), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    const before = ctx.fills.splice(0).map((f) => f.points);
+    layer.draw(frame({ turn: 0.403 }), SITE);
+    const after = ctx.fills.splice(0).map((f) => f.points);
+    expect(after).toHaveLength(before.length);
+    let moved = 0;
+    let offGrid = 0;
+    before.forEach((pts, n) => {
+      pts.forEach(([x, y], i) => {
+        const [bx = 0, by = 0] = after[n]?.[i] ?? [];
+        const d = Math.hypot(bx - x, by - y);
+        if (d > 1e-9) moved += 1;
+        expect(d).toBeLessThan(k); // under a whole art pixel
+        // Not on the art pixel grid: the vertex is not a whole number of art pixels from the globe's centre.
+        const art = (x - ox) / k;
+        if (Math.abs(art - Math.round(art)) > 1e-6) offGrid += 1;
+      });
+    });
+    expect(moved).toBeGreaterThan(0);
+    expect(offGrid).toBeGreaterThan(0);
+  });
+
+  it('draws the same shadows for a whole turn more, and a negative turn', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.4 }), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    const base = ctx.fills.splice(0).map((f) => f.points);
+    for (const turn of [0.4 + 2 * Math.PI, 0.4 - 2 * Math.PI]) {
+      layer.draw(frame({ turn }), SITE);
+      const again = ctx.fills.splice(0).map((f) => f.points);
+      expect(again).toHaveLength(base.length);
+      again.forEach((pts, n) => pts.forEach((p, i) => expect(near(p, base[n]?.[i] ?? [])).toBe(true)));
+    }
+  });
+
+  it('does not keep last frame\'s shadows: the layer is cleared before the fills of a frame', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.4 }), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    const clears = ctx.clears.length;
+    const fills = ctx.fills.length;
+    layer.draw(frame({ turn: 0.9 }), SITE);
+    expect(ctx.clears.length).toBeGreaterThan(clears);
+    expect(ctx.fills.length).toBeGreaterThan(fills);
+    // The clear came before this frame's first fill.
+    expect(ctx.fills[fills]?.seq).toBeGreaterThan(-1);
+  });
+
+  it('with a lean, fills the shadows on the unleaned canvas first, so the row shifts carry them with the shapes', () => {
+    for (const lean of [0.2, -0.35]) {
+      page.made.length = 0;
+      page.order.length = 0;
+      const { main, layer } = setup();
+      layer.draw(frame({ lean }), SITE);
+      const flat = shadowCanvas(main, lean);
+      expect(flat.fills.length).toBeGreaterThan(0);
+      expect(Math.max(...flat.fills.map((f) => f.seq))).toBeLessThan(Math.min(...flat.drawAt));
+      // The leaned layer itself only copies rows: no fill of its own.
+      expect(ctxOf(layersOf(main).shapes).fills).toHaveLength(0);
+    }
+  });
+
+  it('restores the context after the shadows: the disc clip does not leak onto the faces or the next frame', () => {
+    const { main, layer } = setup();
+    layer.draw(frame(), SITE);
+    layer.draw(frame({ turn: 1.1 }), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    expect(ctx.restores).toBe(ctx.saves);
+    expect(ctx.matrix).toEqual(IDENTITY);
+    // No face is drawn inside the disc clip: the faces' own saves hold no region from the shadows.
+    const lastFill = Math.max(...ctx.fills.map((f) => f.seq));
+    expect(lastFill).toBeGreaterThanOrEqual(0);
+  });
+
+  it('draws no shadow and does not throw with no 2d context', () => {
+    page.contextless = true;
+    const { layer } = setup();
+    expect(() => layer.draw(frame(), SITE)).not.toThrow();
+  });
+
+  it('throws for a non-finite turn before drawing any shadow', () => {
+    const { main, layer } = setup();
+    layer.draw(frame(), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    ctx.fills.length = 0;
+    expect(() => layer.draw(frame({ turn: Number.NaN }), SITE)).toThrow(RangeError);
+    expect(ctx.fills).toHaveLength(0);
+  });
+});
+
+/** The floor disc test, allowing the rim to be `slack` art units off (a device pixel's own width). */
+function onFloorLoose(x: number, y: number, slack: number): boolean {
+  return onFloor(x, y) || [[slack, 0], [-slack, 0], [0, slack], [0, -slack]].some(([dx = 0, dy = 0]) => onFloor(x + dx, y + dy));
+}

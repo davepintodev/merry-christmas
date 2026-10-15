@@ -19,8 +19,9 @@ const SHADOW_SHIFT = 8;
 const SHADOW_SOFT = 6;
 /** How tall the shadow is on the floor, in art pixels, and how dark it gets: a deep night blue, so the shade on the snow stays cool instead of grey, and only ever darkens the floor it falls on. */
 const SHADOW_TALL = 4;
-const SHADOW_STRENGTH = 0.32;
-const SHADOW_INK = 0x1d3350;
+/** XMAS-82: exported for the fine layer, which fills the same shade at the same strength. */
+export const SHADOW_STRENGTH = 0.32;
+export const SHADOW_INK = 0x1d3350;
 
 /** Whether two colours differ by at most one step in every channel. */
 function withinOneStep(a: number, b: number): boolean {
@@ -206,11 +207,12 @@ export function paintShape(picture: Uint32Array, width: number, layout: SceneLay
 
 /**
  * The smooth shadow a shape casts on the floor to its right, away from the
- * disc at the top left: a stripe of shade along the floor under the shape,
- * running right and fading as it goes.
+ * disc at the top left, before the floor disc clip: a stripe of shade along
+ * the floor under the shape, running right and fading as it goes. Its corners
+ * (globe-centred art units) run from the shape's middle to where the fade
+ * ends, one art pixel above and SHADOW_TALL below.
  */
-function paintShadow(picture: Uint32Array, width: number, layout: SceneLayout, shape: GlobeShape, turn: number): void {
-  const { cx, cy } = layout.globe;
+export function shadowPolygon(shape: GlobeShape, turn: number): [number, number][] {
   const [baseX, baseY] = projectPoint(shape.x, shape.z, 0, turn);
   const half = Math.max(shape.width, shape.depth) / 2 + 2;
   // It runs right of the shape's middle, so the shape itself hides its near end.
@@ -218,19 +220,55 @@ function paintShadow(picture: Uint32Array, width: number, layout: SceneLayout, s
   const end = from + half + SHADOW_SHIFT;
   const first = baseY - 1;
   const last = first + SHADOW_TALL;
-  const left = Math.max(0, Math.floor(cx + from));
-  const right = Math.min(width - 1, Math.ceil(cx + end));
-  const top = Math.max(0, Math.floor(cy + first));
-  const bottom = Math.min(layout.height - 1, Math.ceil(cy + last));
+  // The shade has faded by SHADOW_SOFT / 2 short of the end.
+  const far = end - SHADOW_SOFT / 2;
+  return [
+    [from, first],
+    [far, first],
+    [far, last],
+    [from, last],
+  ];
+}
+
+/**
+ * Whether (x, y) lies in the convex `polygon`, its edges included: every
+ * edge's cross product has one sign, or is zero on the edge. A polygon with
+ * no area (a line, a point) holds nothing.
+ */
+function insidePolygon(polygon: readonly (readonly [number, number])[], x: number, y: number): boolean {
+  let twiceArea = 0;
+  let sign = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const [ax = 0, ay = 0] = polygon[i] ?? [];
+    const [bx = 0, by = 0] = polygon[(i + 1) % polygon.length] ?? [];
+    twiceArea += ax * by - bx * ay;
+    const side = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+    if (side === 0) continue;
+    if (sign === 0) sign = Math.sign(side);
+    else if (Math.sign(side) !== sign) return false;
+  }
+  return twiceArea !== 0 && sign !== 0;
+}
+
+/**
+ * Paints a shadow `polygon` (see shadowPolygon) over `picture`, `width`
+ * picture pixels across at `zoom` picture pixels to each art pixel: one flat
+ * shade on every pixel whose centre lies in the polygon and on the floor disc.
+ */
+export function paintShadowStripe(picture: Uint32Array, width: number, layout: SceneLayout, polygon: readonly (readonly [number, number])[], zoom = 1): void {
+  const { cx, cy } = layout.globe;
+  const xs = polygon.map(([x]) => x);
+  const ys = polygon.map(([, y]) => y);
+  const left = Math.max(0, Math.floor((cx + Math.min(...xs)) * zoom));
+  const right = Math.min(width - 1, Math.ceil((cx + Math.max(...xs)) * zoom));
+  const top = Math.max(0, Math.floor((cy + Math.min(...ys)) * zoom));
+  const bottom = Math.min(layout.height * zoom - 1, Math.ceil((cy + Math.max(...ys)) * zoom));
   for (let y = top; y <= bottom; y++) {
-    const dy = y + 0.5 - cy;
-    // Hard-edged: a pixel is in the shadow or it is not, one flat shade.
-    if (y + 0.5 < cy + first || y + 0.5 > cy + last) continue;
+    const dy = (y + 0.5) / zoom - cy;
     for (let x = left; x <= right; x++) {
-      const dx = x + 0.5 - cx;
+      const dx = (x + 0.5) / zoom - cx;
       // The shadow lies on the floor disc and nowhere else.
-      if (!onFloor(dx, dy)) continue;
-      if (dx < from || dx > end - SHADOW_SOFT / 2) continue;
+      if (!onFloor(dx, dy) || !insidePolygon(polygon, dx, dy)) continue;
       paintPixel(picture, y * width + x, SHADOW_INK, SHADOW_STRENGTH);
     }
   }
@@ -260,14 +298,14 @@ export function shapesFarFirst(shapes: readonly GlobeShape[], turn: number): Glo
   );
 }
 
-/** Which of a shape's two layers to draw: its cast shadows, or both. */
-export type ShapeParts = 'all' | 'shadows';
+/** Which of a shape's two layers to draw: both, only its cast shadows, or neither (XMAS-82: the fine layer draws the shadows too). */
+export type ShapeParts = 'all' | 'shadows' | 'none';
 
 /**
  * Draws `shapes` (all of globeShapes by default) turned by `turn`, nearer
  * shapes over farther ones, with their cast shadows on the floor, over
  * whatever `picture` (width art pixels across) already holds. `parts` of
- * 'shadows' leaves out the bodies. Throws a RangeError for a non-finite turn and
+ * 'shadows' leaves out the bodies, 'none' the shadows too. Throws a RangeError for a non-finite turn and
  * then leaves the picture alone.
  */
 export function drawShapes(
@@ -284,6 +322,7 @@ export function drawShapes(
   void phase;
   const t = wrapTurn(turn);
   const order = shapesFarFirst(shapes, t);
-  for (const shape of order) paintShadow(picture, width, layout, shape, t);
-  if (parts !== 'shadows') for (const shape of order) paintShape(picture, width, layout, projectShape(shape, t).map((face) => faceAxes(face)));
+  if (parts === 'none') return;
+  for (const shape of order) paintShadowStripe(picture, width, layout, shadowPolygon(shape, t));
+  if (parts === 'all') for (const shape of order) paintShape(picture, width, layout, projectShape(shape, t).map((face) => faceAxes(face)));
 }
