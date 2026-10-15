@@ -111,6 +111,17 @@ const FONT = ((): number => {
 /** Lit pixels of the uppercase lettering, the ink it carries when wholly shown. */
 const TEXT_INK = [...TEXT].reduce((sum, ch) => sum + (glyph(ch)?.pixels.filter((p) => p !== 0).length ?? 0), 0);
 
+/**
+ * Every colour any drawing uses. Sprites are point-sampled (XMAS-75), so their pixels
+ * are crisp and carry the art's own patterns; only the glass is smooth, and the glass
+ * tests look past these colours.
+ */
+const SPRITE_COLOURS = ((): Set<number> => {
+  const out = new Set<number>();
+  for (const d of Object.values(drawings)) for (const n of d.pixels) if (n !== 0) out.add(hexNum(masterColours[n - 1] ?? '#000000'));
+  return out;
+})();
+
 interface Box { x: number; y: number }
 
 /** True when the base drawing's row `row` shows exactly, its own colours, at (ox, oy + row). */
@@ -270,7 +281,7 @@ describe('sceneFrame: the globe in the picture', () => {
     }
   });
 
-  it('draws no checkerboard dither: no 2 x 2 block of two alternating colours on the glass', () => {
+  it('draws no checkerboard dither: no 2 x 2 block of two alternating colours on the glass (the sprites\' own crisp art patterns aside)', () => {
     for (const [name, phase] of READINGS) {
       for (const turn of [0, 0.7, 2.1, 5]) {
         const f = sceneFrame(input({ phase, turn }));
@@ -279,6 +290,7 @@ describe('sceneFrame: the globe in the picture', () => {
           if (!inCircle(f.layout, x + 1, y + 1, -2) || inBox(box, x + 1, y + 1)) continue;
           const a = at(f, x, y);
           const b = at(f, x + 1, y);
+          if (SPRITE_COLOURS.has(a) || SPRITE_COLOURS.has(b)) continue;
           if (a !== b && a === at(f, x + 1, y + 1) && b === at(f, x, y + 1)) {
             expect.fail(`${name} turn ${turn}: checkerboard at ${x},${y}`);
           }
@@ -681,7 +693,7 @@ describe('sceneFrame: turning the globe', () => {
         const counts = new Map<number, number>();
         for (const [x, y] of glass) {
           const c = at(f, x, y);
-          if (c !== bare.get(y * W + x)) counts.set(c, (counts.get(c) ?? 0) + 1);
+          if (c !== bare.get(y * W + x) && !SPRITE_COLOURS.has(c)) counts.set(c, (counts.get(c) ?? 0) + 1);
         }
         return new Set([...counts].filter(([, n]) => n >= 10).map(([c]) => c));
       };
@@ -696,6 +708,9 @@ describe('sceneFrame: turning the globe', () => {
           const g = bare.get(y * W + x);
           const a = at(prev, x, y);
           const b = at(next, x, y);
+          // Sprites and their hard-edged floor shadows are crisp and move whole pixels; only the
+          // reflections slide smoothly, and they ride on the upper half of the glass.
+          if (SPRITE_COLOURS.has(a) || SPRITE_COLOURS.has(b) || y >= first.layout.globe.cy) continue;
           if (b !== g && !solid.has(b)) between++;
           if (a === b) continue;
           moved++;

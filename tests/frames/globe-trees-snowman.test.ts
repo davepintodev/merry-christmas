@@ -53,6 +53,10 @@ const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => {
   return l.groundTop - l.globe.cy;
 }));
 const PINE_DRAWINGS = ['pine-1', 'pine-2', 'pine-3'];
+/** Every colour any drawing uses: the only colours a shape pixel may take besides the floor shadow's shade. */
+const SPRITE_COLOURS = new Set<number>(
+  Object.values(drawings).flatMap((d) => Array.from(d.pixels).filter((n) => n !== 0).map((n) => Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16))),
+);
 const SNOWMAN_DRAWINGS = ['snowman-body', 'snowman-face', 'snowman-arms', 'snowman-scarf', 'snowman-buttons'];
 const TURNING_KINDS = new Set(['house', 'present', 'lamp-post']);
 
@@ -62,6 +66,17 @@ function hexNum(hex: string): number {
 
 function rgb(n: number): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** The floor shadow's flat shade (shapes-draw.ts): this ink at this share over what is under it. */
+const SHADOW_INK = 0x1d3350;
+const SHADOW_SHARE = 0.32;
+
+function shadeOver(under: number): number {
+  const [r, g, b] = rgb(under);
+  const [ir, ig, ib] = rgb(SHADOW_INK);
+  const mix = (u: number, i: number): number => Math.round(u + (i - u) * SHADOW_SHARE);
+  return (mix(r, ir) << 16) | (mix(g, ig) << 8) | mix(b, ib);
 }
 
 function drawing(name: string): Drawing {
@@ -213,39 +228,68 @@ function onlyIn(name: string, others: readonly string[]): Set<number> {
 
 /**
  * Draws `shape` alone over a plain background at every 0.001 rad all the way
- * round, in the smallest picture, and returns the largest change of any
- * channel of any pixel between neighbouring turns, and where.
+ * round, in the smallest picture. Returns the first pixel that is not crisp
+ * (neither the background, one of the drawings' own colours nor the floor
+ * shadow's flat shade, once or laid over itself) and, for the pixels in a
+ * drawing's own colours, the furthest any edge of their box jumped in one
+ * step, with where.
  */
-function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = sceneLayout(161, 160, SEED)): [number, string] {
+function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = sceneLayout(161, 160, SEED)): { bad: string; jump: number; where: string } {
   const shapes: readonly GlobeShape[] = Array.isArray(shape) ? shape : [shape as GlobeShape];
   const width = layout.width;
+  const allowed = new Set<number>([FILL_A, ...SPRITE_COLOURS]);
+  let shade = FILL_A;
+  for (let n = 0; n < 4; n++) {
+    shade = shadeOver(shade);
+    allowed.add(shade);
+  }
   const paint = (t: number): Uint32Array => {
     const pic = new Uint32Array(width * layout.height).fill(FILL_A);
     drawShapes(pic, width, layout, NIGHT, t, shapes);
     return pic;
   };
+  const boxOf = (pic: Uint32Array): [number, number, number, number] => {
+    let l = Infinity;
+    let r = -Infinity;
+    let tp = Infinity;
+    let bt = -Infinity;
+    for (let i = 0; i < pic.length; i++) {
+      if (!SPRITE_COLOURS.has(pic[i] ?? -1)) continue;
+      l = Math.min(l, i % width);
+      r = Math.max(r, i % width);
+      tp = Math.min(tp, Math.floor(i / width));
+      bt = Math.max(bt, Math.floor(i / width));
+    }
+    return [l, r, tp, bt];
+  };
   const STEP = 0.001;
-  let prev = paint(0);
-  let worst = 0;
+  let prev = boxOf(paint(0));
+  let bad = '';
+  let jump = 0;
   let where = '';
   for (let k = 1; k * STEP <= FULL + STEP; k++) {
     const t = k * STEP;
-    const next = paint(t);
-    for (let i = 0; i < next.length; i++) {
-      const p = prev[i] ?? 0;
-      const n = next[i] ?? 0;
-      if (p === n) continue;
-      const [pr, pg, pb] = rgb(p);
-      const [nr, ng, nb] = rgb(n);
-      const jump = Math.max(Math.abs(pr - nr), Math.abs(pg - ng), Math.abs(pb - nb));
-      if (jump > worst) {
-        worst = jump;
-        where = `turn ${(t - STEP).toFixed(3)} -> ${t.toFixed(3)} pixel ${i % width},${Math.floor(i / width)}`;
+    const pic = paint(t);
+    if (bad === '') {
+      for (let i = 0; i < pic.length; i++) {
+        if (!allowed.has(pic[i] ?? -1)) {
+          bad = `turn ${t.toFixed(3)} pixel ${i % width},${Math.floor(i / width)}: ${(pic[i] ?? 0).toString(16)}`;
+          break;
+        }
+      }
+    }
+    const next = boxOf(pic);
+    // A single drawing's box moves by whole pixels, never far, as it turns (a shape that comes into or leaves the picture aside).
+    if (Number.isFinite(prev[0]) && Number.isFinite(next[0])) {
+      const step = Math.max(...next.map((v, j) => Math.abs(v - (prev[j] ?? 0))));
+      if (step > jump) {
+        jump = step;
+        where = `turn ${(t - STEP).toFixed(3)} -> ${t.toFixed(3)}`;
       }
     }
     prev = next;
   }
-  return [worst, where];
+  return { bad, jump, where };
 }
 
 describe('globeShapes: the pines and the snowman', () => {
@@ -457,69 +501,55 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
       for (let k = 0; k < 24; k++) {
         const t = (k * FULL) / 24 + 0.013;
         const covered = solidIndexes(drawn(t, [p]));
-        // Sliding between grid columns blends the edge pixels, so not every pixel is whole.
-        expect(covered.length, `${pineName(p)} turn ${t.toFixed(2)}: covered pixels`).toBeGreaterThanOrEqual(0.4 * opaqueCount(d));
+        // Point-sampled: a pine slid off the grid keeps nearly every pixel of its drawing, give or take its edge rows and columns.
+        expect(covered.length, `${pineName(p)} turn ${t.toFixed(2)}: covered pixels`).toBeGreaterThanOrEqual(0.8 * opaqueCount(d));
         expect(covered.length, `${pineName(p)} turn ${t.toFixed(2)}: no bigger than its drawing`).toBeLessThanOrEqual(opaqueCount(d));
       }
     }
   });
 
-  // Review (XMAS-32c round 1): off the grid a pine pixel is the in-between
-  // shade of the drawing pixels it straddles, by their shares of it; it never
-  // snaps to one of them.
-  it('paints each pine off the grid as the share-weighted mix of the drawing pixels under each picture pixel, never snapped to one', () => {
+  // XMAS-75: sprites are point-sampled. Off the grid a pine pixel takes the one
+  // drawing pixel under its centre, whole: its colour is one of the drawing's
+  // own, never a mix of the pixels it straddles.
+  it('paints each pine off the grid as the one drawing pixel under each picture pixel\'s centre, never a mix', () => {
     expect(pines().length).toBe(3);
     const { cx, cy } = LAYOUT.globe;
     for (const p of pines()) {
       const name = pineName(p);
       const d = drawing(name);
+      const own = palette(d);
       let checked = 0;
-      let mixes = 0;
+      let offGrid = 0;
       const wrong: string[] = [];
       for (let k = 0; k < 24; k++) {
         const t = (k * FULL) / 24 + 0.013;
         const f = only(projectShape(p, t));
         const [ax, ay] = corner(f, 0);
         const pic = drawn(t, [p]);
+        // Every solid pixel is one of the drawing's own colours.
         for (const i of solidIndexes(pic)) {
-          const x = i % W;
-          const y = Math.floor(i / W);
-          // The picture pixel in the drawing's pixels: the face is upright and unscaled.
-          const u0 = x - cx - ax;
-          const v0 = y - cy - ay;
-          let area = 0;
-          let opaque = true;
-          const sum = [0, 0, 0];
-          const seen = new Set<number>();
-          for (let v = Math.floor(v0); v < v0 + 1; v++) {
-            for (let u = Math.floor(u0); u < u0 + 1; u++) {
-              const share = (Math.min(u + 1, u0 + 1) - Math.max(u, u0)) * (Math.min(v + 1, v0 + 1) - Math.max(v, v0));
-              if (share <= 1e-9) continue;
-              const c = u >= 0 && v >= 0 && u < d.width && v < d.height ? colourAt(d, u, v) : -1;
-              if (c < 0) {
-                opaque = false;
-                continue;
-              }
-              seen.add(c);
-              area += share;
-              rgb(c).forEach((ch, j) => (sum[j] = (sum[j] ?? 0) + ch * share));
-            }
-          }
-          // A pixel the drawing only partly covers is wholly covered only by
-          // the blend's rounding; check the pixels its opaque pixels fill.
-          if (!opaque || area < 1 - 1e-6) continue;
-          checked++;
-          const want = sum.map((s) => s / area);
-          if (seen.size > 1 && want.some((w, j) => [...seen].every((c) => Math.abs(rgb(c)[j] - w) > 4))) mixes++;
-          const got = rgb(pic.a[i] ?? 0);
-          if (got.some((ch, j) => Math.abs(ch - (want[j] ?? 0)) > 2) && wrong.length < 8) {
-            wrong.push(`turn ${t.toFixed(2)} pixel ${x},${y}: ${got.join(',')} is not the mix ${want.map((w) => w.toFixed(1)).join(',')}`);
+          if (!own.has(pic.a[i] ?? -1)) wrong.push(`turn ${t.toFixed(2)} pixel ${i % W},${Math.floor(i / W)}: ${(pic.a[i] ?? 0).toString(16)} is not a colour of ${name}`);
+        }
+        const y0 = Math.floor(cy + ay) - 1;
+        const x0 = Math.floor(cx + ax) - 1;
+        for (let y = y0; y <= y0 + d.height + 2; y++) {
+          for (let x = x0; x <= x0 + d.width + 2; x++) {
+            const u = x + 0.5 - cx - ax;
+            const v = y + 0.5 - cy - ay;
+            // A pixel centre on a drawing pixel's edge is a tie: skip it.
+            if (Math.abs(u - Math.round(u)) < 1e-6 || Math.abs(v - Math.round(v)) < 1e-6) continue;
+            const want = u >= 0 && v >= 0 && u < d.width && v < d.height ? colourAt(d, Math.floor(u), Math.floor(v)) : -1;
+            if (want < 0) continue;
+            checked++;
+            if (Math.abs(ax - Math.round(ax)) > 1e-3) offGrid++;
+            const i = y * W + x;
+            if ((pic.a[i] !== want || pic.b[i] !== want) && wrong.length < 8) wrong.push(`turn ${t.toFixed(2)} pixel ${x},${y}: ${(pic.a[i] ?? 0).toString(16)} is not the drawing pixel ${want.toString(16)} under its centre`);
           }
         }
       }
-      expect(checked, `${name}: wholly covered pixels checked`).toBeGreaterThan(0);
-      expect(mixes, `${name}: pixels whose mix is none of the drawing colours`).toBeGreaterThan(0);
-      expect(wrong, `${name}: pixels not the in-between shade`).toEqual([]);
+      expect(checked, `${name}: pixels checked`).toBeGreaterThan(100);
+      expect(offGrid, `${name}: pixels checked off the grid`).toBeGreaterThan(0);
+      expect(wrong, `${name}: pixels not the drawing pixel under their centre`).toEqual([]);
     }
   });
 
@@ -582,28 +612,31 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
     }
   });
 
-  it('turns his face, arms and scarf by in-between shades: 0.001 rad never moves a pixel by more than a small step, all the way round', () => {
-    const [worst, where] = sweep(only(snowmen()));
-    expect(worst, `largest one-step change (${where})`).toBeLessThanOrEqual(32);
+  it('turns his face, arms and scarf in whole pixels: 0.001 rad never makes a mixed pixel, and his box never jumps more than two pixels, all the way round', () => {
+    const { bad, jump, where } = sweep(only(snowmen()));
+    expect(bad, 'first pixel that is not crisp').toBe('');
+    expect(jump, `furthest his box jumped in one step (${where})`).toBeLessThanOrEqual(2);
   }, 60_000);
 
-  // Review (XMAS-32c round 1): the pines slide on the grid by in-between
-  // shades too, never popping a pixel from the background to a pine colour.
-  it.each([0, 1, 2])('slides pine %s by in-between shades: 0.001 rad never moves a pixel by more than a small step, all the way round', (k) => {
+  // XMAS-75: the pines slide on the grid in whole pixels too, never a mix.
+  it.each([0, 1, 2])('slides pine %s in whole pixels: 0.001 rad never makes a mixed pixel, and its box never jumps more than a pixel, all the way round', (k) => {
     const list = [...pines()].sort((a, b) => pineName(a).localeCompare(pineName(b)));
     expect(list.length).toBe(3);
     const p = list[k] as GlobeShape;
-    const [worst, where] = sweep(p);
-    expect(worst, `${pineName(p)}: largest one-step change (${where})`).toBeLessThanOrEqual(32);
+    const { bad, jump, where } = sweep(p);
+    expect(bad, `${pineName(p)}: first pixel that is not crisp`).toBe('');
+    expect(jump, `${pineName(p)}: furthest its box jumped in one step (${where})`).toBeLessThanOrEqual(1);
   }, 60_000);
 
   // Review bug (XMAS-32c round 2): a pine stood so near a present that its
   // drawing overlaps the present on screen while the two swap depth order
   // flips a whole patch of pixels from one to the other within 0.001 rad.
-  it('turns the whole globe (all its shapes together) by in-between shades: 0.001 rad never moves a pixel by more than a small step, all the way round', () => {
+  // Point-sampled, a swap is a crisp pop by design, so what is pinned is that
+  // every pixel stays a drawing's own colour or the shadow's flat shade.
+  it('turns the whole globe (all its shapes together) in whole pixels: 0.001 rad never makes a mixed pixel, all the way round', () => {
     expect(globeShapes.length).toBe(14);
-    const [worst, where] = sweep(globeShapes, LAYOUT);
-    expect(worst, `largest one-step change (${where})`).toBeLessThanOrEqual(32);
+    const { bad } = sweep(globeShapes, LAYOUT);
+    expect(bad, 'first pixel that is not crisp').toBe('');
   }, 300_000);
 
   // Review gap (XMAS-32c round 3): the pines and the snowman stand clear of
@@ -615,7 +648,7 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
     const all = drawn(0, globeShapes);
     // The house's pixels the other turning shapes leave as they are.
     const mine = solidIndexes(alone).filter((i) => without.a[i] === alone.a[i] && without.b[i] === alone.b[i]);
-    expect(mine.length, 'house pixels at turn 0').toBeGreaterThanOrEqual(22 * 12);
+    expect(mine.length, 'house pixels at turn 0').toBeGreaterThanOrEqual(28 * 15);
     const changed = mine.filter((i) => all.a[i] !== alone.a[i] || all.b[i] !== alone.b[i]).map((i) => `${i % W},${Math.floor(i / W)}`);
     expect(changed, 'house pixels a pine or the snowman covers at turn 0').toEqual([]);
   });
@@ -683,6 +716,8 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
           if (quad.every((i) => solid(d, i))) continue;
           for (const pic of [d.a, d.b]) {
             const [p, q, r, s] = quad.map((i) => pic[i] ?? -1) as [number, number, number, number];
+            // A diagonal edge of a crisp sprite against the background is two stair-stepped pixels, not a dither.
+            if (SPRITE_COLOURS.has(p) || SPRITE_COLOURS.has(q)) continue;
             if (p !== q && p === s && q === r) expect.fail(`turn ${turn}: checkerboard at ${x},${y}`);
           }
         }

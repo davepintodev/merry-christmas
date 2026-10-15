@@ -1,16 +1,17 @@
 // XMAS-32d "The globe", slice 4: Santa with his sleigh and two reindeer
 // circling high inside the globe (XMAS-32 acceptance criteria). He is one flat
-// drawing (santa-trot-1 / santa-trot-2, 46 x 9 art pixels, from the Santa
+// drawing (santa-trot-1 / santa-trot-2, 48 x 12 art pixels, from the Santa
 // sheet) with two trot frames, squeezed across by how far round his orbit he
 // is (never below 0.3, so he never vanishes), mirrored when flying the other
-// way, blended on the fixed grid so his motion never pops, clipped to the
+// way, point-sampled onto whole picture pixels (crisp: every pixel is one of
+// his own colours, never a mix; XMAS-75), clipped to the
 // glass, and painted in his own colours whatever the phase. Same inputs give
 // the same picture; nothing is random.
 //
 // Interface pinned here (from prototype/visual-direction/variant-b.js):
 //   santaPlacement(turn, timeMs) -> { angle, x, y, depth, squeeze, mirrored, trot }
 //     relative to the globe's centre in art pixels (x right, y down), with
-//     t = timeMs / 1000, R = 56, lim = R - 3, orbit = lim * 0.48:
+//     t = timeMs / 1000, R = 56, lim = R - 3, orbit = lim * 0.42:
 //     angle = 2 + turn + 0.45 t, depth = sin(angle), x = cos(angle) * orbit,
 //     y = -0.46 R + 2 sin(1.3 t) + depth * orbit * tilt (tilt: the ground tilt
 //     projectPoint uses for depth), squeeze = max(0.3, |depth|),
@@ -60,7 +61,7 @@ const FULL = 2 * Math.PI;
 const LAYOUT = sceneLayout(W, H, SEED);
 const R = 56;
 const LIM = R - 3;
-const ORBIT = LIM * 0.48;
+const ORBIT = LIM * 0.42;
 /** The ground tilt the shapes use: a step towards the visitor moves a floor point this far down. */
 const TILT = projectPoint(0, 1, 0, 0)[1] - projectPoint(0, 0, 0, 0)[1];
 /** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by Santa. */
@@ -68,6 +69,8 @@ const FILL_A = 0x010203;
 const FILL_B = 0xfdfcfb;
 /** One scene step: 60 a second. */
 const STEP_MS = 1000 / 60;
+/** The most whole pixels any edge of his painted box may jump in one step (transparent edge columns allow a little more than one). */
+const WORST_STEP = 2;
 /** Seconds Santa takes to go once round his orbit at a fixed turn. */
 const ORBIT_SECONDS = FULL / 0.45;
 
@@ -164,6 +167,22 @@ function box(d: Drawn): Box {
   return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
 }
 
+/** The painted pixels' box on a picture that was filled with FILL_A. */
+function pixelBox(pic: Uint32Array): Box {
+  let left = Infinity;
+  let right = -Infinity;
+  let top = Infinity;
+  let bottom = -Infinity;
+  for (let i = 0; i < pic.length; i++) {
+    if (pic[i] === FILL_A) continue;
+    left = Math.min(left, i % W);
+    right = Math.max(right, i % W);
+    top = Math.min(top, Math.floor(i / W));
+    bottom = Math.max(bottom, Math.floor(i / W));
+  }
+  return { left, right, top, bottom };
+}
+
 /** A turn that puts Santa at `angle` at timeMs. */
 function turnFor(angle: number, timeMs: number): number {
   return angle - 2 - (timeMs / 1000) * 0.45;
@@ -171,33 +190,40 @@ function turnFor(angle: number, timeMs: number): number {
 
 /**
  * A (turn, time) at which Santa flies at depth `side` (+1 in front, -1
- * behind), so squeeze is 1 and x is 0, in trot frame `trot`, with his top
- * row on a whole art pixel: y + cy - 4.5 is whole. With a whole-pixel globe centre,
- * his left edge cx - 23 is whole too, so he lands on the grid.
+ * behind), so squeeze is 1 and x is 0, in trot frame `trot`. Sprites are
+ * point-sampled onto whole pixels, so any such time lands him on the grid.
  */
-function onGrid(side: 1 | -1, trot: 0 | 1, layout: SceneLayout): { turn: number; time: number } {
-  const y = (t: number): number => layout.globe.cy - R * 0.46 + Math.sin(t * 1.3) * 2 + side * ORBIT * TILT - 4.5;
-  for (let m = 1; m < 200; m++) {
-    const a = (2 * m + trot) / 7 + 0.01;
-    const b = (2 * m + trot + 1) / 7 - 0.01;
-    const N = 64;
-    for (let k = 0; k < N; k++) {
-      let lo = a + ((b - a) * k) / N;
-      let hi = a + ((b - a) * (k + 1)) / N;
-      if (Math.floor(y(lo)) === Math.floor(y(hi))) continue;
-      const n = Math.max(Math.floor(y(lo)), Math.floor(y(hi)));
-      const rising = y(hi) > y(lo);
-      for (let i = 0; i < 200; i++) {
-        const mid = (lo + hi) / 2;
-        if ((y(mid) >= n) === rising) hi = mid;
-        else lo = mid;
-      }
-      const t = (lo + hi) / 2;
-      const time = t * 1000;
-      return { turn: turnFor((side * Math.PI) / 2, time), time };
+function onGrid(side: 1 | -1, trot: 0 | 1): { turn: number; time: number } {
+  const time = ((trot + 0.5) / 7) * 1000;
+  return { turn: turnFor((side * Math.PI) / 2, time), time };
+}
+
+/**
+ * The picture Santa should paint, worked out here from the spec: a box of
+ * round(48 * squeeze) columns by 12 rows, placed at the rounded centre,
+ * each column taking the one drawing column under its centre (mirrored when
+ * flying the other way), transparent pixels skipped, clipped to the glass.
+ */
+function reference(turn: number, timeMs: number, layout: SceneLayout = LAYOUT): Map<number, number> {
+  const p = expected(turn, timeMs);
+  const d = TROT[p.trot];
+  const span = Math.max(1, Math.round(d.width * p.squeeze));
+  const left = Math.round(layout.globe.cx + p.x - span / 2);
+  const top = Math.round(layout.globe.cy + p.y - d.height / 2);
+  const out = new Map<number, number>();
+  for (let y = 0; y < d.height; y++) {
+    for (let x = 0; x < span; x++) {
+      const px = left + x;
+      const py = top + y;
+      const dx = px + 0.5 - layout.globe.cx;
+      const dy = py + 0.5 - layout.globe.cy;
+      if (dx * dx + dy * dy > layout.globe.radius ** 2) continue;
+      const sx = Math.floor(((x + 0.5) / span) * d.width);
+      const c = colourAt(d, p.mirrored ? d.width - 1 - sx : sx, y);
+      if (c >= 0) out.set(py * layout.width + px, c);
     }
   }
-  throw new Error('no on-grid time found');
+  return out;
 }
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
@@ -362,9 +388,9 @@ describe('santaPlacement: where Santa flies', () => {
 });
 
 describe('the Santa drawings', () => {
-  it('are two 46 x 9 trot frames from the Santa sheet that differ, in the same colours', () => {
+  it('are two 48 x 12 trot frames from the Santa sheet that differ, in the same colours', () => {
     for (const d of TROT) {
-      expect([d.width, d.height]).toEqual([46, 9]);
+      expect([d.width, d.height]).toEqual([48, 12]);
       expect(d.sheet).toBe('santa.png');
     }
     expect(Array.from(TROT[0].pixels)).not.toEqual(Array.from(TROT[1].pixels));
@@ -376,7 +402,7 @@ describe('drawSanta: Santa in the picture', () => {
   it.each([[0, 'santa-trot-1'], [1, 'santa-trot-2']] as const)(
     'paints trot frame %s on the grid at squeeze 1 on the far side as %s, pixel for pixel, unmirrored',
     (trot, name) => {
-      const { turn, time } = onGrid(-1, trot, LAYOUT);
+      const { turn, time } = onGrid(-1, trot);
       const p = expected(turn, time);
       expect(p.trot).toBe(trot);
       expect(p.mirrored).toBe(false);
@@ -406,7 +432,7 @@ describe('drawSanta: Santa in the picture', () => {
   it.each([[0, 'santa-trot-1'], [1, 'santa-trot-2']] as const)(
     'paints trot frame %s on the grid at squeeze 1 on the near side as the horizontal mirror of %s',
     (trot, name) => {
-      const { turn, time } = onGrid(1, trot, LAYOUT);
+      const { turn, time } = onGrid(1, trot);
       const p = expected(turn, time);
       expect(p.trot).toBe(trot);
       expect(p.mirrored).toBe(true);
@@ -440,18 +466,19 @@ describe('drawSanta: Santa in the picture', () => {
     }
   });
 
-  it('squeezes him across by his squeeze and keeps his full height', () => {
+  it('squeezes him across by his squeeze and keeps his full height: exactly the pixels the sampled drawing gives, at every angle', () => {
     for (const angle of [0, 0.4, 0.9, Math.PI / 2, 2.5, Math.PI, 4, -Math.PI / 2, 5.6]) {
       const time = 1_700;
       const turn = turnFor(angle, time);
-      const p = expected(turn, time);
-      const b = box(drawn(turn, time));
-      const across = b.right - b.left + 1;
-      expect(across, `angle ${angle}: columns`).toBeGreaterThanOrEqual(Math.floor(46 * p.squeeze) - 1);
-      expect(across, `angle ${angle}: columns`).toBeLessThanOrEqual(Math.ceil(46 * p.squeeze) + 1);
-      const down = b.bottom - b.top + 1;
-      expect(down, `angle ${angle}: rows`).toBeGreaterThanOrEqual(9);
-      expect(down, `angle ${angle}: rows`).toBeLessThanOrEqual(10);
+      const want = reference(turn, time);
+      expect(want.size, `angle ${angle}: reference draws something`).toBeGreaterThan(0);
+      const pic = drawn(turn, time);
+      const got = new Map(touchedIndexes(pic).map((i) => [i, pic.a[i] ?? 0] as const));
+      expect([...got].sort((x, y) => x[0] - y[0]), `angle ${angle}`).toEqual([...want].sort((x, y) => x[0] - y[0]));
+      const b = box(pic);
+      const span = Math.round(48 * expected(turn, time).squeeze);
+      expect(b.right - b.left + 1, `angle ${angle}: columns`).toBeLessThanOrEqual(span);
+      expect(b.bottom - b.top + 1, `angle ${angle}: rows`).toBeLessThanOrEqual(12);
     }
   });
 
@@ -471,25 +498,22 @@ describe('drawSanta: Santa in the picture', () => {
     }
   });
 
-  it('blends him on the grid off the grid: some edge pixels are an in-between shade, none of his colours nor the background', () => {
-    const time = 2_345;
-    const turn = turnFor(0.7, time);
-    const pic = drawn(turn, time);
-    const between = touchedIndexes(pic).filter((i) => {
-      const c = pic.a[i] ?? -1;
-      return c !== FILL_A && !SANTA_COLOURS.has(c);
-    });
-    expect(between.length).toBeGreaterThan(0);
+  it('draws crisp at every angle: each pixel he touches is wholly one of his colours, never a mix or a tint of the background', () => {
+    let seen = 0;
+    for (let k = 0; k < 90; k++) {
+      const time = 137 + k * 311.3;
+      const turn = 0.29 * k;
+      const pic = drawn(turn, time);
+      for (const i of touchedIndexes(pic)) {
+        seen++;
+        expect(pic.a[i], `k ${k}: pixel ${i} over the first background`).toBe(pic.b[i]);
+        expect(SANTA_COLOURS.has(pic.a[i] ?? -1), `k ${k}: pixel ${i} colour ${(pic.a[i] ?? 0).toString(16)}`).toBe(true);
+      }
+    }
+    expect(seen).toBeGreaterThan(1_000);
   });
 
-  it('moves smoothly: between one 1/60 s step and the next no pixel changes by more than half a full pop, all the way round', () => {
-    // Over the near-black background white (#ffffff) Santa pixels would pop by
-    // 250 per channel if he snapped to whole pixels; blended edges move a few
-    // tenths of a pixel a step.
-    expect(SANTA_COLOURS.has(0xffffff), 'Santa has white, so a snap would show').toBe(true);
-    const { cx, cy } = LAYOUT.globe;
-    const x0 = cx - R;
-    const y0 = cy - R;
+  it('moves in whole pixels: from one 1/60 s step to the next his box edges move by whole pixels, never far, and every pixel is still his colour or the background', () => {
     const paint = (time: number): Uint32Array => {
       const pic = new Uint32Array(W * H).fill(FILL_A);
       drawSanta(pic, W, LAYOUT, 0.25, time);
@@ -505,33 +529,25 @@ describe('drawSanta: Santa in the picture', () => {
       const next = paint(time);
       const a = expected(0.25, prevTime);
       const b = expected(0.25, time);
+      for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
       // A trot frame change and the flip at the ends of the orbit are meant to change the drawing.
       if (a.trot === b.trot && a.mirrored === b.mirrored) {
         compared++;
-        for (let y = y0; y < cy; y++) {
-          for (let x = x0; x < cx + R; x++) {
-            const i = y * W + x;
-            const p = prev[i] ?? 0;
-            const n = next[i] ?? 0;
-            if (p === n) continue;
-            const [pr, pg, pb] = rgb(p);
-            const [nr, ng, nb] = rgb(n);
-            const jump = Math.max(Math.abs(pr - nr), Math.abs(pg - ng), Math.abs(pb - nb));
-            if (jump > worst) {
-              worst = jump;
-              where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)} pixel ${x},${y}`;
-            }
-          }
+        const [pb, nb] = [pixelBox(prev), pixelBox(next)];
+        const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
+        if (changed > worst) {
+          worst = changed;
+          where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
         }
       }
       prev = next;
       prevTime = time;
     }
     expect(compared, 'steps compared').toBeGreaterThan(300);
-    expect(worst, `largest one-step change (${where})`).toBeLessThanOrEqual(128);
+    expect(worst, `furthest an edge of his box jumped in one step (${where})`).toBeLessThanOrEqual(WORST_STEP);
   }, 60_000);
 
-  it('moves smoothly under the page\'s own turn too: time and turn advancing together never pop a pixel', () => {
+  it('moves in whole pixels under the page\'s own turn too: time and turn advancing together move his box edges by a pixel or two a step', () => {
     const turnAt = (time: number): number => 0.5 + (time / 1000) * (FULL / 60);
     const paint = (time: number): Uint32Array => {
       const pic = new Uint32Array(W * H).fill(FILL_A);
@@ -547,24 +563,19 @@ describe('drawSanta: Santa in the picture', () => {
       const next = paint(time);
       const a = expected(turnAt(prevTime), prevTime);
       const b = expected(turnAt(time), time);
+      for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
       if (a.trot === b.trot && a.mirrored === b.mirrored) {
-        for (let i = 0; i < next.length; i++) {
-          const p = prev[i] ?? 0;
-          const n = next[i] ?? 0;
-          if (p === n) continue;
-          const [pr, pg, pb] = rgb(p);
-          const [nr, ng, nb] = rgb(n);
-          const jump = Math.max(Math.abs(pr - nr), Math.abs(pg - ng), Math.abs(pb - nb));
-          if (jump > worst) {
-            worst = jump;
-            where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)} pixel ${i % W},${Math.floor(i / W)}`;
-          }
+        const [pb, nb] = [pixelBox(prev), pixelBox(next)];
+        const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
+        if (changed > worst) {
+          worst = changed;
+          where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
         }
       }
       prev = next;
       prevTime = time;
     }
-    expect(worst, `largest one-step change (${where})`).toBeLessThanOrEqual(128);
+    expect(worst, `furthest an edge of his box jumped in one step (${where})`).toBeLessThanOrEqual(WORST_STEP);
   }, 60_000);
 
   it('draws the two trot frames differently: the legs move between frames at the same place', () => {
@@ -665,14 +676,17 @@ describe('drawGlobe: Santa in the depth order', () => {
   const FRONT = BEHIND + (Math.PI / 0.45) * 1000;
   const TURN = turnFor(-Math.PI / 2, BEHIND);
 
-  it('puts him behind at one time and in front half an orbit later, in rows that do not overlap', () => {
+  it('puts him behind at one time and in front half an orbit later, lower down the picture and flying the other way', () => {
     const back = santaPlacement(TURN, BEHIND);
     const front = santaPlacement(TURN, FRONT);
     expect(back.depth).toBeCloseTo(-1, 9);
     expect(front.depth).toBeCloseTo(1, 9);
-    const backRows = new Set(santaAlone(TURN, BEHIND).touched.map((i) => Math.floor(i / W)));
+    expect(back.mirrored).toBe(false);
+    expect(front.mirrored).toBe(true);
+    const mean = (rows: number[]): number => rows.reduce((a, b) => a + b, 0) / rows.length;
+    const backRows = santaAlone(TURN, BEHIND).touched.map((i) => Math.floor(i / W));
     const frontRows = santaAlone(TURN, FRONT).touched.map((i) => Math.floor(i / W));
-    expect(frontRows.filter((r) => backRows.has(r))).toEqual([]);
+    expect(mean(frontRows) - mean(backRows), 'the near side sits lower by about the ground tilt').toBeGreaterThan(front.y - back.y - 3);
   });
 
   it('draws him over the glass: with the real shapes his box shows him, not the glass', () => {
@@ -688,10 +702,16 @@ describe('drawGlobe: Santa in the depth order', () => {
     const back = santaAlone(TURN, BEHIND);
     expect(back.touched.length).toBeGreaterThan(0);
     const p = globe(TURN, BEHIND);
-    const q = globe(TURN, FRONT);
-    const shown = back.touched.filter((i) => p[i] !== q[i]).map((i) => `${i % W},${Math.floor(i / W)}`);
+    const { cx, cy, radius } = LAYOUT.globe;
+    const inBlock = (i: number): boolean => {
+      const x = i % W;
+      const y = Math.floor(i / W);
+      return x >= Math.round(cx - 45) && x < Math.round(cx + 45) && y >= Math.round(cy - 45) && y < Math.round(cy - 5) && Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= radius - 3;
+    };
+    const covered = back.touched.filter(inBlock);
+    expect(covered.length, 'his box reaches the shape').toBeGreaterThan(0);
+    const shown = covered.filter((i) => p[i] !== BLOCK).map((i) => `${i % W},${Math.floor(i / W)}`);
     expect(shown, 'pixels where Santa shows through the shape in front of him').toEqual([]);
-    expect(back.touched.some((i) => p[i] === BLOCK), 'the shape shows where he is').toBe(true);
   });
 
   it('draws him over an opaque shape while he flies on the near side (depth > 0)', () => {

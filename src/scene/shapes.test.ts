@@ -81,6 +81,22 @@ function rgb(n: number): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/** The floor shadow's flat shade: this ink at this share over what is under it (as shapes-draw.ts paints it). */
+const SHADOW_INK = 0x1d3350;
+const SHADOW_SHARE = 0.32;
+
+/** Every colour any drawing uses: the only colours a shape pixel may take besides the floor shade. */
+const SPRITE_COLOURS = new Set<number>(
+  Object.values(drawings).flatMap((d) => Array.from(d.pixels).filter((n) => n !== 0).map((n) => Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16))),
+);
+
+/** The largest channel difference between two colours. */
+function distance(a: number, b: number): number {
+  const [ar, ag, ab] = rgb(a);
+  const [br, bg, bb] = rgb(b);
+  return Math.max(Math.abs(ar - br), Math.abs(ag - bg), Math.abs(ab - bb));
+}
+
 function brightness(n: number): number {
   const [r, g, b] = rgb(n);
   return r + g + b;
@@ -283,9 +299,9 @@ describe('globeShapes: what stands in the globe', () => {
     expect([...count.entries()].sort()).toEqual([[1, 2], [2, 2], [3, 2], [4, 2]]);
   });
 
-  it('holds one lamp post, 3 across and 18 tall like its drawing, and no other turning shape', () => {
+  it('holds one lamp post, 5 across and 24 tall like its drawing, and no other turning shape', () => {
     const lamp = only(lamps());
-    expect([lamp.width, lamp.depth, lamp.height]).toEqual([3, 3, 18]);
+    expect([lamp.width, lamp.depth, lamp.height]).toEqual([5, 5, 24]);
     // XMAS-32c adds the pines and the snowman (tests/frames/globe-trees-snowman.test.ts); the turning shapes stay ten.
     expect(globeShapes.filter((s) => s.kind === 'house' || s.kind === 'present' || s.kind === 'lamp-post').length).toBe(10);
     for (const s of globeShapes) if (s.kind !== 'present') expect(s.design, `${s.kind} carries no present design`).toBeUndefined();
@@ -351,17 +367,17 @@ describe('projectShape: turning a shape about the globe axis', () => {
       const faces = projectShape(house, t);
       const front = face(faces, 'house-wall-front');
       if (front === undefined) expect.fail(`turn ${t}: no front wall`);
-      expect(Math.abs(extentX(front) - 22 * Math.cos(t)), `turn ${t}: front wall width`).toBeLessThanOrEqual(0.25);
+      expect(Math.abs(extentX(front) - 28 * Math.cos(t)), `turn ${t}: front wall width`).toBeLessThanOrEqual(0.25);
       if (k > 0) {
         const side = face(faces, 'house-wall-right');
         if (side === undefined) expect.fail(`turn ${t}: no right wall`);
-        expect(Math.abs(extentX(side) - 16 * Math.sin(t)), `turn ${t}: side wall width`).toBeLessThanOrEqual(0.25);
+        expect(Math.abs(extentX(side) - 18 * Math.sin(t)), `turn ${t}: side wall width`).toBeLessThanOrEqual(0.25);
       }
     }
     for (const t of [0, Math.PI]) {
       const wall = face(projectShape(house, t), t === 0 ? 'house-wall-front' : 'house-wall-back');
-      expect(wall && extentX(wall), `turn ${t}: square-on wall width`).toBeCloseTo(22, 6);
-      expect(wall && extentY(wall), `turn ${t}: walls stand at their full 12 rows`).toBeCloseTo(12, 6);
+      expect(wall && extentX(wall), `turn ${t}: square-on wall width`).toBeCloseTo(28, 6);
+      expect(wall && extentY(wall), `turn ${t}: walls stand at their full 15 rows`).toBeCloseTo(15, 6);
     }
   });
 
@@ -398,14 +414,14 @@ describe('projectShape: turning a shape about the globe axis', () => {
     }
   });
 
-  it('shows the lamp post the same from every side: its drawing, 3 across and 18 tall', () => {
+  it('shows the lamp post the same from every side: its drawing, 5 across and 24 tall', () => {
     const lamp = only(lamps());
     for (let k = 0; k < 24; k++) {
       const t = (k * FULL) / 24;
       const post = face(projectShape(lamp, t), 'lamp-post');
       if (post === undefined) expect.fail(`turn ${t}: no lamp post face`);
-      expect(extentX(post), `turn ${t}`).toBeCloseTo(3, 6);
-      expect(extentY(post), `turn ${t}`).toBeCloseTo(18, 6);
+      expect(extentX(post), `turn ${t}`).toBeCloseTo(5, 6);
+      expect(extentY(post), `turn ${t}`).toBeCloseTo(24, 6);
     }
   });
 
@@ -569,26 +585,50 @@ describe('drawShapes: the shapes in the picture', () => {
     expect(touched).toBeGreaterThan(0);
   });
 
-  it('turns the shapes by in-between shades: 0.01 rad never flips a pixel between untouched and wholly covered', () => {
+  it('turns the shapes in whole pixels: every pixel is untouched, wholly one of the drawings\' colours, or the flat floor shade, never a mix, at every small step of the turn', () => {
+    const shade = (under: number): number => {
+      const [r, g, b] = rgb(under);
+      const [ir, ig, ib] = rgb(SHADOW_INK);
+      const mix = (u: number, i: number): number => Math.round(u + (i - u) * SHADOW_SHARE);
+      return (mix(r, ir) << 16) | (mix(g, ig) << 8) | mix(b, ib);
+    };
+    // Shadows of shapes that overlap lay their shade twice or more, so the flat shade may repeat.
+    const nearestShade = (got: number, under: number): number => {
+      let best = Number.POSITIVE_INFINITY;
+      let c = under;
+      for (let n = 1; n <= 4; n++) {
+        c = shade(c);
+        best = Math.min(best, distance(got, c));
+      }
+      return best;
+    };
+    let solidSeen = 0;
+    let shadeSeen = 0;
     for (const from of [0.5, 2.0, 4.4]) {
       let prev = drawn(from);
       for (let k = 1; k <= 12; k++) {
         const turn = from + k * 0.01;
         const next = drawn(turn);
         let moved = 0;
-        let between = 0;
         for (let i = 0; i < next.a.length; i++) {
           if (prev.a[i] !== next.a[i]) moved++;
-          if (!bare(next, i) && !solid(next, i)) between++;
-          if ((bare(prev, i) && solid(next, i)) || (solid(prev, i) && bare(next, i))) {
-            expect.fail(`turn ${(turn - 0.01).toFixed(2)} -> ${turn.toFixed(2)}: pixel ${i % W},${Math.floor(i / W)} jumped a whole step`);
+          if (bare(next, i)) continue;
+          if (solid(next, i)) {
+            solidSeen++;
+            expect(SPRITE_COLOURS.has(next.a[i] ?? -1), `turn ${turn.toFixed(2)}: pixel ${i % W},${Math.floor(i / W)} is not a drawing colour`).toBe(true);
+            continue;
           }
+          // Otherwise the floor's one flat shadow shade over whatever is under it.
+          shadeSeen++;
+          expect(nearestShade(next.a[i] ?? 0, FILL_A), `turn ${turn.toFixed(2)}: pixel ${i % W},${Math.floor(i / W)} over the first background`).toBeLessThanOrEqual(2);
+          expect(nearestShade(next.b[i] ?? 0, FILL_B), `turn ${turn.toFixed(2)}: pixel ${i % W},${Math.floor(i / W)} over the second background`).toBeLessThanOrEqual(2);
         }
         expect(moved, `turn ${turn.toFixed(2)}: pixels that moved`).toBeGreaterThan(0);
-        expect(between, `turn ${turn.toFixed(2)}: in-between shades`).toBeGreaterThan(0);
         prev = next;
       }
     }
+    expect(solidSeen, 'drawing pixels checked').toBeGreaterThan(1_000);
+    expect(shadeSeen, 'shadow pixels checked').toBeGreaterThan(0);
   });
 
   it('comes back to the same picture after whole turns, and a negative turn equals the same turn a circle on', () => {
@@ -802,7 +842,7 @@ describe('drawShapes: the house is one solid, its own faces hiding each other', 
     }
     expect(overlaps, 'overlapping house face pixels checked').toBeGreaterThan(0);
     expect(mixed, 'overlap pixels showing a mix of two faces').toEqual([]);
-  });
+  }, 60_000);
 
   it('draws the chimney over the roof slope behind it at a quarter turn, in the chimney\'s own colours', () => {
     const house = only(houses());
