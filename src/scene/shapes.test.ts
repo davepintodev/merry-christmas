@@ -55,8 +55,8 @@ const SIZES: [number, number][] = [
   [W, H],
   [320, 180],
   [240, 300],
-  [161, 160],
-  [2 * GLOBE_RADIUS, 160],
+  [161, 172],
+  [2 * GLOBE_RADIUS, 172],
 ];
 /** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by a shape. */
 const FILL_A = 0x010203;

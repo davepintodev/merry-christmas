@@ -11,7 +11,7 @@ import { drawings } from '../shared/art.generated.ts';
 import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
-import { drawGlobe, type SnowFlakes } from './globe.ts';
+import { BASE_SINK, drawGlobe, type SnowFlakes } from './globe.ts';
 import type { ShapeParts } from './shapes-draw.ts';
 import { paintHint } from './hint.ts';
 import { MAX_LEAN } from './lean.ts';
@@ -24,9 +24,13 @@ export const DISC_SIZE = 21;
 /** The widest clear gap, in art pixels, between the disc and the picture's left edge: narrower where the disc would touch the globe. */
 export const DISC_MARGIN = 6;
 /** The shortest picture: the countdown area above the globe. */
-export const MIN_HEIGHT = 160;
+export const MIN_HEIGHT = 172;
 /** The base drawing's height in art pixels (art/objects.ts, the Base sheet): the globe sits on it on the ground. */
-const BASE_HEIGHT = drawings['base']?.height ?? 22;
+const BASE_HEIGHT = drawings['base']?.height ?? 28;
+/** How much of the base lies below the horizon: its top rows rise over the glass's foot (BASE_SINK), so the glass joins its lip. */
+const BASE_BELOW = BASE_HEIGHT - BASE_SINK;
+/** The room kept under the base's bottom edge, in art pixels: its shadow (four rows) and a margin below it. MIN_HEIGHT holds it. */
+const BASE_MARGIN = 12;
 /**
  * The countdown's reserved height: the taller countdown frame, the Christmas Day
  * greeting, pushed down by the page's sky above it (SKY_ABOVE). The greeting's
@@ -254,16 +258,19 @@ export function sceneLayout(width: number, height: number, seed: number): SceneL
   }
   if (!Number.isFinite(seed)) throw new RangeError(`seed must be a finite number, got ${seed}`);
   const countdown: Rect = { x: 0, y: 0, width, height: COUNTDOWN_HEIGHT };
+  // The base, its shadow and a margin stay in the picture: the globe rises to leave room under it, as far as the countdown allows.
+  const room = BASE_MARGIN;
+  const lowest = Math.max(COUNTDOWN_HEIGHT + GLOBE_RADIUS, height - GLOBE_RADIUS - BASE_BELOW - room);
   const globe: Circle = {
     cx: Math.round(width / 2),
-    cy: Math.min(Math.max(Math.round(height * 0.56), COUNTDOWN_HEIGHT + GLOBE_RADIUS), height - GLOBE_RADIUS),
+    cy: Math.min(Math.max(Math.round(height * 0.56), COUNTDOWN_HEIGHT + GLOBE_RADIUS), height - GLOBE_RADIUS, lowest),
     radius: GLOBE_RADIUS,
   };
   // The globe sits on its base on the ground, so the horizon is the globe's
   // bottom; the shortest pictures hold the whole base on the ground instead,
   // which raises the horizon and sinks the glass's foot into the base (its
-  // lowest 16 rows at height 160, where cy stays 98).
-  const groundTop = Math.min(height - BASE_HEIGHT, globe.cy + GLOBE_RADIUS);
+  // lowest 18 rows at the minimum height 172, where cy stays 99).
+  const groundTop = Math.min(height - BASE_BELOW - room, globe.cy + GLOBE_RADIUS);
   const disc: Rect = { x: discGap(globe, COUNTDOWN_HEIGHT), y: COUNTDOWN_HEIGHT, width: DISC_SIZE, height: DISC_SIZE };
   return { width, height, groundTop, countdown, globe, disc, stars: placeStars(width, groundTop, globe, disc, countdown, seed) };
 }
@@ -471,7 +478,7 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   const parts: ShapeParts = input.shapeBodies === false ? 'none' : 'all';
   drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts, parts === 'all' ? input.snowSteps : undefined);
   paintDisc(picture, layout, input.phase, share);
-  paintHint(picture, layout, BASE_HEIGHT);
+  paintHint(picture, layout, BASE_BELOW);
 }
 
 export function sceneFrame(input: SceneInput, target?: Uint32Array, layout?: SceneLayout): SceneFrame {

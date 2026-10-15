@@ -5,6 +5,8 @@
 // draws them: the flakes behind the glass centre, each floor shadow, the faces
 // with Santa by depth, then the flakes in front. Lean is 0 only: the fine
 // layer's row shifts are not drawn here.
+import { BASE_SINK } from '../src/scene/globe.ts';
+import { BASE_WIDTH, renderBase } from '../src/scene/base-fine.ts';
 import { sceneFrame, type SceneInput } from '../src/scene/frame.ts';
 import { drawListOf, renderDrawList, renderShadowSteps, shadowDrawList, turnBodies } from '../src/scene/shape-draw-list.ts';
 import { flakeSize, renderSnowSteps, snowDrawList } from '../src/scene/snow-draw-list.ts';
@@ -40,6 +42,8 @@ export function fineFrame(input: SceneInput, zoom = 5): FineRgba {
   renderShadowSteps(picture, width, layout, shadowDrawList(turn), zoom);
   renderDrawList(picture, width, layout, drawListOf(turnBodies(turn), input.time), zoom);
   renderSnowSteps(picture, width, layout, front, zoom, size);
+  // The base goes over all of them, at the screen's pixel size, as the page's last layer.
+  renderBase(picture, side, (layout.globe.cx - BASE_WIDTH / 2) * zoom, (layout.groundTop - BASE_SINK) * zoom, zoom, turn);
 
   const rgba = new Uint8Array(picture.length * 4);
   for (let i = 0; i < picture.length; i++) {

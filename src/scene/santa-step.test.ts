@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { PhaseReading } from '../shared/clock.ts';
+import { BASE_WIDTH, renderBase } from './base-fine.ts';
 import { sceneFrame, sceneLayout, type SceneInput, type SceneLayout } from './frame.ts';
-import { NO_FRONT } from './globe.ts';
+import { BASE_SINK, NO_FRONT } from './globe.ts';
 import { drawSanta, santaNearness, santaPlacement } from './santa.ts';
 import { renderDrawList, renderShadowSteps, shadowDrawList, shapeDrawList, type DrawStep, type SantaDraw } from './shape-draw-list.ts';
 import { globeShapes, projectShape, wrapTurn, type GlobeShape } from './shapes.ts';
@@ -532,6 +533,8 @@ describe('Santa leaves the art picture and the front layer', () => {
       // The bodiless frame has no floor shadows either (XMAS-82): they go back first, then the bodies and Santa.
       renderShadowSteps(back, whole.layout.width, whole.layout, shadowDrawList(turn), 1);
       renderDrawList(back, whole.layout.width, whole.layout, shapeDrawList(turn, globeShapes, time), 1);
+      // The base is the page's last layer over them (XMAS-68), so the bodiless frame is without its body too.
+      renderBase(back, whole.layout.width, whole.layout.globe.cx - BASE_WIDTH / 2, whole.layout.groundTop - BASE_SINK, 1, wrapTurn(turn));
       expect(back).toEqual(whole.picture);
       // Where he is nearer than every shape, all of his pixels are in the default picture.
       if (santaPlacement(turn, time).depth > 0.95) {

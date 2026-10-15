@@ -213,8 +213,8 @@ describe('lean with the other inputs', () => {
   });
 
   it('draws a leaned frame at the shortest picture without throwing, hint or not', () => {
-    const f = sceneFrame(input({ width: 112, height: 160, lean: 0.5 }));
-    expect(f.picture.length).toBe(112 * 160);
+    const f = sceneFrame(input({ width: 112, height: 172, lean: 0.5 }));
+    expect(f.picture.length).toBe(112 * 172);
   });
 });
 

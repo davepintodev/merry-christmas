@@ -8,7 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { keepBackdrop, leanBox, leanGlass, rowShift } from '../scene/lean.ts';
+import { BASE_ROWS, BASE_WIDTH, renderBase } from '../scene/base-fine.ts';
 import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
+import { BASE_SINK, NO_FRONT } from '../scene/globe.ts';
 import { globeShapes, onFloor } from '../scene/shapes.ts';
 import { renderShadowSteps, shadowDrawList, shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
 import type { FaceDraw } from '../scene/shapes-draw.ts';
@@ -240,6 +242,13 @@ function layersOf(main: FakeCanvas): { shapes: FakeCanvas; fronts: FakeCanvas } 
 }
 
 /** The layer of the flakes in front (XMAS-84), over the shapes and Santa. */
+/** XMAS-68: the base's canvas, the last of the layers. */
+function baseOf(main: FakeCanvas): FakeCanvas {
+  const base = page.order[page.order.indexOf(main) + 3];
+  if (base === undefined) throw new Error('the base layer is not on the page');
+  return base;
+}
+
 function snowFrontOf(main: FakeCanvas): FakeCanvas {
   const snow = page.order[page.order.indexOf(main) + 2];
   if (snow === undefined) throw new Error('the snow layer is not on the page');
@@ -326,15 +335,17 @@ describe('makeFineLayer: what it puts on the page', () => {
     expect(page.order).toHaveLength(1);
   });
 
-  it('puts the shapes canvas right after the scene canvas and the flakes-in-front canvas right after that', () => {
+  it('puts the shapes canvas right after the scene canvas, the flakes-in-front canvas after that and the base canvas last', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { shapes, fronts } = layersOf(main);
-    expect(page.order.slice(0, 3)).toEqual([main, shapes, fronts]);
+    expect(page.order.slice(0, 4)).toEqual([main, shapes, fronts, baseOf(main)]);
     expect(shapes).not.toBe(fronts);
     // The flakes in front (XMAS-84) sit on a layer of their own, over the shapes, which hold Santa (XMAS-83) and the flakes behind.
     expect(page.order[2]).toBe(snowFrontOf(main));
-    expect(page.order).toHaveLength(3);
+    // The base (XMAS-68) is over everything: the glass's foot, Santa, the shapes and the flakes in front.
+    expect(page.order[3]).toBe(baseOf(main));
+    expect(page.order).toHaveLength(4);
   });
 
   it('makes the two layers once: a second draw adds no canvas to the page', () => {
@@ -682,7 +693,8 @@ describe('makeFineLayer: the lean shifts rows by whole art pixels, as leanGlass 
       keepBackdrop(picture, W, LAYOUT);
       const flakes: SnowStep[] = [];
       const rows: number[] = [];
-      for (let y = Math.ceil(cy - radius + 2); y < cy + radius - 2; y += STEP) {
+      // The lean box ends at the ground line: the glass's foot below it is sunk in the base (XMAS-68), which stays upright.
+      for (let y = Math.ceil(cy - radius + 2); y < Math.min(cy + radius - 2, BOX.bottom); y += STEP) {
         picture[y * W + cx] = 0x100000 + y;
         flakes.push({ x: 0, y: y - cy, colour: 0xffffff, shape: [[0, 0]], depth: 20 });
         rows.push(y);
@@ -1167,3 +1179,97 @@ describe('makeFineLayer: the shadows', () => {
 function onFloorLoose(x: number, y: number, slack: number): boolean {
   return onFloor(x, y) || [[slack, 0], [-slack, 0], [0, slack], [0, -slack]].some(([dx = 0, dy = 0]) => onFloor(x + dx, y + dy));
 }
+
+// XMAS-68: the base is the last layer, over the glass's foot, Santa, the shapes and the flakes in front, drawn at the
+// screen's pixel size with hard master colours, and worked out again only when its turn or the scale changes.
+describe('makeFineLayer: the base', () => {
+  /** The RGBA renderBase's picture gives at the screen's size k and a turn: alpha 0 where it draws nothing. */
+  function wanted(k: number, turn: number): number[] {
+    const side = BASE_WIDTH * k;
+    const picture = new Uint32Array(side * BASE_ROWS * k).fill(NO_FRONT);
+    renderBase(picture, side, 0, 0, k, turn);
+    return Array.from(picture, (c) => (c === NO_FRONT ? [0, 0, 0, 0] : [(c >> 16) & 255, (c >> 8) & 255, c & 255, 255])).flat();
+  }
+  const baseImage = (main: FakeCanvas): Put => {
+    const image = ctxOf(baseOf(main)).puts.at(-1);
+    if (image === undefined) throw new Error('the base was not put on its canvas');
+    return image;
+  };
+
+  it('draws true and puts the base on its own canvas at BASE_WIDTH x BASE_ROWS art pixels at the screen\'s size', () => {
+    const { main, layer } = setup();
+    expect(layer.draw(frame(), SITE)).toBe(true);
+    const canvas = baseOf(main);
+    expect(canvas.width).toBe(BASE_WIDTH * SITE.scale);
+    expect(canvas.height).toBe(BASE_ROWS * SITE.scale);
+  });
+
+  for (const [name, site] of [
+    ['scale 3, ratio 1.5', SITE],
+    ['a fractional ratio', { scale: 5, ratio: 1.25, left: 12.8 }],
+    ['a narrow window: left negative', { scale: 3, ratio: 1.5, left: -41.333333333333336 }],
+  ] as [string, FineSite][]) {
+    it(`${name}: sits centred on the globe with its top ${BASE_SINK} rows above the ground line, in CSS pixels`, () => {
+      const { main, layer } = setup();
+      layer.draw(frame(), site);
+      const canvas = baseOf(main);
+      const css = site.scale / site.ratio;
+      expect(px(canvas.style.left as unknown as number)).toBeCloseTo(site.left + (LAYOUT.globe.cx - BASE_WIDTH / 2) * css, 6);
+      expect(px(canvas.style.top as unknown as number)).toBeCloseTo((LAYOUT.groundTop - BASE_SINK) * css, 6);
+      expect(px(canvas.style.width as unknown as number)).toBeCloseTo(BASE_WIDTH * css, 6);
+      expect(px(canvas.style.height as unknown as number)).toBeCloseTo(BASE_ROWS * css, 6);
+    });
+  }
+
+  it.each([0, 0.5, 2.2])('puts exactly what renderBase draws at the screen\'s size (turn %s): hard colours, clear elsewhere', (turn) => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn }), SITE);
+    const image = baseImage(main);
+    expect(image.width).toBe(BASE_WIDTH * SITE.scale);
+    expect(image.height).toBe(BASE_ROWS * SITE.scale);
+    expect(Array.from(image.data)).toEqual(wanted(SITE.scale, turn));
+  });
+
+  it('turns with the globe: a new turn puts a new image, which differs from the last', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.5 }), SITE);
+    const first = baseImage(main);
+    layer.draw(frame({ turn: 0.7 }), SITE);
+    const second = baseImage(main);
+    expect(ctxOf(baseOf(main)).puts).toHaveLength(2);
+    expect(Array.from(second.data)).toEqual(wanted(SITE.scale, 0.7));
+    expect(Array.from(second.data)).not.toEqual(Array.from(first.data));
+  });
+
+  it('does not work the base out again while the turn and the scale hold, even as the lean and the flakes change', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.5 }), SITE);
+    layer.draw(frame({ turn: 0.5, lean: 0.3 }), SITE);
+    layer.draw(frame({ turn: 0.5, lean: -0.2, snowFront: [{ x: 0, y: 0, colour: 0xffffff, shape: [[0, 0]], depth: 20 }] }), SITE);
+    expect(ctxOf(baseOf(main)).puts).toHaveLength(1);
+  });
+
+  it('stands upright under a lean: the base image at lean 0.4 is the one at lean 0', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 1.1, lean: 0.4 }), SITE);
+    expect(Array.from(baseImage(main).data)).toEqual(wanted(SITE.scale, 1.1));
+  });
+
+  it('works the base out again when the scale changes, at the new size', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.5 }), SITE);
+    layer.draw(frame({ turn: 0.5 }), { ...SITE, scale: 4 });
+    const puts = ctxOf(baseOf(main)).puts;
+    expect(puts).toHaveLength(2);
+    expect(puts[1]?.width).toBe(BASE_WIDTH * 4);
+    expect(Array.from(puts[1]?.data ?? [])).toEqual(wanted(4, 0.5));
+  });
+
+  it('returns to the same image when the turn comes back to a turn it drew before, a whole turn on', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ turn: 0.5 }), SITE);
+    layer.draw(frame({ turn: 0.5 + 2 * Math.PI }), SITE);
+    const puts = ctxOf(baseOf(main)).puts;
+    expect(Array.from(puts.at(-1)?.data ?? [])).toEqual(Array.from(puts[0]?.data ?? []));
+  });
+});

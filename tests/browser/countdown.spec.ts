@@ -555,7 +555,7 @@ for (const [name, { viewport, dpr }] of [['phone', PHONE], ['laptop', LAPTOP]] a
       const { page, close } = await openAt(browser, '2026-12-01T22:00:00');
       const { scale, digitScale } = pagePixels(viewport, dpr);
       expect(digitScale).toBe(name === 'phone' ? 2 : 4);
-      expect(scale).toBe(name === 'phone' ? 6 : 7);
+      expect(scale).toBe(6);
       const frame = countdownFrame(timeLeft(local(2026, 12, 1, 22, 0, 0)), true, digitScale);
       const size = await canvasSize(page);
       expect(size.dpr).toBe(dpr);

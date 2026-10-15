@@ -1,6 +1,7 @@
 // XMAS-85: fineFrame, the fine layer's picture of a scene input without a browser.
 import { describe, expect, it } from 'vitest';
 import { sceneFrame } from '../src/scene/frame.ts';
+import { BASE_SINK } from '../src/scene/globe.ts';
 import { fineFrame } from './fine-frames.ts';
 import { referenceFrames } from './frames.ts';
 
@@ -86,7 +87,8 @@ describe('fineFrame', () => {
         differ++;
         const ax = x / zoom;
         const ay = y / zoom;
-        const onBase = ay >= coarse.layout.groundTop;
+        // The base (XMAS-68) is drawn on the fine grid too, from its top rows above the ground line down.
+        const onBase = ay >= coarse.layout.groundTop - BASE_SINK;
         if (!onBase && (ax - cx) ** 2 + (ay - cy) ** 2 > (radius + 2) ** 2) expect.fail(`pixel ${x},${y} differs from the coarse picture outside the glass`);
       }
     }

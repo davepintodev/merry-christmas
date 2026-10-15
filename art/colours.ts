@@ -30,6 +30,8 @@ export const masterColours: readonly string[] = [
   // Added for the globe's second visual pass: the prototype's brick reds for
   // the house walls and its lit pine green.
   '#c24c47', '#a83c3c', '#2c8f6f',
+  // Added for the base (XMAS-68): the darker gold of its lip and lettering.
+  '#c4923a',
 ];
 
 // XMAS-27: the sky and ink the countdown draws with, per phase. Every colour

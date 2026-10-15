@@ -98,8 +98,8 @@ describe('pagePixels', () => {
   });
 
   it('a taller window keeps the art pixel size and adds rows; the globe keeps its size', () => {
-    // Width-bound (700 / 112 = 6.25, 1000 / 160 = 6.25), so extra height cannot raise the scale.
-    const short = pagePixels({ width: 700, height: 1000 }, 1);
+    // Width-bound (700 / 112 = 6.25, 1100 / 172 = 6.4), so extra height cannot raise the scale.
+    const short = pagePixels({ width: 700, height: 1100 }, 1);
     const tall = pagePixels({ width: 700, height: 1400 }, 1);
     expect(tall.scale).toBe(short.scale);
     expect(tall.width).toBe(short.width);
@@ -156,8 +156,8 @@ describe('pagePixels: scale is chosen by the globe only (visual-reset-1)', () =>
     expect(pagePixels({ width: 360, height: 700 }, 2)).toMatchObject({ scale: 6, width: 120, height: Math.ceil(1400 / 6) });
   });
 
-  it('a 1920x1130 laptop at ratio 1 gets scale 7', () => {
-    expect(pagePixels({ width: 1920, height: 1130 }, 1)).toMatchObject({ scale: 7, width: Math.ceil(1920 / 7), height: Math.ceil(1130 / 7) });
+  it('a 1920x1130 laptop at ratio 1 gets scale 6 (the height, 1130 / 172, sets it)', () => {
+    expect(pagePixels({ width: 1920, height: 1130 }, 1)).toMatchObject({ scale: 6, width: Math.ceil(1920 / 6), height: Math.ceil(1130 / 6) });
   });
 
   it.each(CASES)('%s: scale is floor(min(across / 112, down / MIN_HEIGHT))', (_name, viewport, dpr) => {

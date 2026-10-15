@@ -16,7 +16,7 @@ import { countdownFrame } from '../countdown/render.ts';
 /** The globe's width in art pixels: twice GLOBE_RADIUS in scene/frame.ts. */
 const GLOBE_WIDTH = 2 * 56;
 /** The engine's MIN_HEIGHT in scene/frame.ts. */
-const MIN_HEIGHT = 160;
+const MIN_HEIGHT = 172;
 /** The art pixels the widest countdown keeps free at each side of the picture. */
 const SIDE_MARGIN = 4;
 

@@ -6,11 +6,13 @@ import { phaseColours } from '../../art/colours.ts';
 import { glyph, glyphWidth, GLYPH_HEIGHT } from '../shared/font.ts';
 import type { SceneLayout } from './frame.ts';
 
+/** The one switch for the hint: false leaves it out on every screen (the owner wants to see the page without it for now); true brings it back where it fits. */
+export const HINT_ENABLED = false;
 const TEXT = 'DRAG TO SPIN AND STIR';
 /** The font's one-column gap after each glyph. */
 const GLYPH_GAP = 1;
-/** The cast shadow reaches six rows under the base (globe.ts); the hint starts two plain rows lower. */
-const SHADOW_ROWS = 6;
+/** The cast shadow reaches seven rows under the base (globe.ts); the hint starts two plain rows lower. */
+const SHADOW_ROWS = 7;
 const GAP = 2;
 /** One plain row is kept at the bottom of the picture. */
 const MARGIN = 1;
@@ -25,6 +27,7 @@ const TEXT_WIDTH = [...TEXT].reduce((sum, char) => sum + glyphWidth(char) + GLYP
  * `baseHeight` is the base drawing's height in art pixels.
  */
 export function paintHint(picture: Uint32Array, layout: SceneLayout, baseHeight: number): void {
+  if (!HINT_ENABLED) return;
   const top = layout.groundTop + baseHeight + SHADOW_ROWS + GAP;
   if (top + GLYPH_HEIGHT > layout.height - MARGIN) return;
   let left = Math.round(layout.globe.cx - TEXT_WIDTH / 2);
