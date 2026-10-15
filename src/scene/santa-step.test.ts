@@ -439,6 +439,50 @@ describe('Santa stays one connected object', () => {
     }
   });
 
+  it('is always 48 * zoom pixels wide: squeeze 1 at every angle, no thinning anywhere on the orbit', () => {
+    const cols = (d: Drawing): number => {
+      let lo = d.width;
+      let hi = -1;
+      for (let i = 0; i < d.pixels.length; i++) {
+        if ((d.pixels[i] ?? 0) === 0) continue;
+        lo = Math.min(lo, i % d.width);
+        hi = Math.max(hi, i % d.width);
+      }
+      return hi - lo + 1;
+    };
+    for (const zoom of [1, 2, 4]) {
+      for (let k = 0; k < 120; k++) {
+        const turn = (k * FULL) / 120;
+        const [step] = santaSteps(shapeDrawList(turn, [], T));
+        expect(step?.squeeze, `zoom ${zoom} turn ${k}`).toBe(1);
+        const width = LAYOUT.width * zoom;
+        const picture = santaOnly(turn, T, zoom);
+        let left = width;
+        let right = -1;
+        for (let i = 0; i < picture.length; i++) {
+          if (picture[i] === FILL) continue;
+          left = Math.min(left, i % width);
+          right = Math.max(right, i % width);
+        }
+        expect(right - left + 1, `zoom ${zoom} turn ${k}`).toBe(cols(step?.sprite as Drawing) * zoom);
+      }
+    }
+  });
+
+  it('is not clipped by the glass: at zoom 1, 2 and 4 every opaque sprite pixel is painted, as whole blocks, at every turn and time', () => {
+    for (const zoom of [1, 2, 4]) {
+      for (let k = 0; k < 240; k++) {
+        const turn = (k * FULL) / 240 + 0.003;
+        const time = 700 + k * 1_237;
+        const [step] = santaSteps(shapeDrawList(turn, [], time));
+        const opaque = Array.from(step?.sprite.pixels ?? []).filter((n) => n !== 0).length;
+        const picture = santaOnly(turn, time, zoom);
+        const painted = picture.filter((c) => c !== FILL).length;
+        expect(painted, `zoom ${zoom} turn ${k}: Santa's pixels lost to the glass`).toBe(opaque * zoom * zoom);
+      }
+    }
+  });
+
   it('keeps at least a block of height and some width at the thinnest angle', () => {
     for (let k = 0; k < 360; k++) {
       const turn = (k * FULL) / 360;

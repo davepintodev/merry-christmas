@@ -1,8 +1,8 @@
 // XMAS-32d "The globe", slice 4: Santa with his sleigh and two reindeer
-// circling high inside the globe. One flat drawing (santa-trot-1 / -2), squeezed
-// across by how far round his orbit he is, mirrored when flying the other way,
-// and spread over the fixed grid by the share of each art pixel he covers, so
-// his motion never pops. Clipped to the glass; his colours never tint.
+// circling high inside the globe. One flat drawing (santa-trot-1 / -2) at his
+// full width, mirrored when flying the other way, and spread over the fixed grid
+// by the share of each art pixel he covers, so his motion never pops. Clipped to
+// the glass; his colours never tint.
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from './frame.ts';
 import { paintSantaStep } from './santa-step.ts';
@@ -11,19 +11,21 @@ import { projectPoint } from './shapes.ts';
 
 /** The glass's radius the orbit is sized on, in art pixels. */
 const GLASS = 56;
-/** The orbit's reach: the glass less its rim, and the share of it Santa flies out to. */
-const LIMIT = GLASS - 3;
-const ORBIT = LIMIT * 0.42;
+/** The furthest an opaque pixel's centre may sit from the glass's centre: the glass less a 2 art pixel margin, inside its rim. */
+const LIMIT = GLASS - 2;
 /** How high Santa flies, up from the globe's centre. */
 const HEIGHT = GLASS * 0.46;
 /** Radians a second round the orbit, and the bob's rate and reach. */
 const SPEED = 0.45;
 const BOB_RATE = 1.3;
 const BOB = 2;
+/** Santa's sprite, in art pixels: its outer pixel centres sit half a pixel in from its edges. */
+const SPRITE_W = 48;
+const SPRITE_H = 12;
 /** Trot frames a second. */
 const TROT_RATE = 7;
-/** The narrowest he is squeezed: never so thin he vanishes. */
-const MIN_SQUEEZE = 0.3;
+/** Santa's reach along the orbit: at the ends (depth 0, the bob at its lowest) his farthest pixel centre is LIMIT from the middle. */
+const ORBIT = Math.sqrt(LIMIT ** 2 - (HEIGHT + BOB + SPRITE_H / 2 - 0.5) ** 2) - (SPRITE_W / 2 - 0.5);
 /** A step towards the visitor moves a floor point this far down, as the shapes tilt it. */
 const TILT = projectPoint(0, 1, 0, 0)[1] - projectPoint(0, 0, 0, 0)[1];
 
@@ -35,7 +37,7 @@ export interface SantaPlacement {
   y: number;
   /** -1 (far side) to 1 (near side). */
   depth: number;
-  /** The share of his width he shows, from 0.3 to 1. */
+  /** The share of his width he shows: always 1, he is never squeezed (he mirrors at the turn). */
   squeeze: number;
   /** Whether he flies towards the left, drawn the other way round. */
   mirrored: boolean;
@@ -52,10 +54,10 @@ export function santaPlacement(turn: number, timeMs: number): SantaPlacement {
   const depth = Math.sin(angle);
   return {
     angle,
-    x: Math.cos(angle) * ORBIT,
+    x: ORBIT * (2 / Math.PI) * Math.asin(Math.cos(angle)),
     y: -HEIGHT + Math.sin(t * BOB_RATE) * BOB + depth * ORBIT * TILT,
     depth,
-    squeeze: Math.max(MIN_SQUEEZE, Math.abs(depth)),
+    squeeze: 1,
     mirrored: depth > 0,
     trot: (Math.floor(t * TROT_RATE) % 2) as 0 | 1,
   };
