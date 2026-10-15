@@ -124,4 +124,5 @@ Process reminders for this reset: use the `scene-artist` agent for art (give it 
 | XMAS-80 | 1 | approve with nits | nit x3 (test asserts equal inputs; stale comment; unused 'bodies' part) - fixed, no re-review lane=full |
 | XMAS-81 | 1 | changes needed | bug x1 (canvas anti-aliasing left partly opaque seams between house faces), test-gap x1 (no browser seam test), nit x2 (per-frame allocations; no-2d-context fallback) |
 | XMAS-81 | 2 | approve with nits | nit x1 (no test for a face squashed past the 64 drawing-pixel stretch cap in `stretchOf`) - left, lane=full |
-| XMAS-83 | 1 | changes needed | test-gap x1 (depth-order test never compared Santa's depth with the shapes'), nit x4 (import cycle; list rebuilt per frame; Santa rows straddle art-row shifts while leaning; lean e2e test drops his orbit band) - test-gap, cycle and per-frame rebuild fixed, no re-review lane=full |
+| XMAS-83 | 1 | changes needed | test-gap x1 (depth-order test never compared Santa's depth with the shapes'), nit x4 (import cycle; list rebuilt per frame; Santa rows straddle art-row shifts while leaning; lean e2e test drops his orbit band) - test-gap, cycle and per-frame rebuild fixed lane=full |
+| XMAS-83 | 2 | approve | none lane=full |
