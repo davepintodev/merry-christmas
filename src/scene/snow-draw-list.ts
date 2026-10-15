@@ -121,15 +121,28 @@ function put(picture: Uint32Array, width: number, height: number, x: number, y: 
  * earlier ones; anything off the picture is skipped. Throws a RangeError for a
  * zoom that is not a whole number of at least 1, or a picture of the wrong size.
  */
-export function renderSnowSteps(picture: Uint32Array, width: number, layout: SceneLayout, steps: readonly SnowStep[], zoom: number): void {
+export function renderSnowSteps(picture: Uint32Array, width: number, layout: SceneLayout, steps: readonly SnowStep[], zoom: number, size = 1): void {
   if (!Number.isInteger(zoom) || zoom < 1) throw new RangeError(`zoom must be a whole number of at least 1, got ${zoom}`);
+  if (!Number.isInteger(size) || size < 1) throw new RangeError(`size must be a whole number of at least 1, got ${size}`);
   const side = width * zoom;
   const rows = layout.height * zoom;
   if (picture.length !== side * rows) throw new RangeError(`picture must hold ${side * rows} colour numbers, got ${picture.length}`);
   const { cx, cy } = layout.globe;
+  // Squares bigger than a pixel space their arms by their side so they stay joined.
+  const reach = size > 1 ? size : zoom;
   for (const step of steps) {
     const x = Math.floor((cx + step.x) * zoom);
     const y = Math.floor((cy + step.y) * zoom);
-    for (const [dx, dy] of step.shape) put(picture, side, rows, x + dx * zoom, y + dy * zoom, step.colour);
+    for (const [dx, dy] of step.shape) {
+      const px = x + dx * reach;
+      const py = y + dy * reach;
+      for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) put(picture, side, rows, px + i, py + j, step.colour);
+    }
   }
+}
+
+/** Screen pixels to a flake's side: two at zoom 1, otherwise the zoom, at least four. */
+export function flakeSize(zoom: number): number {
+  if (!Number.isInteger(zoom) || zoom < 1) throw new RangeError(`zoom must be a whole number of at least 1, got ${zoom}`);
+  return zoom === 1 ? 2 : Math.max(4, zoom);
 }

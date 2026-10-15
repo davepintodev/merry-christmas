@@ -11,7 +11,7 @@ import { keepBackdrop, leanBox, leanGlass, rowShift } from '../scene/lean.ts';
 import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
 import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
-import type { SnowStep } from '../scene/snow-draw-list.ts';
+import { flakeSize, type SnowStep } from '../scene/snow-draw-list.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
 
 const W = 240;
@@ -760,6 +760,14 @@ describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () =
     return out;
   }
 
+  /** The size x size block of a flake whose top-left is the screen pixel (x, y), as litOf lists it (row by row). */
+  const block = (x: number, y: number, rgb: number[]): { x: number; y: number; rgb: number[] }[] => {
+    const size = flakeSize(k);
+    const out: { x: number; y: number; rgb: number[] }[] = [];
+    for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) out.push({ x: x + i, y: y + j, rgb });
+    return out;
+  };
+
   it('lands a flake on the screen pixel its own position picks, so two fractions inside one art pixel land on different screen pixels', () => {
     const { main, layer } = setup();
     layer.draw(frame({ snowFront: [flake(10, 0, WHITE, 20)] }), SITE);
@@ -768,16 +776,16 @@ describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () =
     layer.draw(frame({ snowFront: [flake(10.34, 0, WHITE, 20)] }), SITE);
     const fraction = litOf(snow.puts.at(-1));
     // Both flakes are in the same art pixel, but the screen pixel is k to one art pixel: 10.34 is a screen pixel to the right.
-    expect(whole).toEqual([{ x: k * (cx + 10), y: k * cy, rgb: [0xff, 0xff, 0xff] }]);
-    expect(fraction).toEqual([{ x: k * (cx + 10) + 1, y: k * cy, rgb: [0xff, 0xff, 0xff] }]);
-    expect(fraction[0]?.x % k, 'not a multiple of the art pixel size').not.toBe(0);
+    expect(whole).toEqual(block(k * (cx + 10), k * cy, [0xff, 0xff, 0xff]));
+    expect(fraction).toEqual(block(k * (cx + 10) + 1, k * cy, [0xff, 0xff, 0xff]));
+    expect((fraction[0]?.x ?? 0) % k, 'not a multiple of the art pixel size').not.toBe(0);
   });
 
   it('a flake behind the glass centre is on the shapes layer, under the faces, on the same screen pixel grid', () => {
     const { main, layer } = setup();
     layer.draw(frame({ snowBehind: [flake(10.34, 0, BEHIND, -20)] }), SITE);
     const lit = litOf(ctxOf(layersOf(main).shapes).puts.at(-1));
-    expect(lit).toEqual([{ x: k * (cx + 10) + 1, y: k * cy, rgb: [0xae, 0xbc, 0xf0] }]);
+    expect(lit).toEqual(block(k * (cx + 10) + 1, k * cy, [0xae, 0xbc, 0xf0]));
     // Not on the front layers: the behind flake is drawn only under the shapes.
     expect(litOf(ctxOf(snowFrontOf(main)).puts.at(-1))).toEqual([]);
   });
@@ -789,7 +797,7 @@ describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () =
     layer.draw(frame({ lean, snowFront: [flake(10.34, -5, WHITE, 20)] }), SITE);
     const s = rowShift(lean, BOX.bottom, at);
     expect(s).not.toBe(0);
-    expect(litOf(ctxOf(snowFrontOf(main)).puts.at(-1))).toEqual([{ x: k * (cx + 10) + 1 + s * k, y: k * (cy - 5), rgb: [0xff, 0xff, 0xff] }]);
+    expect(litOf(ctxOf(snowFrontOf(main)).puts.at(-1))).toEqual(block(k * (cx + 10) + 1 + s * k, k * (cy - 5), [0xff, 0xff, 0xff]));
   });
 });
 

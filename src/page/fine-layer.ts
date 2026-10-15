@@ -21,7 +21,7 @@ import type { SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
 import { leanBox, rowShift, type LeanBox } from '../scene/lean.ts';
 import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
-import { renderSnowSteps, type SnowStep } from '../scene/snow-draw-list.ts';
+import { flakeSize, renderSnowSteps, type SnowStep } from '../scene/snow-draw-list.ts';
 
 /** The master list's colours as numbers, so a drawing's colour number is a colour. */
 const COLOUR_NUMBERS: readonly number[] = masterColours.map((colour) => Number.parseInt(colour.slice(1), 16));
@@ -689,7 +689,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       const boxLayout: SceneLayout = { ...layout, height: bh, globe: { ...layout.globe, cx: cx - box.left, cy: cy - box.top } };
       colours = colourBuffer(colours, bw * k * bh * k);
       colours.fill(NO_FRONT);
-      renderSnowSteps(colours, bw, boxLayout, snowBehind, k);
+      renderSnowSteps(colours, bw, boxLayout, snowBehind, k, flakeSize(k));
       const behindDirty = unionOf(snowDirty(snowBehind, cx - box.left, cy - box.top, k, bw * k, bh * k), behind === undefined ? null : overlayFigures(colours, behind, width, box, bw, k));
       behindPixels = pixelsFor(shapesContext, bw * k, bh * k, behindPixels);
       if (behindDirty !== null) wordsFrom(colours, behindPixels.words, bw * k, behindDirty);
@@ -738,7 +738,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       const frontDirty = snowDirty(frontSteps, cx - box.left, cy - box.top, k, bw * k, bh * k);
       if (frontDirty !== null) {
         colours.fill(NO_FRONT);
-        renderSnowSteps(colours, bw, boxLayout, frontSteps, k);
+        renderSnowSteps(colours, bw, boxLayout, frontSteps, k, flakeSize(k));
         wordsFrom(colours, snowPixels.words, bw * k, frontDirty);
         putDirty(snowContext, snowPixels.image, frontDirty);
       }
