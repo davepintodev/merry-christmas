@@ -31,6 +31,7 @@ import { sceneFrame, sceneLayout, type SceneLayout } from './frame.ts';
 import { drawGlobe } from './globe.ts';
 import { drawSanta, santaPlacement } from './santa.ts';
 import { projectPoint } from './shapes.ts';
+import { createDrag, DRAG_SETTINGS } from '../page/drag.ts';
 
 const BLOCK = 0x123456;
 const shapesMode = vi.hoisted(() => ({ block: false }));
@@ -1003,5 +1004,71 @@ describe('sceneFrame: Santa at the input time', () => {
     const b = at(4_000);
     const inside = Array.from(a.keys()).filter((i) => inGlass(LAYOUT, i, -3) && a[i] !== b[i]);
     expect(inside.length).toBeGreaterThan(0);
+  });
+});
+
+// XMAS-67 "Drag direction feels reversed": the turn a drag yields, fed to the real
+// projection and to Santa's orbit, carries the front surface the way the finger went.
+/** The turn after the pointer goes down at x = 0 and moves to `toX`, from `initialTurn`. */
+function turnAfterDrag(toX: number, initialTurn: number): number {
+  const drag = createDrag(initialTurn, DRAG_SETTINGS);
+  drag.pointerDown(1, 0, 0, 0);
+  drag.pointerMove(1, toX, 0, 0.5);
+  return drag.step(1 / 60).turn;
+}
+
+const screenX = (x: number, z: number, turn: number): number => projectPoint(x, z, 0, turn)[0];
+const POINTS: [number, number][] = [[0, 10], [-25, 20], [30, 5], [14, 27], [-40, 1], [10, -20], [-30, -10]];
+/** The points on the visitor's side of the globe at `turn`: nearness x sin t + z cos t > 0 (z > 0 at turn 0). */
+function front(turn: number): [number, number][] {
+  const near = POINTS.filter(([x, z]) => x * Math.sin(turn) + z * Math.cos(turn) > 1);
+  expect(near.length, 'some points are in front').toBeGreaterThan(1);
+  return near;
+}
+
+describe('the drag and the projection agree on which way is right', () => {
+  it.each([0, 1.3, -2.2, 5])('a rightward drag from turn %s moves every front surface point to the right on screen', (start) => {
+    const after = turnAfterDrag(12, start);
+    for (const [x, z] of front(start)) {
+      expect(screenX(x, z, after), `point (${x}, ${z})`).toBeGreaterThan(screenX(x, z, start));
+    }
+  });
+
+  it.each([0, 1.3, -2.2, 5])('a leftward drag from turn %s moves every front surface point to the left on screen', (start) => {
+    const after = turnAfterDrag(-12, start);
+    for (const [x, z] of front(start)) {
+      expect(screenX(x, z, after), `point (${x}, ${z})`).toBeLessThan(screenX(x, z, start));
+    }
+  });
+
+  it('moves the front surface by about the finger distance times the radius it sits at, to the right', () => {
+    const after = turnAfterDrag(10, 0);
+    // A point at z = 27 on the centre line moves by z sin(turn) to the right.
+    expect(screenX(0, 27, after)).toBeCloseTo(27 * Math.sin(10 * DRAG_SETTINGS.turnPerPixel), 6);
+  });
+});
+
+describe('the drag and Santa agree on which way is right', () => {
+  // Santa is in front (depth > 0) at these turns at time 0; time moves on his own as well, so compare at the same time.
+  it.each([0, 0.2, -0.5])('a rightward drag from turn %s moves Santa to the right while he flies in front', (start) => {
+    const before = santaPlacement(start, 1000);
+    expect(before.depth, 'Santa starts in front').toBeGreaterThan(0.3);
+    const after = santaPlacement(turnAfterDrag(6, start), 1000);
+    expect(after.depth, 'and stays in front').toBeGreaterThan(0);
+    expect(after.x).toBeGreaterThan(before.x);
+  });
+
+  it.each([0, 0.2, -0.5])('a leftward drag from turn %s moves Santa to the left while he flies in front', (start) => {
+    const before = santaPlacement(start, 1000);
+    const after = santaPlacement(turnAfterDrag(-6, start), 1000);
+    expect(after.depth).toBeGreaterThan(0);
+    expect(after.x).toBeLessThan(before.x);
+  });
+
+  it('moves Santa the same way as a front shape for the same drag', () => {
+    const before = santaPlacement(0, 1000);
+    const after = santaPlacement(turnAfterDrag(8, 0), 1000);
+    const shape = screenX(0, 20, turnAfterDrag(8, 0)) - screenX(0, 20, 0);
+    expect(Math.sign(after.x - before.x)).toBe(Math.sign(shape));
   });
 });

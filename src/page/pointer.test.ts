@@ -254,7 +254,7 @@ describe('a second finger', () => {
     target.fire('pointerup', { id: 2, pointerType: 'touch' });
     target.fire('pointermove', { id: 1, x: 30, y: 0, pointerType: 'touch' });
     const out = drag.step(1 / 60);
-    expect(out.turn).toBeCloseTo(30 * 0.018, 9); // only the first finger's 30 px
+    expect(out.turn).toBeCloseTo(-30 * 0.018, 9); // only the first finger's 30 px
   });
 
   it('lifting the second finger first does not end the first finger\'s drag, and lifting the first does', () => {
@@ -265,10 +265,10 @@ describe('a second finger', () => {
     target.fire('pointerdown', { id: 2, x: 100, y: 0 });
     target.fire('pointercancel', { id: 2 });
     target.fire('pointermove', { id: 1, x: 10, y: 0 });
-    expect(drag.step(1 / 60).turn).toBeCloseTo(10 * 0.018, 9);
+    expect(drag.step(1 / 60).turn).toBeCloseTo(-10 * 0.018, 9);
     target.fire('pointerup', { id: 1 });
     target.fire('pointermove', { id: 1, x: 90, y: 0 });
-    expect(drag.step(1 / 60).turn).toBeCloseTo(10 * 0.018, 9);
+    expect(drag.step(1 / 60).turn).toBeCloseTo(-10 * 0.018, 9);
   });
 });
 
@@ -341,7 +341,7 @@ describe('a capture call that throws', () => {
     drag.step(1 / 60);
     target.fire('pointerdown', { id: 2, x: 0, y: 0, pointerType: 'touch' });
     target.fire('pointermove', { id: 2, x: 30, y: 0, pointerType: 'touch' });
-    expect(drag.step(1 / 60).turn).toBeCloseTo(30 * 0.018, 9);
+    expect(drag.step(1 / 60).turn).toBeCloseTo(-30 * 0.018, 9);
   });
 
   it('a throwing setPointerCapture on down leaves no stuck drag: a later pointer works', () => {
@@ -353,7 +353,7 @@ describe('a capture call that throws', () => {
     target.throwOnCapture = null;
     target.fire('pointerdown', { id: 2, x: 0, y: 0, pointerType: 'touch' });
     target.fire('pointermove', { id: 2, x: 30, y: 0, pointerType: 'touch' });
-    expect(drag.step(1 / 60).turn).toBeCloseTo(30 * 0.018, 9);
+    expect(drag.step(1 / 60).turn).toBeCloseTo(-30 * 0.018, 9);
   });
 
   it('a throwing setPointerCapture does not leave pointer 1 in the drag: its later moves turn nothing', () => {
@@ -388,11 +388,11 @@ describe('lostpointercapture', () => {
       target.fire('pointermove', { id: 1, x: i * 20, y: 0 });
     }
     const before = drag.step(1 / 60);
-    expect(before.turn).toBeCloseTo(100 * 0.018, 9);
+    expect(before.turn).toBeCloseTo(-100 * 0.018, 9);
     target.fire('lostpointercapture', { id: 1 });
     target.fire('pointermove', { id: 1, x: 300, y: 0 });
     const out = drag.step(1 / 60);
-    expect(out.turn).toBeCloseTo(100 * 0.018, 9);
+    expect(out.turn).toBeCloseTo(-100 * 0.018, 9);
     expect(out.push).toEqual({ x: 0, y: 0, z: 0 });
   });
 
@@ -406,7 +406,7 @@ describe('lostpointercapture', () => {
     drag.step(1 / 60);
     target.fire('pointerdown', { id: 2, x: 0, y: 0 });
     target.fire('pointermove', { id: 2, x: 30, y: 0 });
-    expect(drag.step(1 / 60).turn).toBeCloseTo(30 * 0.018, 9);
+    expect(drag.step(1 / 60).turn).toBeCloseTo(-30 * 0.018, 9);
   });
 });
 

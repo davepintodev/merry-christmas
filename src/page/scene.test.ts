@@ -363,7 +363,7 @@ describe('a change of art scale mid-drag', () => {
     canvas.fire('pointermove', { artX: 120, artY: 100 });
     scene.step();
     const held = drawn(scene).turn ?? Number.NaN;
-    expect(held).toBeCloseTo(start + 20 * DRAG_SETTINGS.turnPerPixel, 9);
+    expect(held).toBeCloseTo(start - 20 * DRAG_SETTINGS.turnPerPixel, 9);
 
     vi.stubGlobal('window', { ...window, innerWidth: 3200, innerHeight: 2400 });
     scene.draw(); // sees the new scale and starts a fresh drag
@@ -381,7 +381,7 @@ describe('a change of art scale mid-drag', () => {
 
     dragBy(10, 0, 0.5);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeGreaterThan(held);
+    expect(drawn(scene).turn ?? Number.NaN).toBeLessThan(held);
   });
 });
 
@@ -391,7 +391,7 @@ describe('a drag turns the globe', () => {
     const before = drawn(scene).turn ?? Number.NaN;
     dragBy(40, 0, 0.5);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before + 40 * DRAG_SETTINGS.turnPerPixel, 9);
+    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before - 40 * DRAG_SETTINGS.turnPerPixel, 9);
   });
 
   it('a drag the other way turns it back', async () => {
@@ -399,7 +399,7 @@ describe('a drag turns the globe', () => {
     const before = drawn(scene).turn ?? Number.NaN;
     dragBy(-25, 0, 0.5);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before - 25 * DRAG_SETTINGS.turnPerPixel, 9);
+    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before + 25 * DRAG_SETTINGS.turnPerPixel, 9);
   });
 
   it('the turn is kept after the finger lifts, however many steps go by (no auto turn, no spring-back)', async () => {
@@ -417,7 +417,7 @@ describe('a drag turns the globe', () => {
     dragBy(40, 0, 0.5, 10, false);
     expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before, 12);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeGreaterThan(before);
+    expect(drawn(scene).turn ?? Number.NaN).toBeLessThan(before);
   });
 
   it('feeds the snow the same turn the frame is drawn with', async () => {
@@ -436,7 +436,7 @@ describe('a drag turns the globe', () => {
     canvas.fire('pointermove', { id: 2, artX: 380, artY: 100 });
     canvas.fire('pointermove', { id: 1, artX: 110, artY: 100 });
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before + 10 * DRAG_SETTINGS.turnPerPixel, 9);
+    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before - 10 * DRAG_SETTINGS.turnPerPixel, 9);
   });
 });
 
@@ -638,7 +638,7 @@ describe('the scene page draws the globe snow (XMAS-84)', () => {
       captured.fineResult = false;
       const scene = await loadDragScene();
       if (lean) {
-        dragBy(40, 0, 0.3, 10, false);
+        dragBy(-40, 0, 0.3, 10, false);
         for (let n = 0; n < 6; n++) scene.step();
       } else scene.step();
       scene.draw();
