@@ -54,6 +54,9 @@ function draw(now: Date, left: TimeLeft): void {
   canvas.style.height = `${physicalHeight / dpr}px`;
   // One art pixel of blank sky above the first inked row, so the title is not clipped by the window's top edge.
   canvas.style.top = `${scale / dpr}px`;
+  // Left edge on a whole device pixel, so the digits stay sharp at fractional ratios.
+  canvas.style.transform = 'none';
+  canvas.style.left = `${Math.round(((window.innerWidth - physicalWidth / dpr) / 2) * dpr) / dpr}px`;
   context.imageSmoothingEnabled = false;
   const { sky, ink } = skyAndInk(phaseAt(now));
   document.body.style.backgroundColor = sky;

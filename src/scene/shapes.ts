@@ -60,40 +60,43 @@ const FULL_TURN = 2 * Math.PI;
 const TILT = 0.3;
 /** A face this near edge-on is passed over: its hairline would be no face at all. */
 const EDGE_ON = 1e-9;
+/** Far enough behind any face's nearness to put a face last within its shape. */
+const UNDER = 1e6;
 
 /** The floor disc's middle sits 20 art pixels below the globe's centre and reaches 44 art pixels out: at every turn its whole rim stays inside the glass (radius 56 less its 2.5-wide rim) and its front edge rests above the base of the shortest picture. */
 export const floorDisc: FloorDisc = { y: 20, radius: 44 };
 
 /**
- * The house: its walls are 22 art pixels across, 16 deep and 12 tall
- * (art/objects.ts), sat back and left on the disc. Every shape stands so that
- * its front wall's columns and rows land on the picture's grid at turn 0, as
- * the lettering does: x - width / 2 and floorDisc.y + TILT * (z + depth / 2)
+ * The house, the globe's hero: its walls are 28 art pixels across, 18 deep and
+ * 15 tall (art/objects.ts), stood in the middle of the disc and a little back,
+ * under a thick snow roof that overhangs its gables. Every shape stands so
+ * that its front wall's columns and rows land on the picture's grid at turn 0,
+ * as the lettering does: x - width / 2 and floorDisc.y + TILT * (z + depth / 2)
  * are whole art pixels.
  */
-const HOUSE: GlobeShape = { kind: 'house', x: -12, z: -8, width: 22, depth: 16, height: 12 };
-/** The eight presents, two of each design, each a cube the size of its design's drawings, stood round the house. */
+const HOUSE: GlobeShape = { kind: 'house', x: 0, z: 1, width: 28, depth: 18, height: 15 };
+/** The eight presents, two of each design, each a cube the size of its design's drawings, heaped round the house, the path to its door kept clear. */
 const PRESENTS: readonly GlobeShape[] = [
-  { kind: 'present', x: 13.5, z: -13.5, width: 7, depth: 7, height: 7, design: 1 },
-  { kind: 'present', x: 25.5, z: 6.5, width: 7, depth: 7, height: 7, design: 1 },
-  { kind: 'present', x: 8, z: -3, width: 6, depth: 6, height: 6, design: 2 },
-  { kind: 'present', x: 32, z: -13, width: 6, depth: 6, height: 6, design: 2 },
-  { kind: 'present', x: -3.5, z: 7.5, width: 5, depth: 5, height: 5, design: 3 },
-  { kind: 'present', x: 21.5, z: -12.5, width: 5, depth: 5, height: 5, design: 3 },
-  { kind: 'present', x: -29.5, z: -3.5, width: 7, depth: 7, height: 7, design: 4 },
-  { kind: 'present', x: -9.5, z: 16.5, width: 7, depth: 7, height: 7, design: 4 },
+  { kind: 'present', x: -29.5, z: -23.5, width: 7, depth: 7, height: 7, design: 1 },
+  { kind: 'present', x: 33.5, z: 6.5, width: 7, depth: 7, height: 7, design: 1 },
+  { kind: 'present', x: 14, z: 27, width: 6, depth: 6, height: 6, design: 2 },
+  { kind: 'present', x: -28, z: 17, width: 6, depth: 6, height: 6, design: 2 },
+  { kind: 'present', x: 2.5, z: 27.5, width: 5, depth: 5, height: 5, design: 3 },
+  { kind: 'present', x: -19.5, z: -22.5, width: 5, depth: 5, height: 5, design: 3 },
+  { kind: 'present', x: -14.5, z: 26.5, width: 7, depth: 7, height: 7, design: 4 },
+  { kind: 'present', x: 16.5, z: -23.5, width: 7, depth: 7, height: 7, design: 4 },
 ];
-/** The lamp post: a thin cylinder, so its one drawing shows the same 3 x 18 face from every side. */
-const LAMP_POST: GlobeShape = { kind: 'lamp-post', x: 18.5, z: 10, width: 3, depth: 3, height: 18 };
+/** The lamp post: a thin cylinder, so its one drawing shows the same 5 x 24 face from every side. */
+const LAMP_POST: GlobeShape = { kind: 'lamp-post', x: -19.5, z: 10, width: 5, depth: 5, height: 24 };
 
-/** The three pines: flat drawings facing the visitor, each on a thin footprint, away from the house's screen area at turn 0. */
+/** The three pines, of three heights: flat drawings facing the visitor, each on a thin footprint, framing the house at turn 0. */
 const PINES: readonly GlobeShape[] = [
-  { kind: 'pine', x: 34.5, z: 10, width: 7, depth: 2, height: 20, drawing: 'pine-1' },
-  { kind: 'pine', x: -33, z: 10, width: 6, depth: 2, height: 16, drawing: 'pine-2' },
-  { kind: 'pine', x: -27.5, z: -20, width: 5, depth: 2, height: 13, drawing: 'pine-3' },
+  { kind: 'pine', x: -32.5, z: 0, width: 17, depth: 2, height: 30, drawing: 'pine-1' },
+  { kind: 'pine', x: 30.5, z: -10, width: 15, depth: 2, height: 25, drawing: 'pine-2' },
+  { kind: 'pine', x: -8.5, z: -30, width: 13, depth: 2, height: 21, drawing: 'pine-3' },
 ];
-/** The snowman: his body is a flat drawing facing the visitor, round on an 8 x 8 footprint; his face, arms and scarf turn with the globe. */
-const SNOWMAN: GlobeShape = { kind: 'snowman', x: 6, z: 10, width: 8, depth: 8, height: 15 };
+/** The snowman: his body is a flat drawing facing the visitor, round on a 10 x 10 footprint; his face, arms and scarf turn with the globe. */
+const SNOWMAN: GlobeShape = { kind: 'snowman', x: 25, z: 20, width: 10, depth: 10, height: 18 };
 
 export const globeShapes: readonly GlobeShape[] = [HOUSE, ...PRESENTS, LAMP_POST, ...PINES, SNOWMAN];
 
@@ -210,12 +213,24 @@ function roundFace(drawing: Drawing, name: string, x: number, z: number, bottom:
   };
 }
 
+/** A face laid before the faces at its own depth, so it covers them where they overlap. */
+function over(placed: Placed): Placed {
+  return { face: placed.face, near: placed.near + 0.5 };
+}
+
+/** A face laid after every other face of its shape, so any of them covers it where they overlap. */
+function under(placed: Placed): Placed {
+  return { face: placed.face, near: placed.near - UNDER };
+}
+
 /** The house's faces: its walls, the gable ends over the side walls, the two roof slopes and the chimney on the ridge. */
 function houseFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
   const { x, z, width, depth, height } = shape;
   const halfWidth = width / 2;
   const halfDepth = depth / 2;
   const roof = sheet('house-roof-front');
+  // The roof drawing is wider than the walls: its slopes overhang both gables by the difference.
+  const eave = halfWidth + (roof.width - width) / 2;
   // The slope runs from the eave at the wall's top up to the ridge over the
   // house's middle; its rise is chosen so the drawing's rows fill exactly the
   // rows the slope's back-to-front run and its height cover on the screen.
@@ -223,23 +238,27 @@ function houseFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
   const ridge = height + rise;
   const chimney = sheet('house-chimney');
   return [
-    ...boxWalls(['house-wall-front', 'house-wall-back', 'house-wall-right', 'house-wall-left'], x, z, halfWidth, halfDepth, height, cos, sin),
-    // The gable ends close the triangle between a side wall's top and the slopes.
+    // The walls stand under the roof too: its eaves cover their tops where they overhang them.
+    ...boxWalls(['house-wall-front', 'house-wall-back', 'house-wall-right', 'house-wall-left'], x, z, halfWidth, halfDepth, height, cos, sin).map((wall) => ({ face: wall.face, near: wall.near - UNDER / 2 })),
+    // The gable ends close the triangle between a side wall's top and the
+    // slopes. They sit under the roof, whose eaves overhang them, so they are
+    // laid last: the slopes always cover them where the two meet on screen,
+    // whatever the turn, instead of swapping over as their middles pass.
     ...(shows(1, 0, 0, cos, sin)
-      ? [face('house-wall-right', [[x + halfWidth, z + halfDepth, height], [x + halfWidth, z, ridge], [x + halfWidth, z - halfDepth, height]], cos, sin)]
+      ? [under(face('house-wall-right', [[x + halfWidth, z + halfDepth, height], [x + halfWidth, z, ridge], [x + halfWidth, z - halfDepth, height]], cos, sin))]
       : []),
     ...(shows(-1, 0, 0, cos, sin)
-      ? [face('house-wall-left', [[x - halfWidth, z - halfDepth, height], [x - halfWidth, z, ridge], [x - halfWidth, z + halfDepth, height]], cos, sin)]
+      ? [under(face('house-wall-left', [[x - halfWidth, z - halfDepth, height], [x - halfWidth, z, ridge], [x - halfWidth, z + halfDepth, height]], cos, sin))]
       : []),
     ...(shows(0, rise, halfDepth, cos, sin)
       ? [
           face(
             'house-roof-front',
             [
-              [x - halfWidth, z, ridge],
-              [x + halfWidth, z, ridge],
-              [x + halfWidth, z + halfDepth, height],
-              [x - halfWidth, z + halfDepth, height],
+              [x - eave, z, ridge],
+              [x + eave, z, ridge],
+              [x + eave, z + halfDepth, height],
+              [x - eave, z + halfDepth, height],
             ],
             cos,
             sin,
@@ -251,17 +270,17 @@ function houseFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
           face(
             'house-roof-back',
             [
-              [x + halfWidth, z, ridge],
-              [x - halfWidth, z, ridge],
-              [x - halfWidth, z - halfDepth, height],
-              [x + halfWidth, z - halfDepth, height],
+              [x + eave, z, ridge],
+              [x - eave, z, ridge],
+              [x - eave, z - halfDepth, height],
+              [x + eave, z - halfDepth, height],
             ],
             cos,
             sin,
           ),
         ]
       : []),
-    roundFace(chimney, 'house-chimney', x + 6, z, ridge, cos, sin),
+    roundFace(chimney, 'house-chimney', x + 8, z, ridge, cos, sin),
   ];
 }
 
@@ -292,26 +311,29 @@ function presentFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
 /**
  * The snowman's faces: his body, always facing the visitor, behind the three
  * parts that turn with the globe. The face sits on the front of his head
- * (rows 4-6 of the body drawing, one column left of its middle so that its
+ * (rows 6-8 of the body drawing, one column left of its middle so that its
  * columns land on the grid) and shows while it looks towards the visitor; the
- * scarf (rows 7-8, his neck) and the arms (rows 8-10) stand in his middle plane
- * and show from both sides, mirrored once seen from behind.
+ * scarf (rows 9-11, his neck) and the arms (rows 8-12) stand in his middle
+ * plane and show from both sides, mirrored once seen from behind.
  */
-/** The rows of the body drawing (from the top) where his turning parts sit: face rows 4-6, scarf rows 7-8, arms rows 8-10, coal buttons rows 9-13. */
-const FACE_ROW = 4;
-const SCARF_ROW = 7;
+/** The rows of the body drawing (from the top) where his turning parts sit: face rows 6-8, scarf rows 9-11, arms rows 8-12, coal buttons rows 14-16 (below the arms, so they never cross as he turns). */
+const FACE_ROW = 6;
+const SCARF_ROW = 9;
 const ARMS_ROW = 8;
-const BUTTONS_ROW = 9;
+const BUTTONS_ROW = 14;
+/** How far his face and buttons stand out of his middle plane: his head's radius, so the face stays on the head as he turns. */
+const SNOWMAN_FRONT = 3;
 
 function snowmanFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
-  const { x, z, width, height } = shape;
-  const body = roundFace(sheet('snowman-body'), 'snowman-body', x, z, 0, cos, sin);
+  const { x, z, height } = shape;
   // The turning parts always cover the body, whichever side they are seen from.
-  body.near -= 1;
+  const body = under(roundFace(sheet('snowman-body'), 'snowman-body', x, z, 0, cos, sin));
   const faceHalf = sheet('snowman-face').width / 2;
   const armsHalf = sheet('snowman-arms').width / 2;
   const scarfHalf = sheet('snowman-scarf').width / 2;
-  const front = width / 2 - 1;
+  const front = SNOWMAN_FRONT;
+  const armsTall = sheet('snowman-arms').height;
+  const scarfTall = sheet('snowman-scarf').height;
   // The face stands out of the middle plane by `front`; lifting it by the tilt's share keeps its rows on the body's at turn 0.
   const faceTop = height - FACE_ROW + TILT * front;
   const faceX = x - 0.5;
@@ -326,8 +348,9 @@ function snowmanFaces(shape: GlobeShape, cos: number, sin: number): Placed[] {
     ...(shows(0, 1, 0, cos, sin)
       ? [face('snowman-buttons', [[faceX - 0.5, z + front, buttonsTop], [faceX + 0.5, z + front, buttonsTop], [faceX + 0.5, z + front, buttonsTop - buttons.height], [faceX - 0.5, z + front, buttonsTop - buttons.height]], cos, sin)]
       : []),
-    face('snowman-arms', [[x - armsHalf, z, height - ARMS_ROW], [x + armsHalf, z, height - ARMS_ROW], [x + armsHalf, z, height - ARMS_ROW - 3], [x - armsHalf, z, height - ARMS_ROW - 3]], cos, sin),
-    face('snowman-scarf', [[x - scarfHalf, z, height - SCARF_ROW], [x + scarfHalf, z, height - SCARF_ROW], [x + scarfHalf, z, height - SCARF_ROW - 2], [x - scarfHalf, z, height - SCARF_ROW - 2]], cos, sin),
+    face('snowman-arms', [[x - armsHalf, z, height - ARMS_ROW], [x + armsHalf, z, height - ARMS_ROW], [x + armsHalf, z, height - ARMS_ROW - armsTall], [x - armsHalf, z, height - ARMS_ROW - armsTall]], cos, sin),
+    // The scarf wraps his neck over the arms' roots: it always covers them.
+    over(face('snowman-scarf', [[x - scarfHalf, z, height - SCARF_ROW], [x + scarfHalf, z, height - SCARF_ROW], [x + scarfHalf, z, height - SCARF_ROW - scarfTall], [x - scarfHalf, z, height - SCARF_ROW - scarfTall]], cos, sin)),
   ];
 }
 

@@ -27,6 +27,9 @@ export const masterColours: readonly string[] = [
   '#c06a98', '#f4cfe0', '#0b1026',
   // Added by XMAS-35 for Dawn's sky ramp and ground shadow.
   '#454389', '#6a5aa0', '#a874a8', '#e49aa6', '#ffd6a0', '#cdbde6',
+  // Added for the globe's second visual pass: the prototype's brick reds for
+  // the house walls and its lit pine green.
+  '#c24c47', '#a83c3c', '#2c8f6f',
 ];
 
 // XMAS-27: the sky and ink the countdown draws with, per phase. Every colour

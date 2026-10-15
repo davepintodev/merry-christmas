@@ -87,6 +87,10 @@ function resize(target: HTMLCanvasElement, ratioNow: number): { scale: number; w
   const cssHeight = `${(height * scale) / ratioNow}px`;
   if (target.style.width !== cssWidth) target.style.width = cssWidth;
   if (target.style.height !== cssHeight) target.style.height = cssHeight;
+  // Left edge on a whole device pixel, so every art pixel stays a whole number of device pixels (crisp at fractional ratios).
+  const left = `${Math.round(((window.innerWidth - (width * scale) / ratioNow) / 2) * ratioNow) / ratioNow}px`;
+  if (target.style.transform !== 'none') target.style.transform = 'none';
+  if (target.style.left !== left) target.style.left = left;
   return { scale, width, height };
 }
 

@@ -9,6 +9,7 @@ import { masterColours } from '../../art/colours.ts';
 import type { PhaseReading } from '../shared/clock.ts';
 import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
+import type { Drawing } from '../shared/art.generated.ts';
 import { globeShapes, onFloor, projectPoint, projectShape, sheet, wrapTurn, type GlobeShape, type ProjectedFace } from './shapes.ts';
 
 /** The master list's colours as numbers, so a drawing's pixel is a colour. */
@@ -16,10 +17,10 @@ const COLOUR_NUMBERS: readonly number[] = masterColours.map((colour) => Number.p
 /** The shadow runs this far right of a shape (the light is at the top left) and fades out over this many pixels. */
 const SHADOW_SHIFT = 8;
 const SHADOW_SOFT = 6;
-/** How tall the shadow is on the floor, in art pixels, and how dark it gets: black only ever darkens the floor it falls on. */
+/** How tall the shadow is on the floor, in art pixels, and how dark it gets: a deep night blue, so the shade on the snow stays cool instead of grey, and only ever darkens the floor it falls on. */
 const SHADOW_TALL = 4;
-const SHADOW_STRENGTH = 0.4;
-const SHADOW_INK = 0x000000;
+const SHADOW_STRENGTH = 0.32;
+const SHADOW_INK = 0x1d3350;
 
 /** Whether two colours differ by at most one step in every channel. */
 function withinOneStep(a: number, b: number): boolean {
@@ -80,33 +81,58 @@ function ringArea(ring: readonly (readonly [number, number])[]): number {
   return Math.abs(twice) / 2;
 }
 
-/** The ring clipped to the drawing pixel [u0, u1] x [v0, v1], which may leave a shorter ring. */
-function clipRing(ring: readonly (readonly [number, number])[], u0: number, v0: number, u1: number, v1: number): readonly (readonly [number, number])[] {
-  let out: readonly (readonly [number, number])[] = ring;
-  const sides: readonly (readonly [number, number, number])[] = [
-    [0, u0, 1],
-    [0, u1, -1],
-    [1, v0, 1],
-    [1, v1, -1],
-  ];
-  for (const [axis, edge, keep] of sides) {
-    const inside = (p: readonly [number, number]): number => keep * ((axis === 0 ? p[0] : p[1]) - edge);
-    const next: [number, number][] = [];
-    for (let i = 0; i < out.length; i++) {
-      const a = out[i] ?? [0, 0];
-      const b = out[(i + 1) % out.length] ?? [0, 0];
-      const da = inside(a);
-      const db = inside(b);
-      if (da >= 0) next.push([a[0], a[1]]);
+/** Scratch rings for clippedArea, so clipping a pixel against each drawing pixel allocates nothing. */
+const SCRATCH_A = new Float64Array(64);
+const SCRATCH_B = new Float64Array(64);
+
+/**
+ * The area of the ring clipped to the drawing pixel [u0, u1] x [v0, v1]: the
+ * area of the ring cut to that square, worked in scratch rings because it runs
+ * for every drawing pixel under every picture pixel of every face.
+ */
+function clippedArea(ring: readonly (readonly [number, number])[], u0: number, v0: number, u1: number, v1: number): number {
+  let src = SCRATCH_A;
+  let dst = SCRATCH_B;
+  let n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const p = ring[i] ?? [0, 0];
+    src[2 * i] = p[0];
+    src[2 * i + 1] = p[1];
+  }
+  for (let side = 0; side < 4 && n > 0; side++) {
+    const axis = side < 2 ? 0 : 1;
+    const edge = side === 0 ? u0 : side === 1 ? u1 : side === 2 ? v0 : v1;
+    const keep = side % 2 === 0 ? 1 : -1;
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = src[2 * i] ?? 0;
+      const ay = src[2 * i + 1] ?? 0;
+      const bx = src[2 * j] ?? 0;
+      const by = src[2 * j + 1] ?? 0;
+      const da = keep * ((axis === 0 ? ax : ay) - edge);
+      const db = keep * ((axis === 0 ? bx : by) - edge);
+      if (da >= 0) {
+        dst[2 * m] = ax;
+        dst[2 * m + 1] = ay;
+        m++;
+      }
       if ((da >= 0) !== (db >= 0)) {
         const t = da / (da - db);
-        next.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+        dst[2 * m] = ax + (bx - ax) * t;
+        dst[2 * m + 1] = ay + (by - ay) * t;
+        m++;
       }
     }
-    out = next;
-    if (out.length === 0) return [];
+    [src, dst] = [dst, src];
+    n = m;
   }
-  return out;
+  let twice = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    twice += (src[2 * i] ?? 0) * (src[2 * j + 1] ?? 0) - (src[2 * j] ?? 0) * (src[2 * i + 1] ?? 0);
+  }
+  return Math.abs(twice) / 2;
 }
 
 /** The ring clipped to a convex polygon of either winding, which may leave a shorter ring. */
@@ -182,60 +208,43 @@ function coverFace(cover: Float64Array, box: Box, layout: SceneLayout, show: Pro
   const bottom = Math.min(box.top + box.height - 1, Math.ceil(cy + Math.max(...ys)));
   const toDrawing = ([px, py]: readonly [number, number]): [number, number] => [iux * (px - a[0]) + iuy * (py - a[1]), ivx * (px - a[0]) + ivy * (py - a[1])];
   const outline = ring.length === 3 ? ring.map(toDrawing) : undefined;
+  const slack = 1e-9;
   for (let y = top; y <= bottom; y++) {
     for (let x = left; x <= right; x++) {
-      // The picture pixel's own corners in the drawing's pixels, in order.
-      const square: [number, number][] = [
-        [x - cx - a[0], y - cy - a[1]],
-        [x + 1 - cx - a[0], y - cy - a[1]],
-        [x + 1 - cx - a[0], y + 1 - cy - a[1]],
-        [x - cx - a[0], y + 1 - cy - a[1]],
-      ].map(([dx, dy]) => [iux * dx + iuy * dy, ivx * dx + ivy * dy]);
-      const corners = outline === undefined ? square : clipConvex(square, outline);
-      if (corners.length < 3) continue;
-      const us = corners.map(([u]) => u);
-      const vs = corners.map(([, v]) => v);
-      const firstU = Math.max(0, Math.floor(Math.min(...us)));
-      const lastU = Math.min(drawing.width - 1, Math.ceil(Math.max(...us)) - 1);
-      const firstV = Math.max(0, Math.floor(Math.min(...vs)));
-      const lastV = Math.min(drawing.height - 1, Math.ceil(Math.max(...vs)) - 1);
-      let covered = 0;
-      let red = 0;
-      let green = 0;
-      let blue = 0;
-      let dominant = 0;
-      let dominantArea = 0;
-      for (let v = firstV; v <= lastV; v++) {
-        for (let u = firstU; u <= lastU; u++) {
-          const colour = COLOUR_NUMBERS[(drawing.pixels[v * drawing.width + u] ?? 0) - 1];
-          if (colour === undefined) continue;
-          const area = ringArea(clipRing(corners, u, v, u + 1, v + 1));
-          if (area <= 0) continue;
-          covered += area * scale;
-          red += ((colour >> 16) & 0xff) * area;
-          green += ((colour >> 8) & 0xff) * area;
-          blue += (colour & 0xff) * area;
-          if (area > dominantArea) {
-            dominantArea = area;
-            dominant = colour;
-          }
-        }
-      }
-      if (covered <= 0) continue;
-      const mixed = (Math.round(red / (covered / scale)) << 16) | (Math.round(green / (covered / scale)) << 8) | Math.round(blue / (covered / scale));
-      // A drawing pixel only nicked at its edge would shift the mix by at
-      // most a step, below what the picture can hold: take the drawing's own
-      // colour there, so the pixel does not flicker as the face turns.
-      const colour = withinOneStep(mixed, dominant) ? dominant : mixed;
+      // The drawing pixel under the picture pixel's centre, taken whole: no
+      // in-between shades, so every pixel the face shows is one of the sheet's
+      // own colours and the picture stays crisp at any turn.
+      const dx = x + 0.5 - cx - a[0];
+      const dy = y + 0.5 - cy - a[1];
+      const u = iux * dx + iuy * dy;
+      const v = ivx * dx + ivy * dy;
+      if (u < -slack || v < -slack || u >= drawing.width + slack || v >= drawing.height + slack) continue;
+      if (outline !== undefined && !insideConvex(outline, u, v)) continue;
+      const colour = COLOUR_NUMBERS[(drawing.pixels[Math.min(drawing.height - 1, Math.max(0, Math.floor(v))) * drawing.width + Math.min(drawing.width - 1, Math.max(0, Math.floor(u)))] ?? 0) - 1];
+      if (colour === undefined) continue;
       const index = ((y - box.top) * box.width + (x - box.left)) * 4;
-      const share = Math.min(covered, 1 - (cover[index + 3] ?? 0));
-      if (share <= 1e-9) continue;
-      cover[index] = (cover[index] ?? 0) + ((colour >> 16) & 0xff) * share;
-      cover[index + 1] = (cover[index + 1] ?? 0) + ((colour >> 8) & 0xff) * share;
-      cover[index + 2] = (cover[index + 2] ?? 0) + (colour & 0xff) * share;
-      cover[index + 3] = (cover[index + 3] ?? 0) + share;
+      if ((cover[index + 3] ?? 0) >= 1) continue;
+      cover[index] = (colour >> 16) & 0xff;
+      cover[index + 1] = (colour >> 8) & 0xff;
+      cover[index + 2] = colour & 0xff;
+      cover[index + 3] = 1;
     }
   }
+}
+
+/** Whether (u, v) lies inside a convex ring of either winding, a hair's width out counted in. */
+function insideConvex(ring: readonly (readonly [number, number])[], u: number, v: number): boolean {
+  let sign = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [ax, ay] = ring[i] ?? [0, 0];
+    const [bx, by] = ring[(i + 1) % ring.length] ?? [0, 0];
+    const side = (bx - ax) * (v - ay) - (by - ay) * (u - ax);
+    if (Math.abs(side) < 1e-9) continue;
+    const s = side > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return true;
 }
 
 /** The picture pixels one shape can reach: its faces' screen box, clipped to the picture. */
@@ -308,17 +317,14 @@ function paintShadow(picture: Uint32Array, width: number, layout: SceneLayout, s
   const bottom = Math.min(layout.height - 1, Math.ceil(cy + last));
   for (let y = top; y <= bottom; y++) {
     const dy = y + 0.5 - cy;
-    // Every edge of the stripe takes its share of the pixel on the grid, so
-    // the shadow slides with the turn instead of jumping a whole pixel.
-    const across = edgeCoverage(cy + last, y) - edgeCoverage(cy + first, y);
-    if (across <= 0) continue;
+    // Hard-edged: a pixel is in the shadow or it is not, one flat shade.
+    if (y + 0.5 < cy + first || y + 0.5 > cy + last) continue;
     for (let x = left; x <= right; x++) {
       const dx = x + 0.5 - cx;
       // The shadow lies on the floor disc and nowhere else.
       if (!onFloor(dx, dy)) continue;
-      const along = 1 - edgeCoverage(cx + from, x);
-      const fade = Math.min(1, Math.max(0, (end - dx) / SHADOW_SOFT));
-      paintPixel(picture, y * width + x, SHADOW_INK, SHADOW_STRENGTH * across * along * fade);
+      if (dx < from || dx > end - SHADOW_SOFT / 2) continue;
+      paintPixel(picture, y * width + x, SHADOW_INK, SHADOW_STRENGTH);
     }
   }
 }
