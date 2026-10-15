@@ -4,6 +4,8 @@
 // `now` and remembers them, so no step is run twice or skipped.
 // reset(now) starts counting again from `now` (after a hidden tab), so a long
 // gap is not replayed as a burst of steps.
+// XMAS-79 "Smooth between steps": fraction(now) says how far `now` is into the
+// step not yet run, so the scene can draw partway between two steps.
 export const STEPS_PER_SECOND = 60;
 export const STEP_MS = 1000 / STEPS_PER_SECOND;
 
@@ -19,6 +21,11 @@ export interface Stepper {
   due(now: number): number;
   /** Starts counting again from `now`, keeping no part-step from before. */
   reset(now: number): void;
+  /**
+   * How far `now` is into the next step not yet run, from 0 to 1. Call it after
+   * due(now) for the same frame; time going backwards gives 0.
+   */
+  fraction(now: number): number;
 }
 
 function finite(time: number, what: string): void {
@@ -53,6 +60,14 @@ export function makeStepper(start: number): Stepper {
       finite(now, 'a frame time');
       base = now;
       taken = 0;
+    },
+    fraction(now: number): number {
+      finite(now, 'a frame time');
+      // Measured from the last step taken, with the same tolerance as counted(),
+      // so a frame exactly on a boundary reads 0 rather than a sliver either side.
+      const into = now - (base + taken * STEP_MS);
+      if (into <= EPSILON_MS) return 0;
+      return Math.min(1, into / STEP_MS);
     },
   };
 }

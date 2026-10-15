@@ -34,7 +34,8 @@ State and next steps for the next session. Ticket keys are in the planning store
 
 - The visual reset (visual-reset-1 to 3, XMAS-75, XMAS-62, XMAS-63) and XMAS-86 are on main and live; `pnpm check` is green on main.
 - XMAS-86 done: the scene canvas keeps `left: 50%` from `index.html` and `resize()` in `src/page/scene.ts` puts the whole-device-pixel rounding into `translateX(<rounded left - innerWidth/2>px)`, so its layout box no longer jumps when the scene loads (transforms do not count as layout shift). It assumes no scrollbar (`overflow: hidden` in `index.html`). New browser test: the scene canvas starts on a whole device pixel at DPR 1, 1.5, 2, 3 (odd widths 1365 and 375), tolerance 1e-4 device px because the translate is a 32-bit float. `src/countdown/main.ts` keeps its pixel `left` + `transform: none`: it is set before the canvas is unhidden, so it never shifts.
-- Next: the fine-layer chain XMAS-78 to XMAS-85 (fine pixel grid). XMAS-78 and XMAS-79 have no blockers; start there. The throwaway prototype for it is on branch `claude/smooth-steps-on-latest` and must not go to main.
+- XMAS-79 done (smooth between steps: `Stepper.fraction(now)` in `src/page/steps.ts`, the loop passes it to `draw(fraction?)`, `src/page/pose.ts` `makePoseTrack`/`smoothTime` blend turn, lean and Santa's time between the last two steps; snow is XMAS-84). Left nits: the first frame back from a hidden tab draws fraction 0 (up to a step back); the pose tests copy the scene.ts wiring instead of testing it.
+- Next: the fine-layer chain XMAS-78 to XMAS-85 (fine pixel grid). XMAS-78 has no blockers; start there. The throwaway prototype for it is on branch `claude/smooth-steps-on-latest` and must not go to main.
 
 ## VISUAL RESET (read for context; XMAS-42 onward is paused)
 
@@ -117,3 +118,4 @@ Process reminders for this reset: use the `scene-artist` agent for art (give it 
 | XMAS-62 | 1 | approve with nits | nit x2 (strip + 1 coupled to SKY_ABOVE without a shared constant; self-computed 43-row test) - both fixed, no re-review lane=full |
 | XMAS-63 | 1 | approve with nits | nit x1 (gap test compared the layout rectangle with itself) - fixed, no re-review lane=full |
 | XMAS-86 | 1 | approve with nits | nit x2 (translateX uses innerWidth/2 while left: 50% excludes a scrollbar, harmless with overflow hidden: comment added; whole-pixel test does not check the box stayed put, covered by the layout-shift test: left) lane=fast |
+| XMAS-79 | 1 | approve with nits | nit x2 (fraction 0 on return from hidden steps back up to a step; pose tests copy scene.ts wiring) - left, no re-review lane=full |

@@ -97,4 +97,114 @@ describe('the 60-step clock', () => {
     expect(() => stepper.reset(bad)).toThrow(RangeError);
     expect(stepper.due(1000)).toBe(60);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('fraction refuses a time of %s', (bad) => {
+    const stepper = makeStepper(0);
+    expect(() => stepper.fraction(bad)).toThrow(RangeError);
+    expect(stepper.due(1000)).toBe(60);
+  });
+});
+
+// XMAS-79 "Smooth between steps": fraction(now), called after due(now) for the
+// same frame, says how far `now` is into the next step not yet run (0 to 1).
+describe('the part-step fraction', () => {
+  it('is 0 at the start', () => {
+    const stepper = makeStepper(1000);
+    stepper.due(1000);
+    expect(stepper.fraction(1000)).toBe(0);
+  });
+
+  it('is 0 exactly on a step boundary after due, never a tiny negative or nearly 1', () => {
+    const stepper = makeStepper(0);
+    expect(stepper.due(100)).toBe(6); // six steps are 100.00000000000001 ms
+    expect(stepper.fraction(100)).toBe(0);
+    expect(stepper.due(1000)).toBe(54);
+    expect(stepper.fraction(1000)).toBe(0);
+  });
+
+  it('is 0 on boundaries at large, close times', () => {
+    const stepper = makeStepper(123_456_789.123);
+    for (let i = 1; i <= 120; i++) {
+      const now = 123_456_789.123 + i * STEP_MS;
+      stepper.due(now);
+      expect(stepper.fraction(now), `step ${i}`).toBeLessThan(1e-6);
+    }
+  });
+
+  it('is the part-step mid-step', () => {
+    const stepper = makeStepper(1000);
+    stepper.due(1000 + STEP_MS * 0.25);
+    expect(stepper.fraction(1000 + STEP_MS * 0.25)).toBeCloseTo(0.25, 9);
+    stepper.due(1000 + STEP_MS * 0.5);
+    expect(stepper.fraction(1000 + STEP_MS * 0.5)).toBeCloseTo(0.5, 9);
+    stepper.due(1000 + STEP_MS * 1.75);
+    expect(stepper.fraction(1000 + STEP_MS * 1.75)).toBeCloseTo(0.75, 9);
+  });
+
+  it('is just under 1 a hair before the next boundary, and 0 on it', () => {
+    const stepper = makeStepper(0);
+    stepper.due(STEP_MS * 0.999);
+    expect(stepper.fraction(STEP_MS * 0.999)).toBeCloseTo(0.999, 9);
+    expect(stepper.due(STEP_MS)).toBe(1);
+    expect(stepper.fraction(STEP_MS)).toBeLessThan(1e-6);
+  });
+
+  it('after many steps in one frame is the part-step of the last one', () => {
+    const stepper = makeStepper(0);
+    expect(stepper.due(100 + STEP_MS * 0.4)).toBe(6);
+    expect(stepper.fraction(100 + STEP_MS * 0.4)).toBeCloseTo(0.4, 9);
+    expect(stepper.due(5000 + STEP_MS * 0.7)).toBe(294);
+    expect(stepper.fraction(5000 + STEP_MS * 0.7)).toBeCloseTo(0.7, 9);
+  });
+
+  it('stays within 0 and 1 over a run of irregular frames', () => {
+    const stepper = makeStepper(77.7);
+    let now = 77.7;
+    for (let i = 0; i < 2000; i++) {
+      now += 1 + ((i * 7919) % 41); // 1 to 41 ms
+      stepper.due(now);
+      const f = stepper.fraction(now);
+      expect(f).toBeGreaterThanOrEqual(0);
+      expect(f).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('is 0 when time goes backwards, and is right again once it moves on', () => {
+    const stepper = makeStepper(0);
+    stepper.due(500);
+    expect(stepper.due(200)).toBe(0);
+    expect(stepper.fraction(200)).toBe(0);
+    expect(stepper.due(500 + STEP_MS * 0.5)).toBe(0);
+    expect(stepper.fraction(500 + STEP_MS * 0.5)).toBeCloseTo(0.5, 9);
+  });
+
+  it('is 0 for a time before the start', () => {
+    const stepper = makeStepper(1000);
+    stepper.due(900);
+    expect(stepper.fraction(900)).toBe(0);
+  });
+
+  it('is 0 at the reset time and counts from it, not from before', () => {
+    const stepper = makeStepper(0);
+    stepper.due(STEP_MS * 0.9);
+    expect(stepper.fraction(STEP_MS * 0.9)).toBeCloseTo(0.9, 9);
+    stepper.reset(60_000);
+    expect(stepper.fraction(60_000)).toBe(0);
+    stepper.due(60_000 + STEP_MS * 0.2);
+    expect(stepper.fraction(60_000 + STEP_MS * 0.2)).toBeCloseTo(0.2, 9);
+  });
+
+  it('is 0 at a reset time that is itself mid-way through an old step', () => {
+    const stepper = makeStepper(0);
+    stepper.due(1000);
+    stepper.reset(1000 + STEP_MS * 0.6);
+    expect(stepper.fraction(1000 + STEP_MS * 0.6)).toBe(0);
+  });
+
+  it('repeats the same answer for the same time', () => {
+    const stepper = makeStepper(0);
+    stepper.due(50 + 5);
+    const a = stepper.fraction(55);
+    expect(stepper.fraction(55)).toBe(a);
+  });
 });

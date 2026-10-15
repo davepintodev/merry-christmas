@@ -7,6 +7,8 @@
 // XMAS-33 "The ?perf readout": an optional observer hears each drawn frame
 // (its rAF time and how long scene.draw() alone took) and the hide and show.
 // Without one the loop makes no timing call at all.
+// XMAS-79 "Smooth between steps": draw gets how far the frame's time is into
+// the next step, so the scene can draw partway between two steps.
 import { observeSafely, type LoopObserver } from './loop-observer.ts';
 import { makeStepper, type Stepper } from './steps.ts';
 
@@ -29,8 +31,12 @@ export interface LoopHost {
 export interface LoopScene {
   /** One step of the scene's own 60-steps-a-second clock. */
   step(): void;
-  /** Draws the scene as it stands. */
-  draw(): void;
+  /**
+   * Draws the scene as it stands, `fraction` (0 to 1) of the way from its last
+   * step to the next one, for the same frame time the steps were counted for.
+   * Left out, it draws the last step as it stood (fraction 1).
+   */
+  draw(fraction?: number): void;
 }
 
 export interface SceneLoop {
@@ -63,11 +69,12 @@ export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopOb
     }
     const steps = stepper.due(time);
     for (let i = 0; i < steps; i++) scene.step();
+    const fraction = stepper.fraction(time);
     if (observer === undefined) {
-      scene.draw();
+      scene.draw(fraction);
     } else {
       const begin = clock();
-      scene.draw();
+      scene.draw(fraction);
       const workMs = clock() - begin;
       observeSafely(observer, (watch) => watch.frame(time, workMs));
     }

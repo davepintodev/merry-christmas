@@ -8,6 +8,8 @@
 // the readout is loaded or timed.
 // XMAS-41b2 "Drag input": a drag on the globe turns and leans it and stirs the
 // snow. The pointer is attached before the loop starts, so before globe-ready.
+// XMAS-79 "Smooth between steps": the globe, its lean and Santa are drawn partway
+// between the last two steps, so motion follows real time and not whole steps.
 import { makeClock, phaseAt, timeLeft } from '../shared/clock.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
 import { createDrag } from './drag.ts';
@@ -16,8 +18,9 @@ import { attachPointer } from './pointer.ts';
 import { wantsPerf } from './perf-option.ts';
 import { readoutLink } from './scene-perf.ts';
 import { pagePixels } from './pixel.ts';
+import { makePoseTrack, smoothTime } from './pose.ts';
 import { makeSnowRuntime } from './snow-runtime.ts';
-import { STEPS_PER_SECOND, STEP_MS } from './steps.ts';
+import { STEPS_PER_SECOND } from './steps.ts';
 
 /** The only source of randomness for a page: fixed, so every visit draws the same sky. */
 const SEED = 1;
@@ -41,8 +44,8 @@ let detachPointer: (() => void) | null = null;
 
 /** Steps taken since the scene started; the scene's own clock, not the wall clock. */
 let steps = 0;
-/** The globe's turn and lean as the last scene step left them; the frame draws these. */
-let pose = { turn: START_TURN, lean: 0 };
+/** The globe's turn and lean as the last two scene steps left them; the frame draws between them. */
+const track = makePoseTrack({ turn: START_TURN, lean: 0 });
 /** The colour, RGBA and image buffers for one picture size, kept between frames. */
 let buffers: { picture: Uint32Array; rgba: Uint8ClampedArray; image: ImageData } | null = null;
 
@@ -72,7 +75,7 @@ function artPoint(target: HTMLCanvasElement, clientX: number, clientY: number): 
  */
 function startDrag(target: HTMLCanvasElement, scale: number): void {
   detachPointer?.();
-  drag = createDrag(pose.turn);
+  drag = createDrag(track.latest().turn);
   dragScale = scale;
   // Pointer times are performance.now() at delivery: the browser merges queued moves, so an event's own timestamp can lag.
   detachPointer = attachPointer(target, drag, (x, y) => artPoint(target, x, y), () => performance.now() / 1000);
@@ -101,7 +104,7 @@ const scene: LoopScene = {
     steps++;
     const { width, height } = windowPixels(ratio());
     const out = drag.step(1 / STEPS_PER_SECOND);
-    pose = { turn: out.turn, lean: out.lean };
+    track.push({ turn: out.turn, lean: out.lean });
     snow.step({
       turn: out.turn,
       christmasDay: timeLeft(clock()).christmasDay,
@@ -111,7 +114,7 @@ const scene: LoopScene = {
       push: out.push,
     });
   },
-  draw(): void {
+  draw(fraction = 1): void {
     if (canvas === null || context === null) return;
     const dpr = ratio();
     const { scale, width, height } = resize(canvas, dpr);
@@ -122,7 +125,8 @@ const scene: LoopScene = {
       const rgba = new Uint8ClampedArray(size * 4);
       buffers = { picture, rgba, image: new ImageData(rgba, width, height) };
     }
-    const time = steps * STEP_MS;
+    const blended = track.blend(fraction);
+    const time = smoothTime(steps, fraction);
     const frame = frames(
       {
         time,
@@ -131,8 +135,8 @@ const scene: LoopScene = {
         seed: SEED,
         width,
         height,
-        turn: pose.turn,
-        lean: pose.lean,
+        turn: blended.turn,
+        lean: blended.lean,
         snow: snow.snow ?? undefined,
         outsideSnow: snow.outsideSnow ?? undefined,
       },
