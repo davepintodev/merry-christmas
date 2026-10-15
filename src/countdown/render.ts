@@ -90,9 +90,9 @@ function countdown(t: TimeLeft, colonOn: boolean, digitScale: number): Frame {
 /**
  * Christmas Day: MERRY over CHRISTMAS in the countdown's own font. CHRISTMAS
  * sits one blank row under MERRY, not two, and the frame keeps its height, so
- * its last inked row is one row above the frame's bottom: the page's one-row
- * sky offset above the countdown then keeps the greeting inside the scene's
- * reserved strip.
+ * its last inked row is one row above the frame's bottom. The page's two-row
+ * sky offset above the countdown then puts that row on the last row of the
+ * scene's reserved strip, which is one row taller than the frame for this reason.
  */
 function greeting(digitScale: number): Frame {
   const lines = ['MERRY', 'CHRISTMAS'];

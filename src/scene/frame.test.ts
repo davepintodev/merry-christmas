@@ -8,6 +8,7 @@ import { masterColours } from '../../art/colours.ts';
 import { skyAndInk } from '../countdown/colours.ts';
 import { contrast, MIN_CONTRAST_RATIO, relativeLuminance } from '../countdown/contrast.ts';
 import { countdownFrame } from '../countdown/render.ts';
+import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawings } from '../shared/art.generated.ts';
 import { phaseAt, type PhaseName, type PhaseReading } from '../shared/clock.ts';
 import { DISC_SIZE, GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
@@ -774,11 +775,21 @@ describe('sceneLayout: the countdown area', () => {
   // Spec 6.6: the digits reach 4.5:1 against every sky colour that can sit
   // behind them, in every phase and at every tenth of each blend. The scene
   // reserves the top of the picture, as tall as the tallest countdown frame
-  // (the days frame or the Christmas Day greeting), for plain sky only.
-  const COUNTDOWN_HEIGHT = Math.max(
-    countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, true).height,
-    countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true).height,
-  );
+  // (the days frame or the Christmas Day greeting) pushed down by the page's
+  // sky above it (SKY_ABOVE), less the greeting frame's blank bottom row, for plain sky only.
+  const COUNTDOWN_HEIGHT =
+    Math.max(
+      countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, true).height,
+      countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true).height,
+    ) +
+    SKY_ABOVE -
+    1;
+  it('reserves exactly the rows the greeting inks once the page puts SKY_ABOVE rows of sky over it', () => {
+    const greeting = countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true);
+    const lastRow = Math.floor(Array.from(greeting.pixels).lastIndexOf(1) / greeting.width);
+    expect(sceneLayout(W, H, SEED).countdown.height).toBe(SKY_ABOVE + lastRow + 1);
+    expect(COUNTDOWN_HEIGHT).toBe(SKY_ABOVE + lastRow + 1);
+  });
   const AREA_SIZES: [number, number][] = [
     [130, 260],
     [130, 160],

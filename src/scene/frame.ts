@@ -8,6 +8,7 @@ import { colours, masterColours, phaseColours, phaseOverrides } from '../../art/
 import { mixHex, skyAndInk } from '../countdown/colours.ts';
 import { countdownFrame } from '../countdown/render.ts';
 import { drawings } from '../shared/art.generated.ts';
+import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { drawGlobe } from './globe.ts';
@@ -23,11 +24,19 @@ export const DISC_SIZE = 13;
 export const MIN_HEIGHT = 160;
 /** The base drawing's height in art pixels (art/objects.ts, the Base sheet): the globe sits on it on the ground. */
 const BASE_HEIGHT = drawings['base']?.height ?? 22;
-/** The countdown's reserved height: the taller countdown frame, the Christmas Day greeting. */
-const COUNTDOWN_HEIGHT = Math.max(
-  countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, true).height,
-  countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true).height,
-);
+/**
+ * The countdown's reserved height: the taller countdown frame, the Christmas Day
+ * greeting, pushed down by the page's sky above it (SKY_ABOVE). The greeting's
+ * last inked row is one above its frame's bottom, so the strip is the frame
+ * plus SKY_ABOVE less that blank row.
+ */
+const COUNTDOWN_HEIGHT =
+  Math.max(
+    countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, true).height,
+    countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true).height,
+  ) +
+  SKY_ABOVE -
+  1;
 
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Circle { cx: number; cy: number; radius: number }

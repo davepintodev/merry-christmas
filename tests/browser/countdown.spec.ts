@@ -566,7 +566,7 @@ for (const [name, { viewport, dpr }] of [['phone', PHONE], ['laptop', LAPTOP]] a
     });
 
     for (const [label, now] of [['the countdown', '2026-12-01T22:00:00'], ['three-digit days', '2026-09-01T12:00:00'], ['the greeting', '2026-12-25T00:00:01']] as const) {
-      test(`${label} leaves at least one art pixel of blank sky above its first inked row, inside the window`, async ({ browser }) => {
+      test(`${label} leaves at least two art pixels of blank sky above its first inked row, inside the window`, async ({ browser }) => {
         const { page, close } = await openAt(browser, now);
         const { scale } = pagePixels(viewport, dpr);
         const ink = now.startsWith('2026-09') ? RED : GOLD;
@@ -588,7 +588,7 @@ for (const [name, { viewport, dpr }] of [['phone', PHONE], ['laptop', LAPTOP]] a
         expect(top, 'some ink is drawn').not.toBeNull();
         const physicalTop = top!.canvasTop * top!.dpr + top!.inkRow;
         expect(top!.canvasTop).toBeGreaterThanOrEqual(0);
-        expect(physicalTop).toBeGreaterThanOrEqual(scale - 0.01);
+        expect(physicalTop).toBeGreaterThanOrEqual(2 * scale - 0.01);
         await close();
       });
     }

@@ -11,6 +11,7 @@
 // page asks for the scene's own file; a failure leaves this plain sky.
 import { makeClock, phaseAt, timeLeft, type TimeLeft } from '../shared/clock.ts';
 import { pagePixels } from '../page/pixel.ts';
+import { SKY_ABOVE } from '../shared/sky.ts';
 import { announcement, spokenTime } from './announce.ts';
 import { skyAndInk } from './colours.ts';
 import { countdownFrame } from './render.ts';
@@ -52,8 +53,8 @@ function draw(now: Date, left: TimeLeft): void {
   if (canvas.height !== physicalHeight) canvas.height = physicalHeight;
   canvas.style.width = `${physicalWidth / dpr}px`;
   canvas.style.height = `${physicalHeight / dpr}px`;
-  // One art pixel of blank sky above the first inked row, so the title is not clipped by the window's top edge.
-  canvas.style.top = `${scale / dpr}px`;
+  // Blank sky above the first inked row, so the title is not clipped by the window's top edge.
+  canvas.style.top = `${(SKY_ABOVE * scale) / dpr}px`;
   // Left edge on a whole device pixel, so the digits stay sharp at fractional ratios.
   canvas.style.transform = 'none';
   canvas.style.left = `${Math.round(((window.innerWidth - physicalWidth / dpr) / 2) * dpr) / dpr}px`;
