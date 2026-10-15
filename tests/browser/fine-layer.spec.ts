@@ -17,7 +17,9 @@
 // every row of the leaning shapes is the upright row moved by a whole number of
 // art pixels, and those moves are one lean's moves (rowShift of a single lean).
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { masterColours } from '../../art/colours.ts';
 import { leanBox, rowShift } from '../../src/scene/lean.ts';
+import { santaPlacement } from '../../src/scene/santa.ts';
 import { sceneLayout } from '../../src/scene/frame.ts';
 import { DRAG_SETTINGS } from '../../src/page/drag.ts';
 import { pagePixels } from '../../src/page/pixel.ts';
@@ -28,6 +30,8 @@ import { shapesFarFirst } from '../../src/scene/shapes-draw.ts';
 const NOW = '2026-12-01T22:00:00';
 const SEED = 1; // src/page/scene.ts
 const STEP_MS = 16;
+/** The master colour number (1 based) only Santa's trot drawings use; no shape's drawing has it. */
+const SANTA_ONLY = 48;
 
 type Rect = { x: number; y: number; width: number; height: number };
 type Viewport = { width: number; height: number };
@@ -297,9 +301,19 @@ test.describe('the layer follows the lean while dragging', () => {
     expect(leaning).toHaveLength(box.bottom - box.top);
     expect(upright).toHaveLength(leaning.length);
     // The turn is the same at both moments (the release has settled), so only the lean differs. Find one lean that moves every row.
-    const rows = leaning.map((row, n) => ({ y: box.top + n, shifts: fits(row, upright[n] ?? '', scale) })).filter((r) => r.shifts.length > 0);
+    // Santa flies between the two captures and is painted on this canvas, sheared with the shapes: leave out the art rows he can be on
+    // (his whole orbit's reach of y, his 12 rows tall, and the bob) rather than any shape row.
+    let santaTop = Infinity;
+    let santaBottom = -Infinity;
+    for (let a = 0; a < 64; a++) {
+      const y = layout.globe.cy + santaPlacement(a * ((2 * Math.PI) / 64) - 2, 0).y;
+      santaTop = Math.min(santaTop, y);
+      santaBottom = Math.max(santaBottom, y);
+    }
+    const santaRow = (y: number): boolean => y >= santaTop - 6 - 3 && y <= santaBottom + 6 + 3;
+    const rows = leaning.map((row, n) => ({ y: box.top + n, shifts: fits(row, upright[n] ?? '', scale) })).filter((r) => r.shifts.length > 0 && !santaRow(r.y));
     expect(rows.length, 'rows with shape pixels to compare').toBeGreaterThan(30);
-    const inexact = leaning.map((row, n) => ({ n, has: (upright[n] ?? '').split(',').filter((c) => c !== '.').length >= 20 })).filter((r) => r.has && !rows.some((x) => x.y === box.top + r.n));
+    const inexact = leaning.map((row, n) => ({ n, has: (upright[n] ?? '').split(',').filter((c) => c !== '.').length >= 20 })).filter((r) => r.has && !santaRow(box.top + r.n) && !rows.some((x) => x.y === box.top + r.n));
     expect(inexact.map((r) => r.n), 'rows that are not the upright row moved by whole art pixels').toEqual([]);
     let found: number | null = null;
     for (let lean = -0.5; lean <= 0.5 && found === null; lean += 0.0005) {
@@ -313,7 +327,7 @@ test.describe('the layer follows the lean while dragging', () => {
     // Settled, the layer is upright: every row is its own upright row.
     await idle(page, 4000);
     const settled = await shapeRows(page, scale);
-    expect(settled.filter((row, n) => row !== upright[n]).length).toBeLessThanOrEqual(2);
+    expect(settled.filter((row, n) => row !== upright[n] && !santaRow(box.top + n)).length).toBeLessThanOrEqual(2);
     await context.close();
   });
 });
@@ -355,22 +369,28 @@ test.describe('Santa and the front snow show in front of the shapes', () => {
     await context.close();
   });
 
-  test('Santa is on the front layer at some moment of his flight, and the shapes layer has no Santa colours of its own', async ({ browser }) => {
+  test('Santa is on the shapes canvas at some moment of his flight, and the front canvas has none of his colours', async ({ browser }) => {
     const { context, page } = await boot(browser, { width: 800, height: 600 });
-    let max = 0;
-    for (let t = 0; t < 40; t++) {
-      await idle(page, 500);
-      const opaque = await page.locator(FRONTS).evaluate((el) => {
+    // The master colour only Santa's two trot drawings use (no shape's drawing has it), as 0xRRGGBB.
+    const santaColour = Number.parseInt(masterColours[SANTA_ONLY - 1]!.slice(1), 16);
+    const countOf = (selector: string): Promise<number> =>
+      page.locator(selector).evaluate((el, colour) => {
         const c = el as HTMLCanvasElement;
         const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+        const [r, g, b] = [(colour >> 16) & 255, (colour >> 8) & 255, colour & 255];
         let n = 0;
-        for (let i = 3; i < data.length; i += 4) if (data[i] === 255) n++;
+        for (let i = 0; i < data.length; i += 4) if (data[i] === r && data[i + 1] === g && data[i + 2] === b && data[i + 3] === 255) n++;
         return n;
-      });
-      max = Math.max(max, opaque);
-      if (max > 0) break;
+      }, santaColour);
+    let onShapes = 0;
+    let onFront = 0;
+    for (let t = 0; t < 40 && onShapes === 0; t++) {
+      await idle(page, 500);
+      onShapes = Math.max(onShapes, await countOf(SHAPES));
+      onFront = Math.max(onFront, await countOf(FRONTS));
     }
-    expect(max, 'Santa or snow drew in front of the shapes within 20 s').toBeGreaterThan(0);
+    expect(onShapes, 'Santa drew on the shapes canvas within 20 s').toBeGreaterThan(0);
+    expect(onFront, 'the front canvas holds the snow in front, not Santa').toBe(0);
     await context.close();
   });
 });

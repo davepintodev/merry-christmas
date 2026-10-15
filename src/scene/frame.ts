@@ -81,7 +81,7 @@ export interface SceneInput {
   snow?: GlobeSnow;
   /** The outside snow (XMAS-36b2); absent draws none. */
   outsideSnow?: OutsideSnow;
-  /** Whether the shapes' bodies are drawn (XMAS-80); absent or true draws them, false leaves them out and keeps their shadows, and the frame then carries the front layer (SceneFrame.front). */
+  /** Whether the shapes' bodies, and Santa with them, are drawn (XMAS-80, XMAS-83); absent or true draws them, false leaves them out and keeps their shadows, and the frame then carries the front layer (SceneFrame.front). */
   shapeBodies?: boolean;
 }
 
@@ -91,7 +91,7 @@ export interface SceneFrame {
   /** width * height colour numbers, 0xRRGGBB, row by row from the top left. */
   picture: Uint32Array;
   layout: SceneLayout;
-  /** With shapeBodies false (XMAS-81): what Santa and the snow in front drew, before the lean, NO_FRONT where nothing did; kept until the next frame. */
+  /** With shapeBodies false (XMAS-81): what the snow in front drew, before the lean, NO_FRONT where nothing did; kept until the next frame. */
   front?: Uint32Array;
 }
 

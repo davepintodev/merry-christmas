@@ -218,8 +218,25 @@ function reference(turn: number, timeMs: number, layout: SceneLayout = LAYOUT): 
       const dx = px + 0.5 - layout.globe.cx;
       const dy = py + 0.5 - layout.globe.cy;
       if (dx * dx + dy * dy > layout.globe.radius ** 2) continue;
-      const sx = Math.floor(((x + 0.5) / span) * d.width);
-      const c = colourAt(d, p.mirrored ? d.width - 1 - sx : sx, y);
+      // Box rule: the source columns [lo, hi) this picture column covers (at least one);
+      // painted if any is opaque, taking the opaque one nearest the box centre, a tie
+      // going to the smaller column in the unmirrored sprite.
+      const lo = Math.floor((x * d.width) / span);
+      const hi = Math.max(lo + 1, Math.floor(((x + 1) * d.width) / span));
+      let c = -1;
+      let bestDist = Infinity;
+      let bestCol = Infinity;
+      for (let s = lo; s < Math.min(hi, d.width); s++) {
+        const col = p.mirrored ? d.width - 1 - s : s;
+        const v = colourAt(d, col, y);
+        if (v < 0) continue;
+        const dist = Math.abs((s + 0.5) / d.width - (x + 0.5) / span);
+        if (dist < bestDist - 1e-9 || (Math.abs(dist - bestDist) <= 1e-9 && col < bestCol)) {
+          c = v;
+          bestDist = dist;
+          bestCol = col;
+        }
+      }
       if (c >= 0) out.set(py * layout.width + px, c);
     }
   }

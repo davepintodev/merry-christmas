@@ -8,15 +8,20 @@
 //   of its border that lie inside a face drawn after it, so the nearer face
 //   covers the overlap and no pair of antialiased edges leaves a half-clear
 //   seam, whatever part of an edge the two share; the rows are then shifted by
-//   the lean in whole art pixels, as leanGlass shifts glass;
-// - over it, an art pixel canvas holding only what Santa and the snow in front
-//   drew, so they still pass in front of the shapes (until XMAS-83/84).
+//   the lean in whole art pixels, as leanGlass shifts glass. Santa's step is
+//   among the faces in the draw list's order (XMAS-83), so the shapes cover or
+//   pass in front of him by depth, and the lean shears him with them;
+// - over it, an art pixel canvas holding only the snow in front, so it still
+//   passes in front of the shapes.
 import { masterColours } from '../../art/colours.ts';
 import type { Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
 import { leanBox, rowShift } from '../scene/lean.ts';
-import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
+import { drawListOf, turnBodies, type SantaDraw, type TurnBodies } from '../scene/shape-draw-list.ts';
+import type { FaceDraw } from '../scene/shapes-draw.ts';
+import { paintSantaOver, type SantaSprite } from './fine-layer-santa.ts';
+import { opaqueWord, type Pixels } from './fine-layer-pixels.ts';
 
 /** The master list's colours as numbers, so a drawing's colour number is a colour. */
 const COLOUR_NUMBERS: readonly number[] = masterColours.map((colour) => Number.parseInt(colour.slice(1), 16));
@@ -68,21 +73,10 @@ interface Layer {
   context: CanvasRenderingContext2D | null;
 }
 
-/** An image of one size for a layer, and a 32-bit view of its bytes; kept while the size holds. */
-interface Pixels {
-  image: ImageData;
-  words: Uint32Array;
-}
-
 function pixelsFor(context: CanvasRenderingContext2D, width: number, height: number, kept: Pixels | null): Pixels {
   if (kept !== null && kept.image.width === width && kept.image.height === height) return kept;
   const image = context.createImageData(width, height);
   return { image, words: new Uint32Array(image.data.buffer) };
-}
-
-/** A colour number (0xRRGGBB) as the little-endian word of an opaque RGBA pixel. */
-function opaqueWord(colour: number): number {
-  return 0xff000000 | ((colour & 0xff) << 16) | (colour & 0xff00) | ((colour >> 16) & 0xff);
 }
 
 /**
@@ -124,7 +118,7 @@ function bitmapFor(bitmaps: Map<Drawing, HTMLCanvasElement>, drawing: Drawing): 
 }
 
 /** The face's own region in art units: its parallelogram, or a gable's triangle. */
-function regionOf(step: DrawStep): Ring {
+function regionOf(step: FaceDraw): Ring {
   if (step.clip !== undefined) return step.clip.map(([x, y]): [number, number] => [x, y]);
   const { a, b, d } = step;
   return [
@@ -136,12 +130,12 @@ function regionOf(step: DrawStep): Ring {
 }
 
 /** A face's drawing axes in art units: one drawing pixel across (ax, ay) and one down (bx, by). */
-function axesOf({ drawing, a, b, d }: DrawStep): [number, number, number, number] {
+function axesOf({ drawing, a, b, d }: FaceDraw): [number, number, number, number] {
   return [(b[0] - a[0]) / drawing.width, (b[1] - a[1]) / drawing.width, (d[0] - a[0]) / drawing.height, (d[1] - a[1]) / drawing.height];
 }
 
 /** The face's bitmap in art units: its drawing with PAD drawing pixels of border on every side. */
-function bitmapRingOf(step: DrawStep): Ring {
+function bitmapRingOf(step: FaceDraw): Ring {
   const [ax, ay, bx, by] = axesOf(step);
   const { drawing, a } = step;
   const at = (u: number, v: number): [number, number] => [a[0] + u * ax + v * bx, a[1] + u * ay + v * by];
@@ -154,7 +148,7 @@ function bitmapRingOf(step: DrawStep): Ring {
  * pixels across (su, the sides left and right) and down (sv, top and bottom), so GROW art pixels
  * lie beyond every side; ou and ov are the OVERLAP inside the sides, in the same units.
  */
-function stretchOf(step: DrawStep): { su: number; sv: number; ou: number; ov: number } {
+function stretchOf(step: FaceDraw): { su: number; sv: number; ou: number; ov: number } {
   const [ax, ay, bx, by] = axesOf(step);
   // A drawing pixel across moves area / |down| art units away from the sides it runs between, and one down area / |across|.
   const area = Math.abs(ax * by - bx * ay);
@@ -172,7 +166,7 @@ function stretchOf(step: DrawStep): { su: number; sv: number; ou: number; ov: nu
  * A parallelogram face's four bands beyond its sides, in art units and in the order of its sides
  * (top, right, bottom, left), each overlapping its side by OVERLAP and reaching GROW past it.
  */
-function stretchBands(step: DrawStep): Ring[] {
+function stretchBands(step: FaceDraw): Ring[] {
   const [ax, ay, bx, by] = axesOf(step);
   const { drawing, a } = step;
   const { su, sv, ou, ov } = stretchOf(step);
@@ -348,7 +342,7 @@ function bandOf({ from, to, normal: [nx, ny] }: Side, depth: number): Ring {
  * The silhouette never grows: every ring lies in a band, inside a later face or pushed across the
  * band to one. `grown` marks the sides that have such a ring.
  */
-function clipsOf(steps: readonly DrawStep[]): Clip[] {
+function clipsOf(steps: readonly FaceDraw[]): Clip[] {
   const regions = steps.map(regionOf);
   const boxes = regions.map(boxOf);
   return steps.map((step, i) => {
@@ -418,7 +412,7 @@ function traceRings(ctx: CanvasRenderingContext2D, rings: readonly Ring[], k: nu
  * column stretched out to where its clip may grow, in the colours the bitmap's border repeats.
  * Called under the face's transform, so the coordinates are the bitmap's own pixels.
  */
-function stretchEdges(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, step: DrawStep, grown: readonly boolean[]): void {
+function stretchEdges(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, step: FaceDraw, grown: readonly boolean[]): void {
   const { drawing } = step;
   const { su, sv, ou, ov } = stretchOf(step);
   const { width: w, height: h } = drawing;
@@ -430,17 +424,23 @@ function stretchEdges(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, 
 }
 
 /**
- * Paints `steps` in order onto `ctx`, each face one image of its drawing under the face's
- * transform, clipped to its `clips` (from clipsOf). (ox, oy) is the globe's centre and k the
- * device pixels to each art pixel, so the faces land on the screen's pixel grid under the same
- * numbers the glass uses. The bordered bitmap starts one drawing pixel up and left of the
- * face's corner.
+ * Paints `list` in order onto `ctx`, each face one image of its drawing under the face's
+ * transform, clipped to its `clips` (from clipsOf, one per face, in the list's face order), and
+ * Santa's step, when the list has one, as paintSantaOver draws it. (ox, oy) is the globe's centre
+ * and k the device pixels to each art pixel, so the faces land on the screen's pixel grid under
+ * the same numbers the glass uses. The bordered bitmap starts one drawing pixel up and left of
+ * the face's corner.
  */
-function paintFaces(ctx: CanvasRenderingContext2D, steps: readonly DrawStep[], clips: readonly Clip[], k: number, ox: number, oy: number, bitmaps: Map<Drawing, HTMLCanvasElement>): void {
+function paintFaces(ctx: CanvasRenderingContext2D, list: readonly (FaceDraw | SantaDraw)[], clips: readonly Clip[], k: number, ox: number, oy: number, bitmaps: Map<Drawing, HTMLCanvasElement>, sprite: SantaSprite | null): void {
   ctx.imageSmoothingEnabled = false;
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    if (step === undefined) continue;
+  let face = 0;
+  for (const step of list) {
+    if ('sprite' in step) {
+      if (sprite !== null) paintSantaOver(ctx, step, sprite);
+      continue;
+    }
+    const clip = clips[face];
+    face += 1;
     const { drawing, a } = step;
     // The affine map from the drawing's pixels to art units: its columns are the
     // width and height steps, and the origin is the top left corner.
@@ -448,7 +448,6 @@ function paintFaces(ctx: CanvasRenderingContext2D, steps: readonly DrawStep[], c
     // An edge-on face has no area on the screen: nothing of it shows, so it is not drawn.
     if (Math.abs(ax * by - bx * ay) < 1e-9) continue;
     const bitmap = bitmapFor(bitmaps, drawing);
-    const clip = clips[i];
     ctx.save();
     // The clip is built under the identity transform, in device pixels.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -469,6 +468,8 @@ export interface FineFrame {
   lean: number;
   /** The scene frame's front layer: NO_FRONT where Santa and the snow in front drew nothing. */
   front: Uint32Array;
+  /** XMAS-83: Santa's time in milliseconds; with it the shapes canvas holds him, in the draw list's order. */
+  santaTimeMs?: number;
 }
 
 /** How the picture sits on the screen: physical pixels per art pixel, the device pixel ratio, and the picture's left edge in CSS pixels. */
@@ -495,13 +496,24 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
   /** The bordered bitmap of each drawing, shared by every face and every frame. */
   const bitmaps = new Map<Drawing, HTMLCanvasElement>();
   let frontPixels: Pixels | null = null;
-  /** The draw list for the last turn drawn, and its clips, so a still picture makes neither anew. */
-  let stepsTurn = Number.NaN;
-  let steps: DrawStep[] = [];
-  let clips: Clip[] = [];
+  /** The bodies of the last turn drawn and their clips, so a still picture makes neither anew. */
+  let kept: { turn: number; bodies: TurnBodies; clips: Clip[] } | null = null;
+  /** Santa's scratch layer, made by the first frame with a time, and the buffers his pixels go through, kept while their size holds. */
+  let santa: Layer | null = null;
+  let santaColours: Uint32Array | null = null;
+  let santaPixels: Pixels | null = null;
 
   return {
-    draw({ layout, width, turn, lean, front }, { scale: k, ratio, left }): boolean {
+    draw({ layout, width, turn, lean, front, santaTimeMs }, { scale: k, ratio, left }): boolean {
+      // The draw list comes first, so a turn or a time that is not finite throws before anything is drawn. The bodies are kept per turn;
+      // Santa's step moves every frame, so a frame with a time splices him into them by depth.
+      if (kept === null || turn !== kept.turn) {
+        const bodies = turnBodies(turn);
+        kept = { turn, bodies, clips: clipsOf(bodies.faces) };
+      }
+      const { bodies, clips } = kept;
+      const list = drawListOf(bodies, santaTimeMs);
+
       // Made once, on the first draw; a layer with no 2d context is kept too, so the page gets no new canvas each frame.
       shapes ??= { canvas: layerAfter(main), context: null };
       shapes.context ??= shapes.canvas.getContext('2d');
@@ -510,6 +522,11 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       const shapesContext = shapes.context;
       const frontsContext = fronts.context;
       if (shapesContext === null || frontsContext === null) return false;
+      if (santaTimeMs !== undefined) {
+        santa ??= { canvas: document.createElement('canvas'), context: null };
+        santa.context ??= santa.canvas.getContext('2d');
+        if (santa.context === null) return false;
+      }
       const leaning = lean !== 0;
       if (leaning) {
         flat ??= { canvas: document.createElement('canvas'), context: null };
@@ -528,10 +545,14 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       const ox = (cx - box.left) * k;
       const oy = (cy - box.top) * k;
 
-      if (turn !== stepsTurn) {
-        steps = shapeDrawList(turn);
-        clips = clipsOf(steps);
-        stepsTurn = turn;
+      // Santa's picture is the box's own: his step is drawn at the box's device size, with the globe's centre moved to the box's top left corner.
+      let sprite: SantaSprite | null = null;
+      if (santaTimeMs !== undefined && santa?.context) {
+        sizeTo(santa.canvas, bw * k, bh * k);
+        if (santaColours === null || santaColours.length !== bw * k * bh * k) santaColours = new Uint32Array(bw * k * bh * k);
+        santaPixels = pixelsFor(santa.context, bw * k, bh * k, santaPixels);
+        const local: SceneLayout = { ...layout, height: bh, globe: { ...layout.globe, cx: cx - box.left, cy: cy - box.top } };
+        sprite = { canvas: santa.canvas, context: santa.context, colours: santaColours, pixels: santaPixels, layout: local, side: bw * k, zoom: k };
       }
 
       // The shapes: drawn straight onto the layer, or, while leaning, onto the flat copy
@@ -539,13 +560,13 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       sizeTo(shapes.canvas, bw * k, bh * k);
       shapesContext.clearRect(0, 0, bw * k, bh * k);
       if (!leaning) {
-        paintFaces(shapesContext, steps, clips, k, ox, oy, bitmaps);
+        paintFaces(shapesContext, list, clips, k, ox, oy, bitmaps, sprite);
       } else {
         const flatLayer = flat as Layer;
         const flatContext = flatLayer.context as CanvasRenderingContext2D;
         sizeTo(flatLayer.canvas, bw * k, bh * k);
         flatContext.clearRect(0, 0, bw * k, bh * k);
-        paintFaces(flatContext, steps, clips, k, ox, oy, bitmaps);
+        paintFaces(flatContext, list, clips, k, ox, oy, bitmaps, sprite);
         shapesContext.imageSmoothingEnabled = false;
         for (let y = box.top; y < box.bottom; y++) {
           const row = (y - box.top) * k;

@@ -159,7 +159,7 @@ const scene: LoopScene = {
     const timed = readout !== undefined;
     const begin = timed ? performance.now() : 0;
     if (fine !== null && frame.front !== undefined) {
-      fineDrew = fine.draw({ layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, front: frame.front }, { scale, ratio: dpr, left });
+      fineDrew = fine.draw({ layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, front: frame.front, santaTimeMs: time }, { scale, ratio: dpr, left });
     }
     return timed ? performance.now() - begin : undefined;
   },

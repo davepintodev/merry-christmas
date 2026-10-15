@@ -10,7 +10,8 @@ import { masterColours } from '../../art/colours.ts';
 import { keepBackdrop, leanBox, leanGlass, rowShift } from '../scene/lean.ts';
 import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
-import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
+import { shapeDrawList } from '../scene/shape-draw-list.ts';
+import type { FaceDraw } from '../scene/shapes-draw.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
 
 const W = 240;
@@ -186,7 +187,7 @@ function px(value: number): number {
 }
 
 /** The matrix and clip the layer should use for a step, worked out from the step alone. */
-function expectedMatrix(step: DrawStep, k: number): Matrix {
+function expectedMatrix(step: FaceDraw, k: number): Matrix {
   const ox = (LAYOUT.globe.cx - BOX.left) * k;
   const oy = (LAYOUT.globe.cy - BOX.top) * k;
   const { a, b, d, drawing } = step;
@@ -206,7 +207,7 @@ function through(m: readonly number[], x: number, y: number): Point {
 }
 
 /** The device corners (top-left, top-right, bottom-left, bottom-right) the layer should cover for a step: the drawing's own footprint. */
-function expectedQuad(step: DrawStep, k: number): Point[] {
+function expectedQuad(step: FaceDraw, k: number): Point[] {
   const m = expectedMatrix(step, k);
   const { width: w, height: h } = step.drawing;
   return [through(m, 0, 0), through(m, w, 0), through(m, 0, h), through(m, w, h)];
@@ -222,13 +223,13 @@ function drawnQuad(call: Call): Point[] | undefined {
 }
 
 /** How far a face's drawn quad may stray from its footprint: about one art pixel (or one bitmap pixel, if larger) of growth or padding. */
-function slack(step: DrawStep, k: number): number {
+function slack(step: FaceDraw, k: number): number {
   const m = expectedMatrix(step, k);
   return 2 * Math.max(k, Math.hypot(m[0] ?? 0, m[1] ?? 0), Math.hypot(m[2] ?? 0, m[3] ?? 0));
 }
 
 /** Whether a drawn call is the step's face: same place, within the slack, corner for corner. */
-function isFace(call: Call, step: DrawStep, k: number): boolean {
+function isFace(call: Call, step: FaceDraw, k: number): boolean {
   const quad = drawnQuad(call);
   if (quad === undefined) return false;
   const want = expectedQuad(step, k);
@@ -237,7 +238,7 @@ function isFace(call: Call, step: DrawStep, k: number): boolean {
 }
 
 /** Finds each step's face among the calls, in draw order (extra calls between are allowed); returns the matched calls. */
-function findFaces(calls: Call[], steps: DrawStep[], k: number): Call[] {
+function findFaces(calls: Call[], steps: FaceDraw[], k: number): Call[] {
   const found: Call[] = [];
   let at = 0;
   steps.forEach((step, i) => {

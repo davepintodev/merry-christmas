@@ -3,9 +3,10 @@
 // across by how far round his orbit he is, mirrored when flying the other way,
 // and spread over the fixed grid by the share of each art pixel he covers, so
 // his motion never pops. Clipped to the glass; his colours never tint.
-import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from './frame.ts';
+import { paintSantaStep } from './santa-step.ts';
+import type { SantaDraw } from './shape-draw-list.ts';
 import { projectPoint } from './shapes.ts';
 
 /** The glass's radius the orbit is sized on, in art pixels. */
@@ -60,29 +61,21 @@ export function santaPlacement(turn: number, timeMs: number): SantaPlacement {
   };
 }
 
-function colourOf(n: number): number {
-  return Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16);
+/** Santa's depth as the shapes measure theirs (their nearness along the turn, in art pixels): his orbit's reach times his depth. */
+export function santaNearness(place: SantaPlacement): number {
+  return place.depth * ORBIT;
 }
 
-/** Draws Santa into picture (width art pixels across). Throws a RangeError for a non-finite turn or time, before drawing. */
+/** The trot drawing Santa shows: santa-trot-1 or santa-trot-2. Throws a plain Error if the sheet lacks it. */
+export function santaSprite(trot: 0 | 1): Drawing {
+  const body: Drawing | undefined = drawings[trot === 0 ? 'santa-trot-1' : 'santa-trot-2'];
+  if (body === undefined) throw new Error('the Santa sheet has no trot drawings');
+  return body;
+}
+
+/** Draws Santa into picture (width art pixels across), as the one step paintSantaStep paints at zoom 1. Throws a RangeError for a non-finite turn or time, before drawing. */
 export function drawSanta(picture: Uint32Array, width: number, layout: SceneLayout, turn: number, timeMs: number): void {
   const place = santaPlacement(turn, timeMs);
-  const body: Drawing | undefined = drawings[place.trot === 0 ? 'santa-trot-1' : 'santa-trot-2'];
-  if (body === undefined) throw new Error('the Santa sheet has no trot drawings');
-  const { cx, cy, radius } = layout.globe;
-  const span = Math.max(1, Math.round(body.width * place.squeeze));
-  const left = Math.round(cx + place.x - span / 2);
-  const top = Math.round(cy + place.y - body.height / 2);
-  // Whole picture pixels only: each takes the one drawing pixel under its centre, so Santa is crisp at every angle.
-  for (let py = Math.max(0, top); py < Math.min(layout.height, top + body.height); py++) {
-    for (let px = Math.max(0, left); px < Math.min(width, left + span); px++) {
-      const dx = px + 0.5 - cx;
-      const dy = py + 0.5 - cy;
-      if (dx * dx + dy * dy > radius * radius) continue;
-      const sx = Math.min(body.width - 1, Math.floor(((px - left + 0.5) / span) * body.width));
-      const n = body.pixels[(py - top) * body.width + (place.mirrored ? body.width - 1 - sx : sx)] ?? 0;
-      if (n === 0) continue;
-      picture[py * width + px] = colourOf(n);
-    }
-  }
+  const step: SantaDraw = { sprite: santaSprite(place.trot), x: place.x, y: place.y, squeeze: place.squeeze, mirrored: place.mirrored };
+  paintSantaStep(picture, width, layout, step, 1);
 }

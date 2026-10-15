@@ -6,7 +6,8 @@
 // rendered house has no hole or crack inside its silhouette.
 import { describe, expect, it } from 'vitest';
 import { sceneLayout } from '../../src/scene/frame.ts';
-import { renderDrawList, shapeDrawList, type DrawStep } from '../../src/scene/shape-draw-list.ts';
+import { renderDrawList, shapeDrawList } from '../../src/scene/shape-draw-list.ts';
+import type { FaceDraw } from '../../src/scene/shapes-draw.ts';
 import { globeShapes } from '../../src/scene/shapes.ts';
 
 const HOUSE = globeShapes.filter((s) => s.kind === 'house');
@@ -26,15 +27,15 @@ type Pt = readonly [number, number];
 const same = (p: Pt, q: Pt): boolean => Math.abs(p[0] - q[0]) < 1e-6 && Math.abs(p[1] - q[1]) < 1e-6;
 
 /** The house faces that are whole walls (a quad drawn with a wall drawing), not the roof. */
-function walls(turn: number): DrawStep[] {
+function walls(turn: number): FaceDraw[] {
   return shapeDrawList(turn, HOUSE).filter((s) => s.clip === undefined && s.drawing.height === 15 && (s.drawing.width === 28 || s.drawing.width === 18));
 }
 
-function corners(s: DrawStep): Pt[] {
+function corners(s: FaceDraw): Pt[] {
   return [s.a, s.b, [s.b[0] + s.d[0] - s.a[0], s.b[1] + s.d[1] - s.a[1]], s.d];
 }
 
-function polygon(s: DrawStep): readonly Pt[] {
+function polygon(s: FaceDraw): readonly Pt[] {
   return s.clip ?? corners(s);
 }
 
@@ -116,7 +117,7 @@ describe('the house at every turn: gables stand on the walls', () => {
         const [left, , right] = gable.clip as readonly Pt[];
         const wall = w.find((s) => s.drawing === gable.drawing);
         expect(wall, `gable with no side wall at turn ${turn}`).toBeDefined();
-        const top = [(wall as DrawStep).a, (wall as DrawStep).b];
+        const top = [(wall as FaceDraw).a, (wall as FaceDraw).b];
         expect(top.some((t) => same(t, left as Pt)) && top.some((t) => same(t, right as Pt)), `gable feet are off the wall top at turn ${turn}`).toBe(true);
       }
     }
@@ -131,7 +132,7 @@ describe('the house at every turn: gables stand on the walls', () => {
         const apex = (gable.clip as readonly Pt[])[1] as Pt;
         if (roofs.length === 0) continue;
         // The ridge is the roof's top edge a-b: the apex is on the line through them, between the ends (the roof overhangs).
-        const roof = roofs[0] as DrawStep;
+        const roof = roofs[0] as FaceDraw;
         const dx = roof.b[0] - roof.a[0];
         const dy = roof.b[1] - roof.a[1];
         const cross = Math.abs((apex[0] - roof.a[0]) * dy - (apex[1] - roof.a[1]) * dx) / Math.hypot(dx, dy);

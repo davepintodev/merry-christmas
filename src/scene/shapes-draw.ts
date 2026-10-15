@@ -236,6 +236,11 @@ function paintShadow(picture: Uint32Array, width: number, layout: SceneLayout, s
   }
 }
 
+/** A shape's nearness to the visitor at the turn whose cosine and sine these are, in art pixels: larger is nearer. */
+export function nearness(shape: GlobeShape, cos: number, sin: number): number {
+  return shape.x * sin + shape.z * cos;
+}
+
 /**
  * The shapes in the order they are painted at `turn`: far shapes first, so a
  * nearer shape covers a farther one wherever they overlap, whatever order the
@@ -247,7 +252,7 @@ export function shapesFarFirst(shapes: readonly GlobeShape[], turn: number): Glo
   const sin = Math.sin(t);
   return [...shapes].sort(
     (a, b) =>
-      (a.x * sin + a.z * cos) - (b.x * sin + b.z * cos) ||
+      nearness(a, cos, sin) - nearness(b, cos, sin) ||
       a.x - b.x ||
       a.z - b.z ||
       (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0) ||
