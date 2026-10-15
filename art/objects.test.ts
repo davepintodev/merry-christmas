@@ -36,7 +36,7 @@ const EXPECTED: ReadonlyArray<[ArtObject['sheet'], string, number, number]> = [
   ['props', 'present-3-side', 5, 5],
   ['props', 'present-4-top', 7, 7],
   ['props', 'present-4-side', 7, 7],
-  ['props', 'disc', 13, 13],
+  ['props', 'disc', 21, 21],
   ['base', 'base', 112, 22],
   ['buttons', 'speaker-muted', 20, 10],
   ['buttons', 'speaker-on', 20, 10],

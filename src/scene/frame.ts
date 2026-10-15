@@ -19,7 +19,9 @@ import type { GlobeSnow } from './snow.ts';
 /** The globe's radius in art pixels. */
 export const GLOBE_RADIUS = 56;
 /** The disc (moon by night, sun by day) is this many art pixels across. */
-export const DISC_SIZE = 13;
+export const DISC_SIZE = 21;
+/** The widest clear gap, in art pixels, between the disc and the picture's left edge: narrower where the disc would touch the globe. */
+export const DISC_MARGIN = 6;
 /** The shortest picture: the countdown area above the globe. */
 export const MIN_HEIGHT = 160;
 /** The base drawing's height in art pixels (art/objects.ts, the Base sheet): the globe sits on it on the ground. */
@@ -215,6 +217,29 @@ function placeStars(width: number, groundTop: number, globe: Circle, disc: Rect,
   return stars;
 }
 
+/**
+ * The disc's left gap at row top: DISC_MARGIN where the disc clears the globe, else the
+ * widest narrower gap that does, else 0 where even a flush disc overlaps the glass.
+ */
+function discGap(globe: Circle, top: number): number {
+  for (let x = DISC_MARGIN; x > 0; x--) {
+    if (discClears(globe, { x, y: top, width: DISC_SIZE, height: DISC_SIZE })) return x;
+  }
+  return 0;
+}
+
+/** Whether no pixel centre of the disc lies within the globe's radius: the centre nearest the globe's centre is the one that decides. */
+function discClears(globe: Circle, disc: Rect): boolean {
+  const px = nearestCentre(disc.x, disc.width, globe.cx);
+  const py = nearestCentre(disc.y, disc.height, globe.cy);
+  return (px - globe.cx) ** 2 + (py - globe.cy) ** 2 > globe.radius ** 2;
+}
+
+/** The centre of the pixel within lo to lo + size, along one axis, that lies nearest c. */
+function nearestCentre(lo: number, size: number, c: number): number {
+  return lo + Math.min(Math.max(Math.round(c - lo - 0.5), 0), size - 1) + 0.5;
+}
+
 export function sceneLayout(width: number, height: number, seed: number): SceneLayout {
   if (!Number.isInteger(width) || width < 2 * GLOBE_RADIUS) {
     throw new RangeError(`a picture needs a whole width of at least ${2 * GLOBE_RADIUS} art pixels, got ${width}`);
@@ -234,7 +259,7 @@ export function sceneLayout(width: number, height: number, seed: number): SceneL
   // which raises the horizon and sinks the glass's foot into the base (its
   // lowest 16 rows at height 160, where cy stays 98).
   const groundTop = Math.min(height - BASE_HEIGHT, globe.cy + GLOBE_RADIUS);
-  const disc: Rect = { x: 2, y: COUNTDOWN_HEIGHT, width: DISC_SIZE, height: DISC_SIZE };
+  const disc: Rect = { x: discGap(globe, COUNTDOWN_HEIGHT), y: COUNTDOWN_HEIGHT, width: DISC_SIZE, height: DISC_SIZE };
   return { width, height, groundTop, countdown, globe, disc, stars: placeStars(width, groundTop, globe, disc, countdown, seed) };
 }
 

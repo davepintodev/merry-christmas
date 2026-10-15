@@ -49,6 +49,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function overDisc(l: SceneLayout, x: number, y: number): boolean {
+  return x >= l.disc.x && x < l.disc.x + l.disc.width && y >= l.disc.y && y < l.disc.y + l.disc.height;
+}
+
+/** Whether a disc flush with the left edge would stay outside the globe's circle. */
+function discFlushClears(l: SceneLayout): boolean {
+  for (let y = l.disc.y; y < l.disc.y + l.disc.height; y++) {
+    for (let x = 0; x < l.disc.width; x++) {
+      const dx = x + 0.5 - l.globe.cx;
+      const dy = y + 0.5 - l.globe.cy;
+      if (dx * dx + dy * dy <= l.globe.radius ** 2) return false;
+    }
+  }
+  return true;
+}
+
 function steady(phase: PhaseName): PhaseReading {
   return { from: phase, to: phase, share: 0 };
 }
@@ -258,11 +274,14 @@ describe('sceneFrame: the globe in the picture', () => {
     const f = sceneFrame(input({ width, height }));
     const b = baseline({ width, height });
     expect(f.layout.globe.radius).toBe(GLOBE_RADIUS);
+    const discClears = discFlushClears(f.layout);
     let band = 0;
     let drawn = 0;
     for (let y = 0; y < f.layout.globe.cy; y++) {
       for (let x = 0; x < width; x++) {
         if (!inCircle(f.layout, x, y, -0.5) || inCircle(f.layout, x, y, -1.5)) continue;
+        // Where even a disc flush with the left edge overlaps the globe (XMAS-63, the narrowest pictures) the disc hides part of the band.
+        if (!discClears && overDisc(f.layout, x, y)) continue;
         band++;
         if (at(f, x, y) !== at(b, x, y)) drawn++;
       }

@@ -35,7 +35,7 @@ export const objects: readonly ArtObject[] = [
   { name: 'present-3-side', sheet: 'props', width: 5, height: 5 },
   { name: 'present-4-top', sheet: 'props', width: 7, height: 7 },
   { name: 'present-4-side', sheet: 'props', width: 7, height: 7 },
-  { name: 'disc', sheet: 'props', width: 13, height: 13 },
+  { name: 'disc', sheet: 'props', width: 21, height: 21 },
   { name: 'base', sheet: 'base', width: 112, height: 22 },
   { name: 'speaker-muted', sheet: 'buttons', width: 20, height: 10 },
   { name: 'speaker-on', sheet: 'buttons', width: 20, height: 10 },

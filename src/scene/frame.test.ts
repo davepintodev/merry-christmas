@@ -11,7 +11,7 @@ import { countdownFrame } from '../countdown/render.ts';
 import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawings } from '../shared/art.generated.ts';
 import { phaseAt, type PhaseName, type PhaseReading } from '../shared/clock.ts';
-import { DISC_SIZE, GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
+import { DISC_MARGIN, DISC_SIZE, GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 const W = 240;
@@ -54,6 +54,20 @@ function nearGlobe(l: SceneLayout, x: number, y: number, margin = 2): boolean {
 
 function inDisc(l: SceneLayout, x: number, y: number): boolean {
   return x >= l.disc.x && x < l.disc.x + l.disc.width && y >= l.disc.y && y < l.disc.y + l.disc.height;
+}
+
+/** Whether a disc of the layout's size, placed at left gap x on its row, stays wholly outside the globe's circle. */
+function discClearsAt(l: SceneLayout, x: number): boolean {
+  for (let y = l.disc.y; y < l.disc.y + l.disc.height; y++) {
+    for (let xx = x; xx < x + l.disc.width; xx++) if (nearGlobe(l, xx, y, 0)) return false;
+  }
+  return true;
+}
+
+/** The rule's answer: the widest left gap up to DISC_MARGIN at which the disc clears the globe, 0 where none does. */
+function expectedDiscX(l: SceneLayout): number {
+  for (let x = DISC_MARGIN; x > 0; x--) if (discClearsAt(l, x)) return x;
+  return 0;
 }
 
 function starSet(l: SceneLayout): Set<string> {
@@ -304,19 +318,109 @@ describe('sceneLayout: places', () => {
     expect(globe.cy + globe.radius).toBeLessThanOrEqual(height);
   });
 
-  it.each(SIZES)('puts the 13-across disc at the top left of %s x %s, clear of the globe', (width, height) => {
+  it.each(SIZES)('puts the 21-across disc at the top left of %s x %s, clear of the globe', (width, height) => {
     const l = sceneLayout(width, height, SEED);
-    expect(DISC_SIZE).toBe(13);
-    expect(l.disc.width).toBe(13);
-    expect(l.disc.height).toBe(13);
+    expect(DISC_SIZE).toBe(21);
+    expect(l.disc.width).toBe(21);
+    expect(l.disc.height).toBe(21);
     expect(l.disc.x).toBeGreaterThanOrEqual(0);
     expect(l.disc.y).toBeGreaterThanOrEqual(0);
     expect(l.disc.x + l.disc.width / 2).toBeLessThan(width / 3);
     expect(l.disc.y + l.disc.height / 2).toBeLessThan(height / 2);
     expect(l.disc.y + l.disc.height).toBeLessThanOrEqual(l.groundTop);
-    for (let y = l.disc.y; y < l.disc.y + 13; y++) {
-      for (let x = l.disc.x; x < l.disc.x + 13; x++) expect(nearGlobe(l, x, y, 0), `disc pixel ${x},${y}`).toBe(false);
+    // Where even a disc flush with the left edge overlaps the globe (the narrowest pictures) there is nothing to assert.
+    if (discClearsAt(l, 0)) expect(discClearsAt(l, l.disc.x), 'disc clear of the globe').toBe(true);
+  });
+
+  const HEIGHTS = [MIN_HEIGHT, 161, 175, 200, 350, 700, 1130];
+  const NARROW_TO_WIDE = [
+    ...Array.from({ length: 300 - 2 * GLOBE_RADIUS + 1 }, (_, i) => 2 * GLOBE_RADIUS + i),
+    301, 320, 360, 375, 390, 393, 412, 428, 480, 600, 640, 768, 800, 810, 820, 960, 1024, 1180, 1280, 1366, 1440, 1536, 1920, 2560, 3840,
+  ];
+
+  it('leaves a 6 art pixel gap between the disc and the left edge', () => {
+    expect(DISC_MARGIN).toBe(6);
+  });
+
+  it.each([
+    ['360x700 at 2x', 180, 350],
+    ['1920x1130 at 1x', 1920, 1130],
+  ])('leaves a clear gap of several art pixels left of the disc at %s', (_name, width, height) => {
+    const l = sceneLayout(width, height, SEED);
+    expect(l.disc.x).toBe(6);
+    expect(l.disc.x).toBeGreaterThanOrEqual(4);
+  });
+
+  it('puts the disc at min(6, the widest left gap that clears the globe), never below 0, at every width and height', () => {
+    const wrong: string[] = [];
+    for (const height of HEIGHTS) {
+      for (const width of NARROW_TO_WIDE) {
+        const l = sceneLayout(width, height, SEED);
+        const want = expectedDiscX(l);
+        if (l.disc.x !== want) wrong.push(`${width}x${height}: x ${l.disc.x}, want ${want}`);
+      }
     }
+    expect(wrong).toEqual([]);
+  });
+
+  it('keeps the full 6 gap at every width from 180 up, at every height', () => {
+    const wrong: string[] = [];
+    for (const height of HEIGHTS) {
+      for (const width of [...NARROW_TO_WIDE, 1000, 1500, 2000]) {
+        if (width < 180) continue;
+        const x = sceneLayout(width, height, SEED).disc.x;
+        if (x !== DISC_MARGIN) wrong.push(`${width}x${height}: x ${x}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it('never lets the disc touch the globe where a gap exists that clears it, and never shrinks the gap needlessly', () => {
+    const wrong: string[] = [];
+    for (const height of HEIGHTS) {
+      for (const width of NARROW_TO_WIDE) {
+        const l = sceneLayout(width, height, SEED);
+        if (!discClearsAt(l, 0)) continue;
+        if (!discClearsAt(l, l.disc.x)) wrong.push(`${width}x${height}: disc at ${l.disc.x} overlaps the globe`);
+        if (l.disc.x < DISC_MARGIN && discClearsAt(l, l.disc.x + 1)) wrong.push(`${width}x${height}: gap ${l.disc.x} is narrower than needed`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it('keeps the gap in whole art pixels, from 0 to 6, and never shrinks it as the picture gets wider', () => {
+    for (const height of HEIGHTS) {
+      let last = -1;
+      for (const width of NARROW_TO_WIDE) {
+        const x = sceneLayout(width, height, SEED).disc.x;
+        expect(Number.isInteger(x), `${width}x${height}`).toBe(true);
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThanOrEqual(DISC_MARGIN);
+        expect(x, `${width}x${height} narrower than at the previous width`).toBeGreaterThanOrEqual(last);
+        last = x;
+      }
+    }
+  });
+
+  it('does not let the seed move the disc', () => {
+    for (const width of [112, 127, 133, 138, 180, 1920]) {
+      const xs = [0, 1, 31, 0xffffffff].map((seed) => sceneLayout(width, MIN_HEIGHT, seed).disc.x);
+      expect(new Set(xs).size, `${width}`).toBe(1);
+    }
+  });
+
+  it('draws nothing of the disc in the gap: the disc body starts at its layout x', () => {
+    const f = sceneFrame(input({ width: 180, height: 350 }));
+    const { x, y } = f.layout.disc;
+    const stars = starSet(f.layout);
+    for (let yy = y; yy < y + 21; yy++) {
+      const sky = rowSky(f, yy);
+      for (let xx = 0; xx < x; xx++) {
+        if (stars.has(`${xx},${yy}`)) continue;
+        expect(at(f, xx, yy), `gap pixel ${xx},${yy} is the sky`).toBe(sky);
+      }
+    }
+    expect(x).toBe(6);
   });
 
   it('has sky above and ground below, both growing with a taller picture', () => {
@@ -434,7 +538,7 @@ describe('sceneFrame: sky, ground and disc', () => {
     const disc = drawings['disc'];
     if (disc === undefined) throw new Error('art.generated.ts has no disc');
     expect(disc.sheet).toBe('props.png');
-    expect([disc.width, disc.height]).toEqual([13, 13]);
+    expect([disc.width, disc.height]).toEqual([21, 21]);
     const counts = new Map<number, number>();
     for (const n of disc.pixels) if (n !== 0) counts.set(n, (counts.get(n) ?? 0) + 1);
     const body = [...counts].sort((p, q) => q[1] - p[1])[0]?.[0] ?? 0;
@@ -445,7 +549,7 @@ describe('sceneFrame: sky, ground and disc', () => {
   function bodyColour(f: SceneFrame): number {
     const { pixels, body } = discArt();
     const seen = new Set<number>();
-    for (let i = 0; i < 169; i++) if (pixels[i] === body) seen.add(at(f, f.layout.disc.x + (i % 13), f.layout.disc.y + Math.floor(i / 13)));
+    for (let i = 0; i < 441; i++) if (pixels[i] === body) seen.add(at(f, f.layout.disc.x + (i % 21), f.layout.disc.y + Math.floor(i / 21)));
     expect(seen.size, 'disc body pixels share one colour').toBe(1);
     return [...seen][0] ?? -1;
   }
@@ -455,9 +559,9 @@ describe('sceneFrame: sky, ground and disc', () => {
     const f = sceneFrame(input({ phase: steady(p) }));
     const { x: dx, y: dy } = f.layout.disc;
     const byNumber = new Map<number, number>();
-    for (let y = 0; y < 13; y++) {
-      for (let x = 0; x < 13; x++) {
-        const n = pixels[y * 13 + x] ?? 0;
+    for (let y = 0; y < 21; y++) {
+      for (let x = 0; x < 21; x++) {
+        const n = pixels[y * 21 + x] ?? 0;
         const got = at(f, dx + x, dy + y);
         if (n === 0) {
           expect(got, `${p}: clear disc pixel ${x},${y} shows the sky`).toBe(rowSky(f, dy + y));
@@ -478,9 +582,9 @@ describe('sceneFrame: sky, ground and disc', () => {
     const f = sceneFrame(input({ phase }));
     const { x: dx, y: dy } = f.layout.disc;
     let seen = 0;
-    for (let y = 0; y < 13; y++) {
-      for (let x = 0; x < 13; x++) {
-        if ((pixels[y * 13 + x] ?? 0) !== white) continue;
+    for (let y = 0; y < 21; y++) {
+      for (let x = 0; x < 21; x++) {
+        if ((pixels[y * 21 + x] ?? 0) !== white) continue;
         seen++;
         expect(at(f, dx + x, dy + y), `highlight pixel ${x},${y}`).toBe(0xffffff);
       }
@@ -854,9 +958,8 @@ describe('sceneLayout: the countdown area', () => {
         expect(c).toEqual({ x: 0, y: 0, width, height: COUNTDOWN_HEIGHT });
         expect(l.globe.cy - l.globe.radius, `${width}: globe reaches the countdown area`).toBeGreaterThanOrEqual(bottom);
         expect(l.disc.y, `${width}: disc in the countdown area`).toBeGreaterThanOrEqual(bottom);
-        for (let y = l.disc.y; y < l.disc.y + l.disc.height; y++) {
-          for (let x = l.disc.x; x < l.disc.x + l.disc.width; x++) expect(nearGlobe(l, x, y, 0), `${width}: disc ${x},${y} in the globe`).toBe(false);
-        }
+        // Where even x = 0 overlaps the globe (the narrowest pictures) there is nothing to assert.
+        if (discClearsAt(l, 0)) expect(discClearsAt(l, l.disc.x), `${width}: disc in the globe`).toBe(true);
         for (const s of l.stars) expect(s.y >= bottom, `${width} seed ${seed}: star ${s.x},${s.y} in the countdown area`).toBe(true);
       }
     }
