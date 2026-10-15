@@ -1,13 +1,16 @@
 // XMAS-31a "Scene core engine and reference pictures": the reference
 // renderer, the deliberate update command (`pnpm frames:update`) and the check
 // `pnpm run test:unit` runs. Pictures are PNGs written with tools/png.ts; only
-// the update command writes them. The `pnpm frames` review page and its
-// server live in tools/frames-review.ts and tools/frames-serve.ts.
+// the update command writes them. XMAS-85: each picture is the fine layer's
+// (tools/fine-frames.ts) at the fixed zoom REFERENCE_ZOOM, so it is larger than
+// the art. The `pnpm frames` review page and its server live in
+// tools/frames-review.ts and tools/frames-serve.ts.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { makeSnowRuntime } from '../src/page/snow-runtime.ts';
-import { sceneFrame, type SceneInput } from '../src/scene/frame.ts';
+import type { SceneInput } from '../src/scene/frame.ts';
 import type { PhaseName } from '../src/shared/clock.ts';
+import { fineFrame, type FineRgba } from './fine-frames.ts';
 import { decodePng, encodePng } from './png.ts';
 
 /** One reference picture: stored as tests/frames/<name>.png. */
@@ -17,6 +20,8 @@ export interface ReferenceFrame { name: string; input: SceneInput }
 const SIZE = { width: 130, height: 260 };
 const SEED = 31;
 const TIME = 1_234_567;
+/** The fixed zoom of every reference: 5 screen pixels per art pixel (art/STYLE.md). */
+const REFERENCE_ZOOM = 5;
 
 /**
  * The snow reference's input: the page's snow runtime run for `steps` steps at the shared size and seed, the stir
@@ -38,7 +43,7 @@ function snowInput(phase: PhaseName, christmasDay: boolean, steps: number, raise
   };
 }
 
-/** The fixed reference pictures: one per phase, one mid-blend, the globe at other turn angles and the snow. */
+/** The fixed reference pictures: one per phase, one mid-blend, the globe at other turn angles (degrees and radians) and the snow. */
 export const referenceFrames: readonly ReferenceFrame[] = [
   ...(['dawn', 'frosty-morning', 'sunset', 'purple-night'] as const).map(
     (phase): ReferenceFrame => ({
@@ -56,6 +61,12 @@ export const referenceFrames: readonly ReferenceFrame[] = [
       ['purple-night-turn-180', 'purple-night', Math.PI],
       ['purple-night-turn-270', 'purple-night', (3 * Math.PI) / 2],
       ['frosty-morning-turn-180', 'frosty-morning', Math.PI],
+      ['purple-night-turn-45', 'purple-night', Math.PI / 4],
+      ['purple-night-turn-135', 'purple-night', (3 * Math.PI) / 4],
+      ['purple-night-turn-0-5-rad', 'purple-night', 0.5],
+      ['purple-night-turn-1-5-rad', 'purple-night', 1.5],
+      ['purple-night-turn-2-5-rad', 'purple-night', 2.5],
+      ['purple-night-turn-4-rad', 'purple-night', 4],
     ] as const
   ).map(
     ([name, phase, turn]): ReferenceFrame => ({
@@ -68,21 +79,12 @@ export const referenceFrames: readonly ReferenceFrame[] = [
   { name: 'snow-christmas-day', input: snowInput('purple-night', true, 600) },
 ];
 
-/** The reference's pixels as RGBA bytes, straight from the scene. */
-function referenceRgba(ref: ReferenceFrame): { width: number; height: number; rgba: Uint8Array } {
-  const frame = sceneFrame(ref.input);
-  const rgba = new Uint8Array(frame.width * frame.height * 4);
-  for (let i = 0; i < frame.picture.length; i++) {
-    const colour = frame.picture[i] ?? 0;
-    rgba[i * 4] = (colour >> 16) & 0xff;
-    rgba[i * 4 + 1] = (colour >> 8) & 0xff;
-    rgba[i * 4 + 2] = colour & 0xff;
-    rgba[i * 4 + 3] = 0xff;
-  }
-  return { width: frame.width, height: frame.height, rgba };
+/** The reference's pixels as RGBA bytes: the fine layer's picture at REFERENCE_ZOOM, drawn without a browser. */
+function referenceRgba(ref: ReferenceFrame): FineRgba {
+  return fineFrame(ref.input, REFERENCE_ZOOM);
 }
 
-/** The reference picture as PNG bytes (RGBA, opaque), rendered without a browser. */
+/** The reference picture as PNG bytes (RGBA, opaque), at the zoom-5 size of the fine layer. */
 export function renderReference(ref: ReferenceFrame): Uint8Array {
   const { width, height, rgba } = referenceRgba(ref);
   return encodePng(width, height, rgba);

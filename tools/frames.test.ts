@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { sceneFrame } from '../src/scene/frame.ts';
+import { fineFrame } from './fine-frames.ts';
 import { drawSanta } from '../src/scene/santa.ts';
 import type { PhaseName } from '../src/shared/clock.ts';
 import { framesAddress, referenceFrames, referenceProblems, renderReference, updateReferences } from './frames.ts';
@@ -26,6 +27,12 @@ const NAMES = [
   'purple-night-turn-180',
   'purple-night-turn-270',
   'frosty-morning-turn-180',
+  'purple-night-turn-45',
+  'purple-night-turn-135',
+  'purple-night-turn-0-5-rad',
+  'purple-night-turn-1-5-rad',
+  'purple-night-turn-2-5-rad',
+  'purple-night-turn-4-rad',
   'snow-calm',
   'snow-mid-stir',
   'snow-christmas-day',
@@ -36,6 +43,12 @@ const TURNED: [string, PhaseName, number][] = [
   ['purple-night-turn-180', 'purple-night', Math.PI],
   ['purple-night-turn-270', 'purple-night', (3 * Math.PI) / 2],
   ['frosty-morning-turn-180', 'frosty-morning', Math.PI],
+  ['purple-night-turn-45', 'purple-night', Math.PI / 4],
+  ['purple-night-turn-135', 'purple-night', (3 * Math.PI) / 4],
+  ['purple-night-turn-0-5-rad', 'purple-night', 0.5],
+  ['purple-night-turn-1-5-rad', 'purple-night', 1.5],
+  ['purple-night-turn-2-5-rad', 'purple-night', 2.5],
+  ['purple-night-turn-4-rad', 'purple-night', 4],
 ];
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 
@@ -126,16 +139,16 @@ describe('referenceFrames', () => {
 });
 
 describe('renderReference', () => {
-  it.each(NAMES)('renders %s as an opaque PNG of the scene frame, pixel for pixel', (name) => {
+  it.each(NAMES)('renders %s as an opaque PNG of the fine layer at zoom 5, pixel for pixel', (name) => {
     const ref = refByName(name);
     const png = decodePng(renderReference(ref));
-    const frame = sceneFrame(ref.input);
-    expect(png.width).toBe(ref.input.width);
-    expect(png.height).toBe(ref.input.height);
-    for (let i = 0; i < frame.picture.length; i++) {
-      const c = frame.picture[i] ?? 0;
-      const got = [png.rgba[i * 4], png.rgba[i * 4 + 1], png.rgba[i * 4 + 2], png.rgba[i * 4 + 3]];
-      if (got.join() !== [(c >> 16) & 255, (c >> 8) & 255, c & 255, 255].join()) expect.fail(`${name}: pixel ${i} differs`);
+    const fine = fineFrame(ref.input, 5);
+    expect(png.width).toBe(ref.input.width * 5);
+    expect(png.height).toBe(ref.input.height * 5);
+    expect([png.width, png.height]).toEqual([650, 1300]);
+    for (let i = 0; i < fine.rgba.length; i += 4) {
+      const got = [png.rgba[i], png.rgba[i + 1], png.rgba[i + 2], png.rgba[i + 3]];
+      if (got.join() !== [fine.rgba[i], fine.rgba[i + 1], fine.rgba[i + 2], 255].join()) expect.fail(`${name}: pixel ${i / 4} differs`);
     }
   });
 

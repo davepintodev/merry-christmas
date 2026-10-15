@@ -2,12 +2,14 @@
 // reference pictures in this folder, compared with the scene rendered now.
 // A mismatch fails and names the picture; to accept a change on purpose run
 // `pnpm frames:update`, the only command that rewrites them.
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { GLOBE_SNOW, SNOW_SETTINGS } from '../../src/scene/snow.ts';
 import { sceneFrame } from '../../src/scene/frame.ts';
 import { referenceFrames, referenceProblems } from '../../tools/frames.ts';
+import { decodePng } from '../../tools/png.ts';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +25,12 @@ describe('reference pictures in tests/frames', () => {
       'purple-night-turn-180',
       'purple-night-turn-270',
       'frosty-morning-turn-180',
+      'purple-night-turn-45',
+      'purple-night-turn-135',
+      'purple-night-turn-0-5-rad',
+      'purple-night-turn-1-5-rad',
+      'purple-night-turn-2-5-rad',
+      'purple-night-turn-4-rad',
       'snow-calm',
       'snow-mid-stir',
       'snow-christmas-day',
@@ -52,6 +60,13 @@ describe('reference pictures in tests/frames', () => {
         if (a === undefined || b === undefined) continue;
         expect(a.picture.some((c, k) => c !== b.picture[k]), `${a.name} and ${b.name} are the same picture`).toBe(true);
       }
+    }
+  });
+
+  it('are the fine layer at the fixed zoom 5: every committed picture is 650 x 1300', () => {
+    for (const r of referenceFrames) {
+      const png = decodePng(new Uint8Array(readFileSync(path.join(DIR, `${r.name}.png`))));
+      expect([r.name, png.width, png.height]).toEqual([r.name, 650, 1300]);
     }
   });
 

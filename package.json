@@ -14,6 +14,7 @@
     "check:caps": "node tools/check-caps.ts",
     "frames:update": "node tools/frames-update.ts",
     "frames": "node tools/frames-serve.ts",
+    "frames:turn": "node tools/turn-sequence.ts",
     "test:e2e": "playwright test",
     "check": "pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run check:caps && pnpm run test:e2e"
   },
