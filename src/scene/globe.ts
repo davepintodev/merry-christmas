@@ -16,7 +16,7 @@ import { keepBackdrop, leanGlass } from './lean.ts';
 import { drawSanta, santaPlacement } from './santa.ts';
 import { drawShapes, type ShapeParts } from './shapes-draw.ts';
 import { floorDisc, globeShapes, projectPoint } from './shapes.ts';
-import { drawSnowBehind, drawSnowFront } from './snow-draw.ts';
+import { renderSnowSteps, type SnowStep } from './snow-draw-list.ts';
 import type { GlobeSnow } from './snow.ts';
 
 /** A full turn in radians: the globe's period, negative and whole turns included. */
@@ -616,10 +616,18 @@ function paintBase(picture: Uint32Array, width: number, base: Drawing, boxX: num
   paintLettering(picture, width, base, boxX, boxY, turn);
 }
 
-/** What `front` holds where Santa and the front snow drew nothing (XMAS-81): no colour number is this. */
+/** The flakes as draw steps (snowDrawList): those behind the glass centre, and those in front. */
+export interface SnowFlakes {
+  behind: readonly SnowStep[];
+  front: readonly SnowStep[];
+}
+
+/** What `front` and `behind` hold where Santa drew nothing (XMAS-81): no colour number is this. */
 export const NO_FRONT = 0xffffffff;
 
-/** Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), the snow inside the glass when given, leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). `parts` of 'shadows' leaves the shapes' bodies out (XMAS-80). `front`, when given, is picture-sized and receives only what Santa and the snow in front drew, before the lean, with NO_FRONT elsewhere (XMAS-81). */
+/**
+ * Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). `parts` of 'shadows' leaves the shapes' bodies out (XMAS-80). `snow` is not drawn here: the page draws the flakes as steps on the screen's pixel grid (XMAS-84), so the picture is the same with or without it. `behind` and `front`, when given, are picture-sized and receive only Santa, before the lean, with NO_FRONT elsewhere: `behind` while he is behind the glass centre, `front` while he is in front (XMAS-81, XMAS-84). The page draws the flakes between the two. `flakes`, when given, are drawn into `picture` at one pixel to an art pixel before the lean, so it shifts them with the glass: the ones behind under Santa and the shapes, the ones in front over them (the page's fallback without a fine layer).
+ */
 export function drawGlobe(
   picture: Uint32Array,
   width: number,
@@ -631,6 +639,8 @@ export function drawGlobe(
   lean = 0,
   parts: ShapeParts = 'all',
   front?: Uint32Array,
+  behind?: Uint32Array,
+  flakes?: SnowFlakes,
 ): void {
   const base = drawings['base'];
   if (base === undefined) throw new Error('the Base sheet has no base drawing');
@@ -638,22 +648,21 @@ export function drawGlobe(
   const glass = glassOf(phase);
   const boxX = layout.globe.cx - base.width / 2;
   const boxY = layout.groundTop;
-  const behind = santaPlacement(spin, time).depth <= 0;
+  const isBehind = santaPlacement(spin, time).depth <= 0;
   if (lean !== 0) keepBackdrop(picture, width, layout);
   paintGlass(picture, width, layout, glass);
   // The reflections lie on the glass, but under Santa and the shapes, whose own colours never tint.
   paintReflections(picture, width, layout, glass, spin);
-  if (snow !== undefined) drawSnowBehind(picture, width, layout, snow);
-  if (behind) drawSanta(picture, width, layout, spin, time);
+  if (flakes !== undefined) renderSnowSteps(picture, width, layout, flakes.behind, 1);
+  if (isBehind) drawSanta(picture, width, layout, spin, time);
   drawShapes(picture, width, layout, phase, spin, globeShapes, parts);
-  if (!behind) drawSanta(picture, width, layout, spin, time);
-  if (snow !== undefined) drawSnowFront(picture, width, layout, snow, time);
-  if (front !== undefined) {
-    // The same figures again, alone: they write colour numbers only, so they can be drawn into `front` as they are.
-    front.fill(NO_FRONT);
-    if (!behind) drawSanta(front, width, layout, spin, time);
-    if (snow !== undefined) drawSnowFront(front, width, layout, snow, time);
-  }
+  if (!isBehind) drawSanta(picture, width, layout, spin, time);
+  if (flakes !== undefined) renderSnowSteps(picture, width, layout, flakes.front, 1);
+  // Santa alone, once more, for the page's layers: they write colour numbers only, so he is drawn into `behind` or `front` as he is.
+  behind?.fill(NO_FRONT);
+  front?.fill(NO_FRONT);
+  const alone = isBehind ? behind : front;
+  if (alone !== undefined) drawSanta(alone, width, layout, spin, time);
   if (lean !== 0) leanGlass(picture, width, layout, lean);
   paintCastShadow(picture, width, layout, boxX + base.width, boxY + base.height - 2);
   paintBase(picture, width, base, boxX, boxY, spin);

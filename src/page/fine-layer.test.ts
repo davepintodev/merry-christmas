@@ -11,6 +11,7 @@ import { keepBackdrop, leanBox, leanGlass, rowShift } from '../scene/lean.ts';
 import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
 import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
+import type { SnowStep } from '../scene/snow-draw-list.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
 
 const W = 240;
@@ -95,12 +96,14 @@ class FakeContext {
   }
   drawImage(source: FakeCanvas, ...args: number[]): void {
     this.calls.push({ source: source as unknown as HTMLCanvasElement, args, matrix: [...this.matrix], smoothing: this.imageSmoothingEnabled });
+    this.canvas.page.log.push({ canvas: this.canvas, op: 'draw', call: this.calls[this.calls.length - 1] as Call });
   }
   createImageData(width: number, height: number): { data: Uint8ClampedArray; width: number; height: number } {
     return { data: new Uint8ClampedArray(width * height * 4), width, height };
   }
   putImageData(image: Put): void {
     this.puts.push({ data: Uint8ClampedArray.from(image.data), width: image.width, height: image.height });
+    this.canvas.page.log.push({ canvas: this.canvas, op: 'put', put: this.puts[this.puts.length - 1] as Put });
   }
 }
 
@@ -111,7 +114,7 @@ class FakeCanvas {
   private h = 150;
   private context: FakeContext | null = null;
   contextless = false;
-  constructor(private readonly page: FakeDocument) {}
+  constructor(readonly page: FakeDocument) {}
   get width(): number { return this.w; }
   set width(v: number) { this.resizes++; this.w = v; }
   get height(): number { return this.h; }
@@ -127,7 +130,12 @@ class FakeCanvas {
   }
 }
 
+/** One operation on any canvas's context, in the order it happened: the fake's single ordered record. */
+type Op = { canvas: FakeCanvas; op: 'put'; put: Put } | { canvas: FakeCanvas; op: 'draw'; call: Call };
+
 class FakeDocument {
+  /** Every putImageData and drawImage on every canvas, in order. */
+  readonly log: Op[] = [];
   readonly order: FakeCanvas[] = [];
   readonly made: FakeCanvas[] = [];
   contextless = false;
@@ -173,6 +181,13 @@ function layersOf(main: FakeCanvas): { shapes: FakeCanvas; fronts: FakeCanvas } 
   const fronts = page.order[at + 2];
   if (shapes === undefined || fronts === undefined) throw new Error('the layers are not on the page');
   return { shapes, fronts };
+}
+
+/** The layer of the flakes in front (XMAS-84), over the front layer. */
+function snowFrontOf(main: FakeCanvas): FakeCanvas {
+  const snow = page.order[page.order.indexOf(main) + 3];
+  if (snow === undefined) throw new Error('the snow layer is not on the page');
+  return snow;
 }
 
 function ctxOf(canvas: FakeCanvas): FakeContext {
@@ -261,8 +276,10 @@ describe('makeFineLayer: what it puts on the page', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { shapes, fronts } = layersOf(main);
-    expect(page.order).toEqual([main, shapes, fronts]);
+    expect(page.order.slice(0, 3)).toEqual([main, shapes, fronts]);
     expect(shapes).not.toBe(fronts);
+    // The flakes in front (XMAS-84) sit on a layer of their own, over Santa's front layer.
+    expect(page.order[3]).toBe(snowFrontOf(main));
   });
 
   it('makes the two layers once: a second draw adds no canvas to the page', () => {
@@ -401,8 +418,8 @@ describe('makeFineLayer: the shapes with canvas transforms', () => {
     expect(page.made.length).toBe(made);
     const later = new Set(ctxOf(layersOf(main).shapes).calls.splice(0).map((c) => c.source));
     expect(later).toEqual(first);
-    // Not one bitmap per face: faces with the same drawing share.
-    expect(first.size).toBeLessThanOrEqual(new Set(shapeDrawList(0.4).map((s) => s.drawing)).size);
+    // Not one bitmap per face: faces with the same drawing share. The one more is the behind layer, drawn onto the shapes the same way.
+    expect(first.size).toBeLessThanOrEqual(new Set(shapeDrawList(0.4).map((s) => s.drawing)).size + 1);
   });
 
   it('a bitmap holds the drawing\'s own colours, only those, and is clear somewhere', () => {
@@ -528,10 +545,12 @@ describe('makeFineLayer: the lean shifts rows by whole art pixels, as leanGlass 
     const { main, layer } = setup();
     layer.draw(frame({ lean: 0 }), SITE);
     const { shapes } = layersOf(main);
+    const snow = snowFrontOf(main);
     const calls = ctxOf(shapes).calls;
     expect(calls.length).toBeGreaterThanOrEqual(shapeDrawList(0.4).length);
     findFaces(calls, shapeDrawList(0.4), SITE.scale);
-    expect(page.made.some((c) => c !== shapes && c.width === BW * SITE.scale)).toBe(false);
+    // Only the flakes' own layer (XMAS-84) is as wide as the shapes and is not a row copy.
+    expect(page.made.some((c) => c !== shapes && c !== snow && c.width === BW * SITE.scale)).toBe(false);
   });
 
   it('with a lean copies every row of the box from the unleaned shapes, each by rowShift whole art pixels', () => {
@@ -718,6 +737,133 @@ describe('makeFineLayer: Santa and the snow in front', () => {
     const image = ctxOf(layersOf(main).fronts).puts.at(-1);
     expect(image?.width).toBe(wideBox.right - wideBox.left + 1);
     expect(image?.height).toBe(wideBox.bottom - wideBox.top);
+  });
+});
+
+describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () => {
+  const k = SITE.scale;
+  /** The globe's centre in box pixels, as the layer's snow is drawn from. */
+  const cx = LAYOUT.globe.cx - BOX.left;
+  const cy = LAYOUT.globe.cy - BOX.top;
+  const WHITE = 0xffffff;
+  const BEHIND = 0xaebcf0;
+  const flake = (x: number, y: number, colour: number, depth: number): SnowStep => ({ x, y, colour, shape: [[0, 0]], depth });
+
+  /** The pixels an image lights (alpha 255), as [x, y] on the image's own grid, with the colour's bytes. */
+  function litOf(image: Put | undefined): { x: number; y: number; rgb: number[] }[] {
+    const out: { x: number; y: number; rgb: number[] }[] = [];
+    if (image === undefined) return out;
+    for (let p = 0; p < image.width * image.height; p++) {
+      if (image.data[p * 4 + 3] !== 255) continue;
+      out.push({ x: p % image.width, y: Math.floor(p / image.width), rgb: Array.from(image.data.slice(p * 4, p * 4 + 3)) });
+    }
+    return out;
+  }
+
+  it('lands a flake on the screen pixel its own position picks, so two fractions inside one art pixel land on different screen pixels', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ snowFront: [flake(10, 0, WHITE, 20)] }), SITE);
+    const snow = ctxOf(snowFrontOf(main));
+    const whole = litOf(snow.puts.at(-1));
+    layer.draw(frame({ snowFront: [flake(10.34, 0, WHITE, 20)] }), SITE);
+    const fraction = litOf(snow.puts.at(-1));
+    // Both flakes are in the same art pixel, but the screen pixel is k to one art pixel: 10.34 is a screen pixel to the right.
+    expect(whole).toEqual([{ x: k * (cx + 10), y: k * cy, rgb: [0xff, 0xff, 0xff] }]);
+    expect(fraction).toEqual([{ x: k * (cx + 10) + 1, y: k * cy, rgb: [0xff, 0xff, 0xff] }]);
+    expect(fraction[0]?.x % k, 'not a multiple of the art pixel size').not.toBe(0);
+  });
+
+  it('a flake behind the glass centre is on the shapes layer, under the faces, on the same screen pixel grid', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ snowBehind: [flake(10.34, 0, BEHIND, -20)] }), SITE);
+    const lit = litOf(ctxOf(layersOf(main).shapes).puts.at(-1));
+    expect(lit).toEqual([{ x: k * (cx + 10) + 1, y: k * cy, rgb: [0xae, 0xbc, 0xf0] }]);
+    // Not on the front layers: the behind flake is drawn only under the shapes.
+    expect(litOf(ctxOf(snowFrontOf(main)).puts.at(-1))).toEqual([]);
+  });
+
+  it('a leaning frame moves a front flake by its row\'s whole art pixel shift, as whole screen pixels', () => {
+    const lean = 0.3;
+    const { main, layer } = setup();
+    const at = Math.floor(LAYOUT.globe.cy - 5);
+    layer.draw(frame({ lean, snowFront: [flake(10.34, -5, WHITE, 20)] }), SITE);
+    const s = rowShift(lean, BOX.bottom, at);
+    expect(s).not.toBe(0);
+    expect(litOf(ctxOf(snowFrontOf(main)).puts.at(-1))).toEqual([{ x: k * (cx + 10) + 1 + s * k, y: k * (cy - 5), rgb: [0xff, 0xff, 0xff] }]);
+  });
+});
+
+describe('makeFineLayer: the behind layers go under the faces (XMAS-84), in one ordered record', () => {
+  const k = SITE.scale;
+  const WHITE_BEHIND = 0xaebcf0;
+  const cx = LAYOUT.globe.cx - BOX.left;
+  const cy = LAYOUT.globe.cy - BOX.top;
+  const lit = (put: Put): number => {
+    let n = 0;
+    for (let i = 3; i < put.data.length; i += 4) if (put.data[i] === 255) n++;
+    return n;
+  };
+  const litAt = (put: Put, x: number, y: number): boolean => put.data[(y * put.width + x) * 4 + 3] === 255;
+  const flake = (x: number, y: number): SnowStep => ({ x, y, colour: WHITE_BEHIND, shape: [[0, 0]], depth: -20 });
+  /** Where the log has the first lit put on `canvas`, and the first face drawn on it (-1 for none). */
+  const firstLitPut = (canvas: FakeCanvas): number => page.log.findIndex((o) => o.canvas === canvas && o.op === 'put' && lit(o.put) > 0);
+  const firstDraw = (canvas: FakeCanvas): number => page.log.findIndex((o) => o.canvas === canvas && o.op === 'draw');
+  const santaBehind = (): Uint32Array => {
+    const behind = emptyFront();
+    behind[LAYOUT.globe.cy * W + LAYOUT.globe.cx] = 0x112233;
+    return behind;
+  };
+
+  it('puts the behind flakes on the shapes before the first face is drawn', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ snowBehind: [flake(10, 0)] }), SITE);
+    const { shapes } = layersOf(main);
+    expect(firstLitPut(shapes)).toBeGreaterThanOrEqual(0);
+    expect(firstDraw(shapes)).toBeGreaterThanOrEqual(0);
+    expect(firstLitPut(shapes)).toBeLessThan(firstDraw(shapes));
+  });
+
+  it('puts Santa behind the glass centre on the shapes before the first face, at his own pixel, k by k', () => {
+    const { main, layer } = setup();
+    layer.draw(frame({ behind: santaBehind() }), SITE);
+    const { shapes } = layersOf(main);
+    expect(firstLitPut(shapes)).toBeGreaterThanOrEqual(0);
+    expect(firstLitPut(shapes)).toBeLessThan(firstDraw(shapes));
+    const put = (page.log[firstLitPut(shapes)] as { put: Put }).put;
+    expect(lit(put)).toBe(k * k);
+    expect(litAt(put, cx * k, cy * k)).toBe(true);
+  });
+
+  it('puts nothing lit under the faces when no snow or Santa is behind', () => {
+    const { main, layer } = setup();
+    layer.draw(frame(), SITE);
+    expect(firstLitPut(layersOf(main).shapes)).toBe(-1);
+  });
+
+  it('under a lean puts the behind flakes and Santa on the unleaned copy before its faces, and none straight on the shapes', () => {
+    const lean = 0.3;
+    const { main, layer } = setup();
+    layer.draw(frame({ lean, snowBehind: [flake(10, -5)], behind: santaBehind() }), SITE);
+    const { shapes } = layersOf(main);
+    const flat = ctxOf(shapes).calls[0]?.source as unknown as FakeCanvas;
+    expect(flat).not.toBe(shapes);
+    expect(firstLitPut(flat)).toBeGreaterThanOrEqual(0);
+    expect(firstLitPut(flat)).toBeLessThan(firstDraw(flat));
+    // The shapes get them only through the row copies, which come after the flat copy is done.
+    expect(firstLitPut(shapes)).toBe(-1);
+    const lastFlatOp = page.log.map((o) => o.canvas).lastIndexOf(flat);
+    expect(firstDraw(shapes)).toBeGreaterThan(lastFlatOp);
+    // The flake's row and Santa's row are each copied by their own whole art pixel shift.
+    const put = (page.log[firstLitPut(flat)] as { put: Put }).put;
+    expect(litAt(put, (cx + 10) * k, (cy - 5) * k)).toBe(true);
+    expect(litAt(put, cx * k, cy * k)).toBe(true);
+    for (const row of [Math.floor(LAYOUT.globe.cy - 5), LAYOUT.globe.cy]) {
+      const copy = ctxOf(shapes).calls[row - BOX.top];
+      const shift = rowShift(lean, BOX.bottom, row);
+      expect(shift).not.toBe(0);
+      expect(copy?.source).toBe(flat as unknown as HTMLCanvasElement);
+      expect(copy?.args[4]).toBe(shift * k);
+    }
   });
 });
 

@@ -2,7 +2,9 @@
 //
 // Two canvases follow #scene in the page: the shapes at the screen's own pixel
 // size, laid exactly over the glass, and over it an art pixel layer holding what
-// Santa and the front snow drew. They are read from the page the way a visitor
+// Santa drew. The flakes sit on the screen's pixel grid too (XMAS-84): behind the
+// glass centre they are on the shapes layer, under the faces, and in front on a
+// layer of their own over Santa. They are read from the page the way a visitor
 // sees them: by their on-screen boxes and their pixels, with no test hook.
 //
 // Alignment is read from the boxes: the layer's left and top land on whole
@@ -24,6 +26,8 @@ import { pagePixels } from '../../src/page/pixel.ts';
 import { shapeDrawList, renderDrawList } from '../../src/scene/shape-draw-list.ts';
 import { globeShapes, type GlobeShape } from '../../src/scene/shapes.ts';
 import { shapesFarFirst } from '../../src/scene/shapes-draw.ts';
+import { masterColours } from '../../art/colours.ts';
+import { drawings } from '../../src/shared/art.generated.ts';
 
 const NOW = '2026-12-01T22:00:00';
 const SEED = 1; // src/page/scene.ts
@@ -45,6 +49,8 @@ async function openLive(browser: Browser, viewport: Viewport, dpr: number, searc
 /** The shapes and front canvases that follow #scene. */
 const SHAPES = "canvas#scene + canvas";
 const FRONTS = "canvas#scene + canvas + canvas";
+/** The flakes in front, over Santa's layer: a screen pixel layer that holds nothing but those flakes (XMAS-84). */
+const SNOW_FRONTS = "canvas#scene + canvas + canvas + canvas";
 
 async function layersReady(page: Page): Promise<void> {
   await expect(page.locator(SHAPES)).toHaveCount(1, { timeout: 10_000 });
@@ -235,26 +241,59 @@ async function idle(page: Page, ms: number): Promise<void> {
   for (let t = 0; t < ms; t += STEP_MS) await page.clock.runFor(STEP_MS);
 }
 
-/** The shapes layer's rows, one string per art row of the layer, sampled on the middle device row of the row's band. */
+/**
+ * The shapes layer's rows, one string per art row of the layer, sampled on the middle device row of the row's band.
+ * A cell is '.' where nothing is drawn, its hex colour where it is one of the shapes' own colours (matched exactly), and '*'
+ * where it is a colour the flakes (white and the dim blue) or Santa can put on the layer, or a blend with one (XMAS-84): those are
+ * the cells that move on their own clock behind the glass.
+ */
 async function shapeRows(page: Page, scale: number): Promise<string[]> {
-  return page.locator(SHAPES).evaluate((el, k) => {
-    const c = el as HTMLCanvasElement;
-    const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-    const rows: string[] = [];
-    for (let band = 0; band < c.height / k; band++) {
-      const y = band * k + (k >> 1);
-      const cells: string[] = [];
-      for (let x = 0; x < c.width; x++) {
-        const i = (y * c.width + x) * 4;
-        cells.push((data[i + 3] ?? 0) === 0 ? '.' : ((data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!).toString(16));
-      }
-      rows.push(cells.join(','));
+  /** The colours the named drawings use, as numbers (a drawing's pixels are a Uint8Array, so this is a loop, not a map). */
+  const coloursOf = (names: string[]): number[] => {
+    const out: number[] = [];
+    for (const name of names) {
+      for (const pixel of drawings[name]?.pixels ?? []) if (pixel > 0) out.push(Number.parseInt(masterColours[pixel - 1]!.slice(1), 16));
     }
-    return rows;
-  }, scale);
+    return out;
+  };
+  const movable = [0xffffff, 0xaebcf0, ...coloursOf(['santa-trot-1', 'santa-trot-2'])];
+  // Only the shapes' own colours are kept exact; the flakes' two colours and Santa's are movable even where a shape's drawing uses them
+  // too (a flake or Santa behind the glass over such a shape pixel cannot be told from it, and the other colours of the row still pin
+  // the shear). Any other colour is a shape edge's blend over him or a flake (a face's antialiased edge over a behind pixel), so it too is movable.
+  const own = [...new Set(coloursOf(Object.keys(drawings).filter((name) => !name.startsWith('santa-'))))].filter((c) => !movable.includes(c));
+  return page.locator(SHAPES).evaluate(
+    (el, { k, own }) => {
+      const c = el as HTMLCanvasElement;
+      const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      const rows: string[] = [];
+      for (let band = 0; band < c.height / k; band++) {
+        const y = band * k + (k >> 1);
+        const cells: string[] = [];
+        for (let x = 0; x < c.width; x++) {
+          const i = (y * c.width + x) * 4;
+          if ((data[i + 3] ?? 0) === 0) {
+            cells.push('.');
+            continue;
+          }
+          const colour = (data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!;
+          cells.push(own.includes(colour) ? colour.toString(16) : '*');
+        }
+        rows.push(cells.join(','));
+      }
+      return rows;
+    },
+    { k: scale, own },
+  );
 }
 
-/** The whole art-pixel shifts s at which a leaning row is the upright row moved by s art pixels, over the pixels both show. */
+/** Whether two rows agree cell for cell, a '*' cell (a flake, Santa or a blend) agreeing with any. */
+function sameRow(a: string, b: string): boolean {
+  const x = a.split(',');
+  const y = b.split(',');
+  return x.length === y.length && x.every((c, i) => c === y[i] || c === '*' || y[i] === '*');
+}
+
+/** The whole art-pixel shifts s at which a leaning row is the upright row moved by s art pixels, over the pixels both show; a '*' cell (a flake) matches any cell. */
 function fits(lean: string, upright: string, scale: number): number[] {
   const l = lean.split(',');
   const u = upright.split(',');
@@ -267,7 +306,7 @@ function fits(lean: string, upright: string, scale: number): number[] {
       const from = x - s * scale;
       if (from < 0 || from >= u.length) continue;
       overlap++;
-      if (l[x] !== u[from]) ok = false;
+      if (l[x] !== u[from] && l[x] !== '*' && u[from] !== '*') ok = false;
     }
     if (ok && overlap > l.length / 2) out.push(s);
   }
@@ -301,8 +340,10 @@ test.describe('the layer follows the lean while dragging', () => {
     expect(rows.length, 'rows with shape pixels to compare').toBeGreaterThan(30);
     const inexact = leaning.map((row, n) => ({ n, has: (upright[n] ?? '').split(',').filter((c) => c !== '.').length >= 20 })).filter((r) => r.has && !rows.some((x) => x.y === box.top + r.n));
     expect(inexact.map((r) => r.n), 'rows that are not the upright row moved by whole art pixels').toEqual([]);
+    // A row's whole shift holds over a lean window 1 / (its height above the ground line) wide, so the rows near the top
+    // (about 70 art px up) leave a window under 0.0005 wide: the search steps finer than that.
     let found: number | null = null;
-    for (let lean = -0.5; lean <= 0.5 && found === null; lean += 0.0005) {
+    for (let lean = -0.5; lean <= 0.5 && found === null; lean += 0.00005) {
       if (Math.abs(lean) < 0.02) continue;
       if (rows.every((r) => r.shifts.includes(rowShift(lean, box.bottom, r.y)))) found = lean;
     }
@@ -313,7 +354,7 @@ test.describe('the layer follows the lean while dragging', () => {
     // Settled, the layer is upright: every row is its own upright row.
     await idle(page, 4000);
     const settled = await shapeRows(page, scale);
-    expect(settled.filter((row, n) => row !== upright[n]).length).toBeLessThanOrEqual(2);
+    expect(settled.filter((row, n) => !sameRow(row, upright[n] ?? '')).length).toBeLessThanOrEqual(2);
     await context.close();
   });
 });
@@ -334,7 +375,7 @@ test.describe('Santa and the front snow show in front of the shapes', () => {
     }
     await page.mouse.up();
     await idle(page, 400);
-    const counts = await page.locator(FRONTS).evaluate((el) => {
+    const counts = await page.locator(SNOW_FRONTS).evaluate((el) => {
       const c = el as HTMLCanvasElement;
       const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
       let white = 0;

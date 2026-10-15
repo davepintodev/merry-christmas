@@ -595,16 +595,15 @@ describe('outside snow in sceneFrame', () => {
     expect(diff).toBe(1);
   });
 
-  it('it is drawn behind the globe: globe snow in front at the same pixel wins', () => {
+  it('globe snow is not in the picture (XMAS-84: the page draws it as steps), so it leaves the outside snow behind the globe as it is', () => {
     const gx = LAYOUT.globe.cx;
     const gy = LAYOUT.globe.cy - 20;
     const globeSnow = { flakes: [{ x: 0.25, y: -19.25, z: 20, resting: false, phase: 0 }], stir: 0 };
     const withBoth = sceneFrame(
       input({ snow: globeSnow, outsideSnow: snowOf([flake(gx + 0.5, gy + 0.5, 0.1)]) }),
     ).picture;
-    const globeOnly = sceneFrame(input({ snow: globeSnow })).picture;
-    expect(withBoth[Math.floor(gy) * W + Math.floor(gx)]).toBe(0xffffff);
-    expect(withBoth).toEqual(globeOnly);
+    const outsideOnly = sceneFrame(input({ outsideSnow: snowOf([flake(gx + 0.5, gy + 0.5, 0.1)]) })).picture;
+    expect(withBoth).toEqual(outsideOnly);
   });
 
   it('the globe covers an outside flake behind it where the globe is opaque', () => {

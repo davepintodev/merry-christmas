@@ -11,22 +11,25 @@
 // nothing" as "the pictures are equal". The scene canvas is read pixel by pixel
 // (one canvas pixel per art pixel); no test hook is added to the page.
 //
-// Reading the stir: a stirred globe has snow in the air. The flakes are drawn
-// in two colours only (white in front, 0xaebcf0 behind), so the flake pixels
-// in the upper part of the glass, well above the floor line where resting
-// snow lies, are counted. A flick and a slow drag of the same distance turn
+// Reading the stir: a stirred globe has snow in the air. The flakes in front are
+// white on the snow layer over Santa (XMAS-84), which holds nothing else, so its
+// white pixels in the upper part of the glass, well above the floor line where
+// resting snow lies, are counted. A flick and a slow drag of the same distance turn
 // the globe the same amount, so the only difference left between them is the
 // snow, and the flick must have more of it in the air at the same moment
 // after the release.
 import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { pagePixels } from '../../src/page/pixel.ts';
 import { sceneLayout } from '../../src/scene/frame.ts';
+import { leanBox } from '../../src/scene/lean.ts';
 
 const NOW = '2026-12-01T22:00:00';
 const VIEWPORT = { width: 800, height: 600 };
 const STEP_MS = 16; // Playwright's fake requestAnimationFrame interval
+/** The flakes in front, over Santa's layer: an art pixel layer that holds nothing but those flakes (XMAS-84). */
+const SNOW_FRONTS = "canvas#scene + canvas + canvas + canvas";
 
-type Geometry = { art: (x: number, y: number) => { x: number; y: number }; cx: number; cy: number; radius: number; baseTop: number; baseBottom: number; scale: number };
+type Geometry = { art: (x: number, y: number) => { x: number; y: number }; cx: number; cy: number; radius: number; baseTop: number; baseBottom: number; scale: number; boxLeft: number; boxTop: number };
 type Point = { x: number; y: number };
 type Session = { context: BrowserContext; page: Page; cdp: CDPSession | null; geometry: Geometry };
 
@@ -90,6 +93,7 @@ async function geometryOf(page: Page, viewport: { width: number; height: number 
   const { scale, width, height } = pagePixels(viewport, 1);
   const layout = sceneLayout(width, height, 1);
   const { cx, cy, radius } = layout.globe;
+  const lean = leanBox(width, layout);
   return {
     art: (x, y) => ({ x: box.x + x * scale, y: box.y + y * scale }),
     cx,
@@ -98,6 +102,8 @@ async function geometryOf(page: Page, viewport: { width: number; height: number 
     baseTop: cy + radius + 1,
     baseBottom: Math.min(height - 1, cy + radius + 20),
     scale,
+    boxLeft: lean.left,
+    boxTop: lean.top,
   };
 }
 
@@ -164,16 +170,28 @@ async function basePixels(s: Session): Promise<number[]> {
   return pixels(s.page, g.cx - g.radius, g.baseTop, 2 * g.radius + 1, g.baseBottom - g.baseTop + 1);
 }
 
-/** How many flake-coloured pixels there are in the upper part of the glass, well above the floor line. */
+/**
+ * How many flakes are in the air: the white pixels in the upper part of the glass, well above the floor line,
+ * on the snow layer in front (at the screen's size, `scale` device pixels to an art pixel, so the rectangle is read in art
+ * pixels from the lean box's top left and scaled to device pixels).
+ */
 async function airborne(s: Session): Promise<number> {
   const g = s.geometry;
-  const data = await pixels(s.page, g.cx - 50, g.cy - 50, 101, 50 + 18);
-  let n = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const rgb = (data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!;
-    if (rgb === 0xffffff || rgb === 0xaebcf0) n++;
-  }
-  return n;
+  // x from 50 either side of the centre, inclusive; y from 50 above it to 18 below, exclusive.
+  const k = g.scale;
+  const area = { left: (g.cx - 50 - g.boxLeft) * k, right: (g.cx + 51 - g.boxLeft) * k - 1, top: (g.cy - 50 - g.boxTop) * k, bottom: (g.cy + 18 - g.boxTop) * k };
+  return s.page.locator(SNOW_FRONTS).evaluate((el, a) => {
+    const c = el as HTMLCanvasElement;
+    const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let y = Math.max(0, a.top); y < Math.min(c.height, a.bottom); y++) {
+      for (let x = Math.max(0, a.left); x <= Math.min(c.width - 1, a.right); x++) {
+        const i = (y * c.width + x) * 4;
+        if (data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255 && data[i + 3] === 255) n++;
+      }
+    }
+    return n;
+  }, area);
 }
 
 /** The point on the globe a drag starts from, in client pixels. */

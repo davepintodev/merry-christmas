@@ -22,8 +22,10 @@ import { wantsPerf } from './perf-option.ts';
 import { readoutLink } from './scene-perf.ts';
 import { pagePixels, pictureLeft } from './pixel.ts';
 import { makePoseTrack, smoothTime } from './pose.ts';
+import { snowDrawList, type SnowStep } from '../scene/snow-draw-list.ts';
 import { makeSnowRuntime } from './snow-runtime.ts';
 import { STEPS_PER_SECOND } from './steps.ts';
+import type { Flake, GlobeSnow } from '../scene/snow.ts';
 
 /** The only source of randomness for a page: fixed, so every visit draws the same sky. */
 const SEED = 1;
@@ -57,6 +59,25 @@ let steps = 0;
 const track = makePoseTrack({ turn: START_TURN, lean: 0 });
 /** The colour, RGBA and image buffers for one picture size, kept between frames. */
 let buffers: { picture: Uint32Array; rgba: Uint8ClampedArray; image: ImageData } | null = null;
+/** The globe's snow as the step before the last one left it: a frame draws the flakes between it and the snow as the last step left it (XMAS-84). */
+let snowBefore: { flakes: Flake[]; stir: number } | undefined;
+
+/** The draw steps of the flakes behind the glass centre and in front, their step objects kept between frames. */
+const snowBehind: SnowStep[] = [];
+const snowFront: SnowStep[] = [];
+
+/** Copies the snow's flakes into `into` (its flake objects are reused), so a step that moves the snow on leaves the copy as it was. */
+function copyInto(into: { flakes: Flake[]; stir: number } | undefined, snowNow: GlobeSnow): { flakes: Flake[]; stir: number } {
+  const copy = into ?? { flakes: [], stir: 0 };
+  snowNow.flakes.forEach((flake, i) => {
+    const kept = copy.flakes[i];
+    if (kept === undefined) copy.flakes[i] = { ...flake };
+    else Object.assign(kept, flake);
+  });
+  copy.flakes.length = snowNow.flakes.length;
+  copy.stir = snowNow.stir;
+  return copy;
+}
 
 /** The device pixel ratio as pagePixels reads it: a nonsense value counts as 1. */
 function ratio(): number {
@@ -114,6 +135,8 @@ const scene: LoopScene = {
     const { width, height } = windowPixels(ratio());
     const out = drag.step(1 / STEPS_PER_SECOND);
     track.push({ turn: out.turn, lean: out.lean });
+    // The snow as this step finds it is what the frames blend from, until the next step moves it on (XMAS-84).
+    snowBefore = snow.snow === null ? undefined : copyInto(snowBefore, snow.snow);
     snow.step({
       turn: out.turn,
       christmasDay: timeLeft(clock()).christmasDay,
@@ -136,6 +159,15 @@ const scene: LoopScene = {
     }
     const blended = track.blend(fraction);
     const time = smoothTime(steps, fraction);
+    // The flakes as draw steps, blended from the snow before the last step: those behind the glass centre go before Santa and the shapes, those in front after.
+    const globeSnow = snow.snow;
+    if (globeSnow === null) {
+      snowBehind.length = 0;
+      snowFront.length = 0;
+    } else {
+      snowDrawList(globeSnow, snowBefore, fraction, 'behind', time, snowBehind);
+      snowDrawList(globeSnow, snowBefore, fraction, 'front', time, snowFront);
+    }
     const frame = frames(
       {
         time,
@@ -146,22 +178,27 @@ const scene: LoopScene = {
         height,
         turn: blended.turn,
         lean: blended.lean,
-        snow: snow.snow ?? undefined,
+        snow: globeSnow ?? undefined,
+        snowSteps: { behind: snowBehind, front: snowFront },
         outsideSnow: snow.outsideSnow ?? undefined,
         shapeBodies: !fineDrew,
       },
       buffers.picture,
     );
-    toRgba(frame.picture, buffers.rgba);
-    context.putImageData(buffers.image, 0, 0);
-    // The shapes go over the scene canvas, then Santa and the snow in front over them.
+    // The shapes go over the scene canvas, then the flakes behind and Santa over them, then Santa and the flakes in front.
     // The fine layer is timed only for the readout, which is the only thing that reads the time.
     const timed = readout !== undefined;
     const begin = timed ? performance.now() : 0;
     if (fine !== null && frame.front !== undefined) {
-      fineDrew = fine.draw({ layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, front: frame.front }, { scale, ratio: dpr, left });
+      fineDrew = fine.draw(
+        { layout: frame.layout, width: frame.width, turn: blended.turn, lean: blended.lean, front: frame.front, behind: frame.behind, snowBehind, snowFront },
+        { scale, ratio: dpr, left },
+      );
     }
-    return timed ? performance.now() - begin : undefined;
+    const elapsed = timed ? performance.now() - begin : undefined;
+    toRgba(frame.picture, buffers.rgba);
+    context.putImageData(buffers.image, 0, 0);
+    return elapsed;
   },
 };
 

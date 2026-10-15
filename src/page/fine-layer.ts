@@ -9,14 +9,19 @@
 //   covers the overlap and no pair of antialiased edges leaves a half-clear
 //   seam, whatever part of an edge the two share; the rows are then shifted by
 //   the lean in whole art pixels, as leanGlass shifts glass;
-// - over it, an art pixel canvas holding only what Santa and the snow in front
-//   drew, so they still pass in front of the shapes (until XMAS-83/84).
+// - over it, an art pixel canvas holding only what Santa drew in front of the
+//   glass centre, so he still passes in front of the shapes.
+// XMAS-84 "Snow inside the glass on the fine layer": the snow is drawn too as
+// steps on the screen's own pixel grid. The flakes behind the glass centre, with
+// Santa while he is behind it, go onto the shapes layer before its faces, so the
+// shapes cover them; the flakes in front go on a layer of their own over Santa.
 import { masterColours } from '../../art/colours.ts';
 import type { Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from '../scene/frame.ts';
 import { NO_FRONT } from '../scene/globe.ts';
-import { leanBox, rowShift } from '../scene/lean.ts';
+import { leanBox, rowShift, type LeanBox } from '../scene/lean.ts';
 import { shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
+import { renderSnowSteps, type SnowStep } from '../scene/snow-draw-list.ts';
 
 /** The master list's colours as numbers, so a drawing's colour number is a colour. */
 const COLOUR_NUMBERS: readonly number[] = masterColours.map((colour) => Number.parseInt(colour.slice(1), 16));
@@ -460,15 +465,144 @@ function paintFaces(ctx: CanvasRenderingContext2D, steps: readonly DrawStep[], c
   }
 }
 
-/** What one frame is drawn with: the scene frame's layout, width, turn, lean and front layer. */
+/** A colour-number buffer of `size` numbers, kept while the size holds. */
+function colourBuffer(kept: Uint32Array<ArrayBuffer>, size: number): Uint32Array<ArrayBuffer> {
+  return kept.length === size ? kept : new Uint32Array(size);
+}
+
+/** A rectangle of device pixels, from (left, top) up to but not including (right, bottom): the part of a layer that holds anything. */
+interface Dirty {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** The rectangle `a` and `b` cover together; either may be null for nothing. */
+function unionOf(a: Dirty | null, b: Dirty | null): Dirty | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) };
+}
+
+/** Shapes with their arms moved to their own rows' shifts, by shape and the shifts of the rows above and below the centre's, so a leaning frame makes none anew. */
+const armShapes = new WeakMap<SnowStep['shape'], Map<string, SnowStep['shape']>>();
+
+/** `shape` with each arm above the centre row moved by `up` and each below it by `down`, whole art pixels. */
+function armsShifted(shape: SnowStep['shape'], up: number, down: number): SnowStep['shape'] {
+  if (up === 0 && down === 0) return shape;
+  const kept = armShapes.get(shape) ?? new Map<string, SnowStep['shape']>();
+  armShapes.set(shape, kept);
+  const key = `${up},${down}`;
+  let moved = kept.get(key);
+  if (moved === undefined) {
+    moved = shape.map(([dx, dy]) => [dx + (dy < 0 ? up : dy > 0 ? down : 0), dy] as const);
+    kept.set(key, moved);
+  }
+  return moved;
+}
+
+/**
+ * `steps` moved by the lean's row shifts, as the glass is, written into `into` (its step objects are reused).
+ * Each flake's centre takes its own row's shift and each arm its own row's, so an arm on the next band
+ * is not off by an art pixel; (cy) is the globe's centre row in art px.
+ */
+function leanedSteps(into: SnowStep[], steps: readonly SnowStep[], lean: number, bottom: number, cy: number): SnowStep[] {
+  steps.forEach((step, n) => {
+    const row = Math.floor(cy + step.y);
+    const here = rowShift(lean, bottom, row);
+    const moved = into[n] ?? { x: 0, y: 0, colour: 0, shape: step.shape, depth: 0 };
+    moved.x = step.x + here;
+    moved.y = step.y;
+    moved.colour = step.colour;
+    moved.depth = step.depth;
+    moved.shape = armsShifted(step.shape, rowShift(lean, bottom, row - 1) - here, rowShift(lean, bottom, row + 1) - here);
+    into[n] = moved;
+  });
+  into.length = steps.length;
+  return into;
+}
+
+/** The rectangle the flakes `steps` can reach in an image `side` x `rows` device pixels, at k device pixels to an art pixel; (gx, gy) is the globe's centre in art px of the image. Null when there are none. */
+function snowDirty(steps: readonly SnowStep[], gx: number, gy: number, k: number, side: number, rows: number): Dirty | null {
+  if (steps.length === 0) return null;
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const step of steps) {
+    const x = Math.floor((gx + step.x) * k);
+    const y = Math.floor((gy + step.y) * k);
+    left = Math.min(left, x);
+    top = Math.min(top, y);
+    right = Math.max(right, x);
+    bottom = Math.max(bottom, y);
+  }
+  // A shape reaches one art pixel (k device pixels) either way from a flake's own pixel.
+  left = Math.max(0, left - k);
+  top = Math.max(0, top - k);
+  right = Math.min(side, right + k + 1);
+  bottom = Math.min(rows, bottom + k + 1);
+  return left < right && top < bottom ? { left, top, right, bottom } : null;
+}
+
+/**
+ * Writes Santa's `picture` (NO_FRONT where he drew nothing) over the colour numbers `colours` of the box, each art pixel a k x k block.
+ * Returns the rectangle he covers, or null when he drew nothing.
+ */
+function overlayFigures(colours: Uint32Array, picture: Uint32Array, width: number, box: LeanBox, bw: number, k: number): Dirty | null {
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (let y = box.top; y < box.bottom; y++) {
+    for (let x = box.left; x <= box.right; x++) {
+      const colour = picture[y * width + x] ?? NO_FRONT;
+      if (colour === NO_FRONT) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+      for (let dy = 0; dy < k; dy++) {
+        const row = ((y - box.top) * k + dy) * bw * k;
+        for (let dx = 0; dx < k; dx++) colours[row + (x - box.left) * k + dx] = colour;
+      }
+    }
+  }
+  if (left > right) return null;
+  return { left: (left - box.left) * k, top: (top - box.top) * k, right: (right - box.left + 1) * k, bottom: (bottom - box.top + 1) * k };
+}
+
+/** The colour numbers of `dirty` as the opaque words of an image `side` pixels across: NO_FRONT, where nothing was drawn, is clear. */
+function wordsFrom(colours: Uint32Array, words: Uint32Array, side: number, dirty: Dirty): void {
+  for (let y = dirty.top; y < dirty.bottom; y++) {
+    for (let i = y * side + dirty.left; i < y * side + dirty.right; i++) {
+      const colour = colours[i] ?? NO_FRONT;
+      words[i] = colour === NO_FRONT ? 0 : opaqueWord(colour);
+    }
+  }
+}
+
+/** The pixels of `dirty` put onto the canvas, which is cleared first; the rest of the image is not read. */
+function putDirty(context: CanvasRenderingContext2D, image: ImageData, dirty: Dirty | null): void {
+  if (dirty !== null) context.putImageData(image, 0, 0, dirty.left, dirty.top, dirty.right - dirty.left, dirty.bottom - dirty.top);
+}
+
+/** What one frame is drawn with: the scene frame's layout, width, turn, lean and the figures and snow of the layers. */
 export interface FineFrame {
   layout: SceneLayout;
   /** The picture's width in art pixels. */
   width: number;
   turn: number;
   lean: number;
-  /** The scene frame's front layer: NO_FRONT where Santa and the snow in front drew nothing. */
+  /** The scene frame's front layer: what Santa drew in front of the glass centre, NO_FRONT where he drew nothing. */
   front: Uint32Array;
+  /** The scene frame's behind layer: what Santa drew behind the glass centre, NO_FRONT where he drew nothing; absent draws none. */
+  behind?: Uint32Array;
+  /** The flakes behind the glass centre, as draw steps (snowDrawList, XMAS-84); absent draws none. */
+  snowBehind?: readonly SnowStep[];
+  /** The flakes in front of the glass centre, as draw steps; absent draws none. */
+  snowFront?: readonly SnowStep[];
 }
 
 /** How the picture sits on the screen: physical pixels per art pixel, the device pixel ratio, and the picture's left edge in CSS pixels. */
@@ -490,6 +624,15 @@ export interface FineLayer {
 export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
   let shapes: Layer | null = null;
   let fronts: Layer | null = null;
+  /** The flakes in front, on the screen's pixel grid, over Santa's front layer. */
+  let snowFronts: Layer | null = null;
+  /** The colour numbers of the box at the screen's size, kept while the size holds: the snow and Santa are drawn into them, then made into words. */
+  let colours: Uint32Array<ArrayBuffer> = new Uint32Array(0);
+  /** The flakes and Santa behind the glass centre, at the screen's size: put onto the shapes (or their flat copy) under the faces. */
+  let behindPixels: Pixels | null = null;
+  let snowPixels: Pixels | null = null;
+  /** The flakes in front as a leaning frame moves them, kept between frames. */
+  const leaned: SnowStep[] = [];
   /** The unleaned faces, drawn here first when the lean moves the rows of the shapes. Not on the page. */
   let flat: Layer | null = null;
   /** The bordered bitmap of each drawing, shared by every face and every frame. */
@@ -501,15 +644,18 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
   let clips: Clip[] = [];
 
   return {
-    draw({ layout, width, turn, lean, front }, { scale: k, ratio, left }): boolean {
+    draw({ layout, width, turn, lean, front, behind, snowBehind = [], snowFront = [] }, { scale: k, ratio, left }): boolean {
       // Made once, on the first draw; a layer with no 2d context is kept too, so the page gets no new canvas each frame.
       shapes ??= { canvas: layerAfter(main), context: null };
       shapes.context ??= shapes.canvas.getContext('2d');
       fronts ??= { canvas: layerAfter(shapes.canvas), context: null };
       fronts.context ??= fronts.canvas.getContext('2d');
+      snowFronts ??= { canvas: layerAfter(fronts.canvas), context: null };
+      snowFronts.context ??= snowFronts.canvas.getContext('2d');
       const shapesContext = shapes.context;
       const frontsContext = fronts.context;
-      if (shapesContext === null || frontsContext === null) return false;
+      const snowContext = snowFronts.context;
+      if (shapesContext === null || frontsContext === null || snowContext === null) return false;
       const leaning = lean !== 0;
       if (leaning) {
         flat ??= { canvas: document.createElement('canvas'), context: null };
@@ -538,13 +684,24 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       // and then copied row by row, each row moved by its own whole art pixel shift.
       sizeTo(shapes.canvas, bw * k, bh * k);
       shapesContext.clearRect(0, 0, bw * k, bh * k);
+      // The flakes behind the glass centre, and Santa while he is behind it, lie under the faces: they are drawn first, unshifted,
+      // into an image of the box at the screen's size, so a leaning frame moves them with the rows of the flat copy.
+      const boxLayout: SceneLayout = { ...layout, height: bh, globe: { ...layout.globe, cx: cx - box.left, cy: cy - box.top } };
+      colours = colourBuffer(colours, bw * k * bh * k);
+      colours.fill(NO_FRONT);
+      renderSnowSteps(colours, bw, boxLayout, snowBehind, k);
+      const behindDirty = unionOf(snowDirty(snowBehind, cx - box.left, cy - box.top, k, bw * k, bh * k), behind === undefined ? null : overlayFigures(colours, behind, width, box, bw, k));
+      behindPixels = pixelsFor(shapesContext, bw * k, bh * k, behindPixels);
+      if (behindDirty !== null) wordsFrom(colours, behindPixels.words, bw * k, behindDirty);
       if (!leaning) {
+        putDirty(shapesContext, behindPixels.image, behindDirty);
         paintFaces(shapesContext, steps, clips, k, ox, oy, bitmaps);
       } else {
         const flatLayer = flat as Layer;
         const flatContext = flatLayer.context as CanvasRenderingContext2D;
         sizeTo(flatLayer.canvas, bw * k, bh * k);
         flatContext.clearRect(0, 0, bw * k, bh * k);
+        putDirty(flatContext, behindPixels.image, behindDirty);
         paintFaces(flatContext, steps, clips, k, ox, oy, bitmaps);
         shapesContext.imageSmoothingEnabled = false;
         for (let y = box.top; y < box.bottom; y++) {
@@ -554,7 +711,7 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       }
       place(shapes.canvas, x0, y0, bw * css, bh * css);
 
-      // Santa and the snow in front: what they drew, sheared by the same row shifts as the glass.
+      // Santa in front: what he drew, sheared by the same row shifts as the glass.
       sizeTo(fronts.canvas, bw, bh);
       frontPixels = pixelsFor(frontsContext, bw, bh, frontPixels);
       const frontWords = frontPixels.words;
@@ -571,6 +728,21 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       }
       frontsContext.putImageData(frontPixels.image, 0, 0);
       place(fronts.canvas, x0, y0, bw * css, bh * css);
+
+      // The flakes in front, on the screen's pixel grid over Santa: each one moved by its row's whole art pixel shift, as the glass is.
+      // A whole art pixel shift is a whole number of screen pixels, so the flake's own screen pixel moves by the same amount.
+      const frontSteps = lean === 0 ? snowFront : leanedSteps(leaned, snowFront, lean, box.bottom, cy);
+      sizeTo(snowFronts.canvas, bw * k, bh * k);
+      snowPixels = pixelsFor(snowContext, bw * k, bh * k, snowPixels);
+      snowContext.clearRect(0, 0, bw * k, bh * k);
+      const frontDirty = snowDirty(frontSteps, cx - box.left, cy - box.top, k, bw * k, bh * k);
+      if (frontDirty !== null) {
+        colours.fill(NO_FRONT);
+        renderSnowSteps(colours, bw, boxLayout, frontSteps, k);
+        wordsFrom(colours, snowPixels.words, bw * k, frontDirty);
+        putDirty(snowContext, snowPixels.image, frontDirty);
+      }
+      place(snowFronts.canvas, x0, y0, bw * css, bh * css);
       return true;
     },
   };

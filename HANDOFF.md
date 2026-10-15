@@ -123,3 +123,5 @@ Process reminders for this reset: use the `scene-artist` agent for art (give it 
 | XMAS-80 | 1 | approve with nits | nit x3 (test asserts equal inputs; stale comment; unused 'bodies' part) - fixed, no re-review lane=full |
 | XMAS-81 | 1 | changes needed | bug x1 (canvas anti-aliasing left partly opaque seams between house faces), test-gap x1 (no browser seam test), nit x2 (per-frame allocations; no-2d-context fallback) |
 | XMAS-81 | 2 | approve with nits | nit x1 (no test for a face squashed past the 64 drawing-pixel stretch cap in `stretchOf`) - left, lane=full |
+| XMAS-84 | 1 | changes needed | bug x1 (no-2d-context fallback drew flakes over Santa and the shapes, unshifted by the lean), test-gap x2 (fake context could not order behind snow before faces; no test for snowBefore blend wiring), nit x3 (dead `snow` param; per-frame copies; arms take the centre row's shift) lane=full |
+| XMAS-84 | 2 | approve | no findings; dead `snow` param and vi.mock in scene.test.ts left lane=full |

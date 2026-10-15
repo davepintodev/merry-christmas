@@ -4,7 +4,12 @@
 // on import; here the browser bits it touches are stand-ins, the loop is
 // captured instead of run, and the frame source records what it is asked for.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SceneInput } from '../scene/frame.ts';
+import { leanBox } from '../scene/lean.ts';
+import { rowShift } from '../scene/lean.ts';
+import { sceneLayout, type SceneInput } from '../scene/frame.ts';
+import { snowDrawList, type SnowStep as DrawnFlake } from '../scene/snow-draw-list.ts';
+import type { GlobeSnow } from '../scene/snow.ts';
+import type { FineFrame } from './fine-layer.ts';
 import { GLOBE_SNOW } from '../scene/snow.ts';
 import { DRAG_SETTINGS } from './drag.ts';
 import type { LoopScene } from './loop.ts';
@@ -19,6 +24,11 @@ const captured = vi.hoisted(() => ({
   snowSteps: [] as SnowStep[],
   listenersAtLoopStart: -1,
   loopStarts: 0,
+  /** XMAS-84: draw with the real frame source, and a stand-in fine layer that records its frames. */
+  realFrames: false,
+  fineResult: true,
+  fineFrames: [] as unknown[],
+  puts: [] as Uint8ClampedArray[],
 }));
 
 const canvasRef = vi.hoisted(() => ({ current: null as null | { listenerCount(): number } }));
@@ -49,14 +59,27 @@ vi.mock('./snow-runtime.ts', async (importOriginal) => {
   };
 });
 
+vi.mock('./fine-layer.ts', () => ({
+  makeFineLayer: () => ({
+    draw: (frame: unknown) => {
+      captured.fineFrames.push(frame);
+      return captured.fineResult;
+    },
+  }),
+}));
+
 vi.mock('./frames.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./frames.ts')>();
   return {
     ...actual,
-    makeFrameSource: () => (input: SceneInput, target?: Uint32Array) => {
+    makeFrameSource: () => {
+      const real = actual.makeFrameSource();
+      return (input: SceneInput, target?: Uint32Array) => {
       captured.inputs.push({ ...input });
+      if (captured.realFrames) return real(input, target);
       const picture = target ?? new Uint32Array(input.width * input.height);
       return { width: input.width, height: input.height, picture, layout: undefined as never };
+      };
     },
   };
 });
@@ -79,7 +102,7 @@ class FakeCanvas {
   height = 0;
   style = { width: '', height: '' };
   readonly listeners = new Map<string, Set<Listener>>();
-  getContext = () => ({ putImageData: () => undefined });
+  getContext = () => ({ putImageData: (image: FakeImageData) => void captured.puts.push(Uint8ClampedArray.from(image.data)) });
   addEventListener(type: string, listener: Listener): void {
     const set = this.listeners.get(type) ?? new Set<Listener>();
     set.add(listener);
@@ -119,6 +142,10 @@ beforeEach(() => {
   captured.inputs = [];
   vi.resetModules();
   captured.snowSteps = [];
+  captured.realFrames = false;
+  captured.fineResult = true;
+  captured.fineFrames = [];
+  captured.puts = [];
   captured.listenersAtLoopStart = -1;
   captured.loopStarts = 0;
   nowMs = 0;
@@ -532,5 +559,124 @@ describe('the snow gets the stir and the push, once per step', () => {
     dragBy(18, 0, 0.1); // 180 art px/s
     scene.step();
     expect(lastSnow().raise ?? 0).toBeCloseTo(18 * DRAG_SETTINGS.stirPerPixel, 9);
+  });
+});
+
+// XMAS-84 "Snow inside the glass on the fine layer", page wiring: the flakes go to the
+// fine layer as draw steps blended between the last two steps, and when the fine layer
+// has no 2d context they go on the scene canvas in the right order and with the lean.
+describe('the scene page draws the globe snow (XMAS-84)', () => {
+  const copy = (snow: GlobeSnow | undefined): GlobeSnow => JSON.parse(JSON.stringify(snow)) as GlobeSnow;
+  const xy = (steps: readonly DrawnFlake[]): number[][] => steps.map((s) => [s.x, s.y]);
+  const lastFine = (): FineFrame => {
+    const frame = captured.fineFrames[captured.fineFrames.length - 1] as FineFrame | undefined;
+    if (frame === undefined) expect.fail('the fine layer was not drawn');
+    return frame;
+  };
+
+  it('with two steps of snow draws the flakes blended by the fraction between the last two steps', async () => {
+    captured.realFrames = true;
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const before = copy(last().snow);
+    scene.step();
+    scene.draw(0.5);
+    const now = copy(last().snow);
+    const fine = lastFine();
+    for (const side of ['behind', 'front'] as const) {
+      const got = side === 'behind' ? fine.snowBehind : fine.snowFront;
+      const want = snowDrawList(now, before, 0.5, side);
+      expect(want.length).toBeGreaterThan(0);
+      expect(xy(got ?? [])).toEqual(xy(want));
+      // The blend is not the current place: the flakes did move between the steps.
+      expect(xy(got ?? [])).not.toEqual(xy(snowDrawList(now, undefined, 0.5, side)));
+    }
+  });
+
+  it('draws the step before the last at fraction 0 and the last at fraction 1', async () => {
+    captured.realFrames = true;
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const before = copy(last().snow);
+    scene.step();
+    scene.draw(0);
+    const now = copy(last().snow);
+    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, before, 0, 'front')));
+    scene.draw(1);
+    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, before, 1, 'front')));
+  });
+
+  it('with only one step of snow draws the flakes at the current position, whatever the fraction', async () => {
+    captured.realFrames = true;
+    const scene = await loadScene();
+    scene.step();
+    scene.draw(0.5);
+    const now = copy(last().snow);
+    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, undefined, 0.5, 'front')));
+    expect(xy(lastFine().snowBehind ?? [])).toEqual(xy(snowDrawList(now, undefined, 0.5, 'behind')));
+  });
+
+  it('with no step yet draws no flakes', async () => {
+    captured.realFrames = true;
+    const scene = await loadScene();
+    scene.draw();
+    expect(lastFine().snowBehind ?? []).toEqual([]);
+    expect(lastFine().snowFront ?? []).toEqual([]);
+  });
+
+  describe('with no 2d context on the fine layer', () => {
+    const BEHIND = 0xaebcf0;
+    const WHITE = 0xffffff;
+    const pixel = (rgba: Uint8ClampedArray, width: number, x: number, y: number): number => ((rgba[(y * width + x) * 4] ?? 0) << 16) | ((rgba[(y * width + x) * 4 + 1] ?? 0) << 8) | (rgba[(y * width + x) * 4 + 2] ?? 0);
+    const lastPut = (): Uint8ClampedArray => captured.puts[captured.puts.length - 1] ?? expect.fail('nothing was put on the scene canvas');
+
+    /** Steps once, then sets every flake to one given flake, in place, and draws twice (the first frame leaves the shape bodies out). */
+    async function drawWith(flake: { x: number; y: number; z: number }, lean = false): Promise<{ input: SceneInput; rgba: Uint8ClampedArray }> {
+      captured.realFrames = true;
+      captured.fineResult = false;
+      const scene = await loadDragScene();
+      if (lean) {
+        dragBy(40, 0, 0.3, 10, false);
+        for (let n = 0; n < 6; n++) scene.step();
+      } else scene.step();
+      scene.draw();
+      const flakes = last().snow?.flakes ?? expect.fail('no snow');
+      flakes.forEach((f, i) => {
+        f.resting = false;
+        // Only the first flake is the one under test; the rest sit far outside the glass.
+        Object.assign(f, i === 0 ? flake : { x: 5000, y: 5000, z: flake.z });
+      });
+      scene.draw();
+      return { input: last(), rgba: lastPut() };
+    }
+
+    it('lets a shape cover a flake behind the glass centre', async () => {
+      const { input, rgba } = await drawWith({ x: 0, y: 0, z: -10 });
+      const layout = sceneLayout(input.width, input.height, 1);
+      const { rgba: bare } = await drawWith({ x: 5000, y: 0, z: -10 });
+      const at = [layout.globe.cx, layout.globe.cy] as const;
+      expect(pixel(bare, input.width, ...at), 'a shape is at the centre of the glass').not.toBe(BEHIND);
+      expect(pixel(rgba, input.width, ...at), 'the flake behind does not paint over the shape').toBe(pixel(bare, input.width, ...at));
+    });
+
+    it('draws a flake in front of the glass centre over what is there', async () => {
+      const { input, rgba } = await drawWith({ x: 0, y: 0, z: 10 });
+      const layout = sceneLayout(input.width, input.height, 1);
+      expect(pixel(rgba, input.width, layout.globe.cx, layout.globe.cy)).toBe(WHITE);
+    });
+
+    it('shifts a flake with the rows of the leaning glass, as the glass moves', async () => {
+      const { input, rgba } = await drawWith({ x: 10, y: -5, z: 10 }, true);
+      const layout = sceneLayout(input.width, input.height, 1);
+      const lean = input.lean ?? 0;
+      const row = Math.floor(layout.globe.cy - 5);
+      const shift = rowShift(lean, leanBox(input.width, layout).bottom, row);
+      expect(Math.abs(shift), 'the lean moves this row').toBeGreaterThanOrEqual(1);
+      const x = Math.floor(layout.globe.cx + 10);
+      expect(pixel(rgba, input.width, x + shift, row)).toBe(WHITE);
+      expect(pixel(rgba, input.width, x, row)).not.toBe(WHITE);
+    });
   });
 });
