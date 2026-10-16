@@ -6,13 +6,12 @@ of every file.
 
 ## Specs
 
-- XMAS-21 "Build-ready spec for the Christmas countdown site": TypeScript in
-  strict mode, Vite, Vitest and Playwright, driven by pnpm. No rendering
-  library and no web font. Layout: `index.html`, `src/countdown/`,
-  `src/scene/`, `src/page/`, `src/shared/`, `art/sheets/`, `art/colours.ts`,
-  `tools/`, `tests/frames/`, `tests/browser/`, `tests/repo/`.
-- XMAS-16 "Glossary for the Christmas countdown site": shared names for the
-  countdown domain; it grows as features land.
+- `.scratchpad/spec.md` (private) holds the build-ready spec (formerly XMAS-21)
+  and the glossary (formerly XMAS-16): TypeScript in strict mode, Vite, Vitest
+  and Playwright, driven by pnpm. No rendering library and no web font.
+  Layout: `index.html`, `src/countdown/`, `src/scene/`, `src/page/`,
+  `src/shared/`, `art/sheets/`, `art/colours.ts`, `tools/`, `tests/frames/`,
+  `tests/browser/`, `tests/repo/`.
 - Art: every sheet is drawn to the rules in [art/STYLE.md](art/STYLE.md); the
   object list with each drawing's sheet, name and size is
   [art/objects.ts](art/objects.ts).
@@ -48,3 +47,10 @@ of every file.
 
 ## Golden test file
 New unit tests follow `src/page/loop-observer.test.ts`: a hand-written fake that implements the real interface, a clock the test drives, and no `vi.mock`. Run one file with `pnpm vitest run <file> --reporter=dot --bail=1`.
+
+<!-- scratchpad-init:begin -->
+## Working rules
+
+- Plan, state, spec and reference live in `.scratchpad/` (private, gitignored). Read `.scratchpad/STATE.md` first. Tickets are files in `.scratchpad/backlog/`. There is no plan store and no handoff file.
+- Work in the main checkout. Do not create git worktrees.
+<!-- scratchpad-init:end -->
