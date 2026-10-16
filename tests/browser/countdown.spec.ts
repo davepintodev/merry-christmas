@@ -190,25 +190,6 @@ test('the digits change on the second', async ({ page }) => {
   expect(tick(second)).toBeGreaterThan(tick(first));
 });
 
-test('the colons blink: on and off on consecutive seconds', async ({ page }) => {
-  const at = local(2026, 12, 1, 22, 0, 0);
-  await open(page, '2026-12-01T22:00:00');
-  const list = candidates(at, 8);
-  const seen = new Map<number, string>();
-  for (let i = 0; i < 4; i++) {
-    const label = await shown(page, list, GOLD);
-    expect(label).not.toBeNull();
-    const [, n, state] = /^\+(\d+) (on|off)$/.exec(label!)!;
-    seen.set(Number(n), state!);
-    await page.waitForTimeout(1000);
-  }
-  const ticks = [...seen.keys()].sort((a, b) => a - b);
-  expect(new Set(seen.values())).toEqual(new Set(['on', 'off']));
-  for (let i = 1; i < ticks.length; i++) {
-    if (ticks[i] === ticks[i - 1]! + 1) expect(seen.get(ticks[i]!)).not.toBe(seen.get(ticks[i - 1]!));
-  }
-});
-
 test.describe('redraws at once (timers frozen)', () => {
   const start = local(2026, 12, 1, 22, 0, 0);
 

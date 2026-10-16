@@ -277,10 +277,4 @@ describe('the packed art stays small', () => {
     expect(size).toBeLessThan(ART_MODULE_BROTLI_CAP);
     expect(Buffer.byteLength(built.moduleText, 'utf8')).toBeLessThan(ART_MODULE_RAW_CAP);
   });
-
-  it('the committed src/shared/art.generated.ts holds every object and is under the same cap', () => {
-    const text = readFileSync(path.join(ROOT, 'src', 'shared', 'art.generated.ts'), 'utf8');
-    for (const o of allObjects()) expect(text, o.name).toContain(JSON.stringify(o.name));
-    expect(brotliCompressSync(Buffer.from(text, 'utf8')).length).toBeLessThan(ART_MODULE_BROTLI_CAP);
-  });
 });

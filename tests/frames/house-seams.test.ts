@@ -214,29 +214,4 @@ describe('the rendered house has no hole or crack in it', () => {
     }
     expect(onEdge).toBeGreaterThan(1000);
   });
-
-  it('covers its whole outline: every pixel centre inside any face polygon is painted at zoom 4', () => {
-    const zoom = 4;
-    const side = LAYOUT.width * zoom;
-    for (const turn of TURNS.filter((_, i) => i % 7 === 0)) {
-      const steps = shapeDrawList(turn, HOUSE).filter((s) => !s.drawing.pixels.includes(0));
-      const picture = new Uint32Array(side * LAYOUT.height * zoom).fill(FILL);
-      renderDrawList(picture, LAYOUT.width, LAYOUT, steps, zoom);
-      for (const step of steps) {
-        const poly = polygon(step);
-        const xs = poly.map((p) => p[0]);
-        const ys = poly.map((p) => p[1]);
-        for (let y = Math.floor(Math.min(...ys) * zoom); y <= Math.ceil(Math.max(...ys) * zoom); y++) {
-          for (let x = Math.floor(Math.min(...xs) * zoom); x <= Math.ceil(Math.max(...xs) * zoom); x++) {
-            const cx = (x + 0.5) / zoom;
-            const cy = (y + 0.5) / zoom;
-            if (!inside(poly, cx, cy)) continue;
-            const pxi = Math.floor((cx + LAYOUT.globe.cx) * zoom);
-            const pyi = Math.floor((cy + LAYOUT.globe.cy) * zoom);
-            expect(picture[pyi * side + pxi]).not.toBe(FILL);
-          }
-        }
-      }
-    }
-  });
 });

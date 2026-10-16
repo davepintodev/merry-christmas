@@ -6,12 +6,15 @@ of every file.
 
 ## Specs
 
-- `.scratchpad/spec.md` (private) holds the build-ready spec (formerly XMAS-21)
-  and the glossary (formerly XMAS-16): TypeScript in strict mode, Vite, Vitest
-  and Playwright, driven by pnpm. No rendering library and no web font.
-  Layout: `index.html`, `src/countdown/`, `src/scene/`, `src/page/`,
-  `src/shared/`, `art/sheets/`, `art/colours.ts`, `tools/`, `tests/frames/`,
+- XMAS-21 "Build-ready spec for the Christmas countdown site", in
+  `.scratchpad/spec.md` (private): TypeScript in strict mode, Vite, Vitest and
+  Playwright, driven by pnpm. No rendering library and no web font. Layout:
+  `index.html`, `src/countdown/`, `src/scene/`, `src/page/`, `src/shared/`,
+  `art/sheets/`, `art/colours.ts`, `tools/`, `tests/frames/`,
   `tests/browser/`, `tests/repo/`.
+- XMAS-16 "Glossary for the Christmas countdown site", in the same file under
+  `## Glossary`: shared names for the countdown domain; it grows as features
+  land.
 - Art: every sheet is drawn to the rules in [art/STYLE.md](art/STYLE.md); the
   object list with each drawing's sheet, name and size is
   [art/objects.ts](art/objects.ts).
