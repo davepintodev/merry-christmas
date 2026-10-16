@@ -31,7 +31,8 @@ function steady(phase: PhaseName): PhaseReading {
 }
 
 function input(over: Partial<SceneInput> = {}): SceneInput {
-  return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, ...over };
+  // The plain sky and ground: the backdrop (XMAS-70) has its own tests in backdrop.test.ts.
+  return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
 }
 
 function hexNum(hex: string): number {

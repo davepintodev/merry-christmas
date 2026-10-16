@@ -626,7 +626,7 @@ export interface SnowFlakes {
 export const NO_FRONT = 0xffffffff;
 
 /**
- * Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). `parts` of 'shadows' leaves the shapes' bodies out, and Santa with them, and 'none' the floor shadows too, as the page's fine layer draws them (XMAS-80, XMAS-82, XMAS-83). `snow` is not drawn here: the page draws the flakes as steps on the screen's pixel grid (XMAS-84), so the picture is the same with or without it. `flakes`, when given, are drawn into `picture` at one pixel to an art pixel before the lean, so it shifts them with the glass: the ones behind under Santa and the shapes, the ones in front over them (the page's fallback without a fine layer).
+ * Draws the globe centred on layout.globe, Santa flying round inside it at `time` (ms), leaning by `lean` radians (0 stands it upright), and its base under it, into picture (width art pixels across). `parts` of 'shadows' leaves the shapes' bodies out, and Santa with them, and 'none' the floor shadows too, as the page's fine layer draws them (XMAS-80, XMAS-82, XMAS-83). `snow` is not drawn here: the page draws the flakes as steps on the screen's pixel grid (XMAS-84), so the picture is the same with or without it. `flakes`, when given, are drawn into `picture` at one pixel to an art pixel before the lean, so it shifts them with the glass: the ones behind under Santa and the shapes, the ones in front over them (the page's fallback without a fine layer). `leanUnder`, for a lean, is the picture as it lies under the glass, to show where the glass has left (see keepBackdrop).
  */
 export function drawGlobe(
   picture: Uint32Array,
@@ -639,6 +639,7 @@ export function drawGlobe(
   lean = 0,
   parts: ShapeParts = 'all',
   flakes?: SnowFlakes,
+  leanUnder?: Uint32Array,
 ): void {
   const base = drawings['base'];
   if (base === undefined) throw new Error('the Base sheet has no base drawing');
@@ -647,7 +648,7 @@ export function drawGlobe(
   const boxX = layout.globe.cx - base.width / 2;
   const boxY = layout.groundTop;
   const isBehind = santaPlacement(spin, time).depth <= 0;
-  if (lean !== 0) keepBackdrop(picture, width, layout);
+  if (lean !== 0) keepBackdrop(picture, width, layout, leanUnder);
   paintGlass(picture, width, layout, glass);
   // The reflections lie on the glass, but under Santa and the shapes, whose own colours never tint.
   paintReflections(picture, width, layout, glass, spin);

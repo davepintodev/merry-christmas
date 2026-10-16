@@ -9,6 +9,8 @@ import { mixHex, skyAndInk } from '../countdown/colours.ts';
 import { countdownFrame } from '../countdown/render.ts';
 import { drawings } from '../shared/art.generated.ts';
 import { SKY_ABOVE } from '../shared/sky.ts';
+import { pictureWithOpenBackdrop } from './backdrop-lean.ts';
+import { type Backdrop, backdropFor, covered, paintBackdrop, random } from './backdrop.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { drawGlobe, type SnowFlakes } from './globe.ts';
@@ -85,6 +87,8 @@ export interface SceneInput {
   outsideSnow?: OutsideSnow;
   /** Whether the shapes' bodies, and Santa with them, are drawn (XMAS-80, XMAS-83); absent or true draws them, false leaves them out, and their floor shadows too (XMAS-82): the page's fine layer draws the shadows, bodies, Santa and the snow on the screen's pixel grid. */
   shapeBodies?: boolean;
+  /** Whether the backdrop (clouds, hills, pines, floor details and scenery; XMAS-70) is drawn; absent or true draws it, false leaves the plain sky and ground, which the sky and ground tests measure. */
+  backdrop?: boolean;
 }
 
 export interface SceneFrame {
@@ -155,6 +159,9 @@ const STAR_STRENGTH: Record<PhaseName, number> = {
   sunset: 0.35,
   'purple-night': 1,
 };
+/** The colours the outside snow's flakes blend toward in the sky and on the ground (XMAS-57): violet at night, pale and warm-white by day, so no flake reads as a purple star on a bright sky. */
+const FLAKE_SKY: Record<PhaseName, string> = { dawn: '#d9c8ee', 'frosty-morning': '#ffffff', sunset: '#f6cfdc', 'purple-night': '#8f8ad0' };
+const FLAKE_GROUND: Record<PhaseName, string> = { dawn: '#ffffff', 'frosty-morning': '#ffffff', sunset: '#ffffff', 'purple-night': '#b9c3ee' };
 /** The colour the sheet's disc warms towards: a moon at night, a sun by day. */
 const SUN_COLOUR = '#fff3b0';
 const SUN_SHARE: Record<PhaseName, number> = {
@@ -171,21 +178,9 @@ const DISC_BODY: Record<PhaseName, string> = {
   'purple-night': '#d6e6f8',
 };
 /** About one star per this many sky pixels, from the seed. */
-const SKY_PER_STAR = 1200;
+const SKY_PER_STAR = 800;
 /** Star placement tries this many times per wanted star before giving up. */
 const STAR_TRIES = 40;
-
-/** A seeded PRNG (mulberry32); the only randomness the scene has. */
-function random(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /** True when one of the eight neighbours of (x, y) already holds a star. */
 function touches(taken: ReadonlySet<number>, width: number, x: number, y: number): boolean {
@@ -415,15 +410,23 @@ function paintDisc(picture: Uint32Array, layout: SceneLayout, reading: PhaseRead
   }
 }
 
-/** Each lit star's one art pixel: the colour of the sky row it sits on (sky holds one colour per row), mixed towards the phase's star colour. */
-function paintStars(picture: Uint32Array, layout: SceneLayout, input: SceneInput, share: number, sky: readonly string[]): void {
+/** Every this-many-th star is a bright one (XMAS-70): still one art pixel, shown at full strength where the others are dimmer. */
+const BRIGHT_EVERY = 4;
+const DIM_SHARE = 0.55;
+
+/**
+ * Each lit star's one art pixel: the colour of the sky row it sits on (sky holds one colour per row), mixed
+ * towards the phase's star colour. Stars never light over clouds, hills or pines.
+ */
+function paintStars(picture: Uint32Array, layout: SceneLayout, input: SceneInput, share: number, sky: readonly string[], backdrop: Backdrop | undefined): void {
   const strength = (1 - share) * STAR_STRENGTH[input.phase.from] + share * STAR_STRENGTH[input.phase.to];
   if (strength === 0) return;
   const target = mixHex(override(input.phase.from, STAR_COLOUR), override(input.phase.to, STAR_COLOUR), share);
   layout.stars.forEach((star, index) => {
-    if (!twinkles(index, input.time)) return;
+    if (!twinkles(index, input.time) || (backdrop !== undefined && covered(backdrop, star.x, star.y))) return;
     const row = sky[star.y] ?? STAR_COLOUR;
-    picture[star.y * layout.width + star.x] = colourNumber(mixHex(row, target, strength));
+    const amount = index % BRIGHT_EVERY === 0 ? strength : strength * DIM_SHARE;
+    picture[star.y * layout.width + star.x] = colourNumber(mixHex(row, target, amount));
   });
 }
 
@@ -463,13 +466,24 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   for (let y = groundTop; y < height; y++) {
     picture.fill(y < groundTop + GROUND_SHADOW_ROWS ? shadow : snow, y * width, (y + 1) * width);
   }
+  // Clouds, hills and pines (XMAS-70) stand on the sky and ground, behind the outside snow and the globe.
+  const backdrop = input.backdrop === false ? undefined : backdropFor(layout);
+  if (backdrop !== undefined) paintBackdrop(picture, backdrop, from, to, share);
   // The outside snow falls behind the globe, so the glass and objects cover it.
-  if (input.outsideSnow !== undefined) drawOutsideSnow(picture, width, layout, input.outsideSnow, input.time);
+  if (input.outsideSnow !== undefined) drawOutsideSnow(picture, width, layout, input.outsideSnow, input.time, {
+      sky: colourNumber(mixHex(FLAKE_SKY[from], FLAKE_SKY[to], share)),
+      ground: colourNumber(mixHex(FLAKE_GROUND[from], FLAKE_GROUND[to], share)),
+    });
   // The stars lie behind the globe too: a leaning glass covers them and shows them where it has left.
-  paintStars(picture, layout, input, share, sky);
+  paintStars(picture, layout, input, share, sky, backdrop);
   // The globe sits on the ground's first row, on its base.
   const parts: ShapeParts = input.shapeBodies === false ? 'none' : 'all';
-  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts, parts === 'all' ? input.snowSteps : undefined);
+  // A leaning glass shows the backdrop where it has left the upright glass: keep a copy that has it there too.
+  let leanUnder: Uint32Array | undefined;
+  if ((input.lean ?? 0) !== 0 && backdrop !== undefined) {
+    leanUnder = pictureWithOpenBackdrop(picture, layout, from, to, share);
+  }
+  drawGlobe(picture, width, layout, input.phase, input.turn ?? 0, input.time, input.snow, input.lean ?? 0, parts, parts === 'all' ? input.snowSteps : undefined, leanUnder);
   paintDisc(picture, layout, input.phase, share);
   paintHint(picture, layout, BASE_HEIGHT);
 }

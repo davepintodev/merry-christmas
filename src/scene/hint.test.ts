@@ -41,7 +41,7 @@ const READINGS: PhaseReading[] = [
 ];
 
 function input(over: Partial<SceneInput> = {}): SceneInput {
-  return { time: 1_000_000, drag: 0, phase: steady('purple-night'), seed: SEED, width: 130, height: 260, ...over };
+  return { time: 1_000_000, drag: 0, phase: steady('purple-night'), seed: SEED, width: 130, height: 260, backdrop: false, ...over };
 }
 
 function at(f: SceneFrame, x: number, y: number): number {

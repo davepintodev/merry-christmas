@@ -19,7 +19,7 @@ function steady(phase: PhaseName): PhaseReading {
 }
 
 function input(over: Partial<SceneInput> = {}): SceneInput {
-  return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, ...over };
+  return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
 }
 
 function at(f: SceneFrame, x: number, y: number): number {
@@ -124,7 +124,9 @@ describe('lean direction and size', () => {
     // The rim's left edge in a row near the bottom of the glass, by the first column differing from the sky.
     const edge = (f: SceneFrame, y: number): number => {
       const sky = at(f, 0, y);
-      for (let x = cx - GLOBE_RADIUS - 90; x < cx; x++) if (at(f, x, y) !== sky) return x;
+      // A star lying in the row is not the rim.
+      const stars = new Set(f.layout.stars.map((star) => `${star.x},${star.y}`));
+      for (let x = cx - GLOBE_RADIUS - 90; x < cx; x++) if (at(f, x, y) !== sky && !stars.has(`${x},${y}`)) return x;
       return -1;
     };
     const lowRow = cy + GLOBE_RADIUS - 6;

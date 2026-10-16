@@ -37,9 +37,11 @@ const STEP_SECONDS = 1 / 60;
 const SWAY = 1 / 30;
 /** A flake below this row (px) wraps back to the top. */
 const WRAP_BELOW = 2;
-/** The dim colours the flakes blend toward: sky, then ground from the ground line down. */
+/** The dim colours the flakes blend toward: sky, then ground from the ground line down (the default: Purple night's). */
 const SKY_FLAKE = 0x8f8ad0;
 const GROUND_FLAKE = 0xb9c3ee;
+/** The two flake colours a picture draws with (XMAS-57: by day they are pale, not the night's violet). */
+export interface FlakeColours { sky: number; ground: number }
 /** A sparkle's four tips draw at this share of the flake's full colour. */
 const TIP_SHARE = 0.4;
 /** Depth above which a flake tumbles between a plus and an X, and above which it sparkles. */
@@ -175,11 +177,12 @@ export function drawOutsideSnow(
   layout: SceneLayout,
   snow: OutsideSnow,
   time: number,
+  flakeColours: FlakeColours = { sky: SKY_FLAKE, ground: GROUND_FLAKE },
 ): void {
   for (const f of snow.flakes) {
     const x = Math.floor(f.x);
     const y = Math.floor(f.y);
-    const colour = y >= layout.groundTop ? GROUND_FLAKE : SKY_FLAKE;
+    const colour = y >= layout.groundTop ? flakeColours.ground : flakeColours.sky;
     const shape = f.d > SPARKLE_FROM ? SPARKLE : f.d > TUMBLE_FROM ? tumbleShape(f, time) : SINGLE;
     for (const [dx, dy, share] of shape) {
       blendPixel(picture, width, layout.height, x + dx, y + dy, colour, share);

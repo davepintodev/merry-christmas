@@ -70,7 +70,7 @@ function steady(phase: PhaseName): PhaseReading {
 }
 
 function input(over: Partial<SceneInput> = {}): SceneInput {
-  return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, ...over };
+  return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
 }
 
 /** The XMAS-31 picture for the same input: sky, ground, disc and stars, no globe. */

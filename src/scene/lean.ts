@@ -56,11 +56,11 @@ function copyBox(picture: Uint32Array, width: number, box: LeanBox, into: Uint32
   }
 }
 
-/** Keeps what lies under the glass, so a leaning glass can show it where the glass has left. Call before the glass is painted; leanGlass needs it for the same layout and width. */
-export function keepBackdrop(picture: Uint32Array, width: number, layout: SceneLayout): void {
+/** Keeps what lies under the glass, so a leaning glass can show it where the glass has left. Call before the glass is painted; leanGlass needs it for the same layout and width. `under`, when given, is kept instead of the picture: the same picture with the backdrop also painted where the glass stands (XMAS-70), which the painted glass never shows. */
+export function keepBackdrop(picture: Uint32Array, width: number, layout: SceneLayout, under: Uint32Array = picture): void {
   const box = leanBox(width, layout);
   backdrop = holding(backdrop, (box.right - box.left + 1) * (box.bottom - box.top));
-  copyBox(picture, width, box, backdrop);
+  copyBox(under, width, box, backdrop);
   keptLayout = layout;
   keptWidth = width;
 }
