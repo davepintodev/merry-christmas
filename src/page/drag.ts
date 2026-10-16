@@ -104,7 +104,7 @@ export function createDrag(initialTurn = 0, settings: Partial<typeof DRAG_SETTIN
       const dy = y - lastY;
       requireFinite('movement x', dx);
       requireFinite('movement y', dy);
-      turn += dx * S.turnPerPixel;
+      turn -= dx * S.turnPerPixel;
       raise += Math.hypot(dx, dy) * S.stirPerPixel;
       pushX += dx * S.pushPerPixel;
       pushY += dy * S.pushPerPixel;

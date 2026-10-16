@@ -571,7 +571,7 @@ test.describe('the faces of the house meet with no seam', () => {
       const scene = await rect(page, 'canvas#scene');
       const css = scale / dpr;
       const from = { x: scene.x + layout.globe.cx * css, y: scene.y + layout.globe.cy * css };
-      // The turn is known: it starts at src/page/scene.ts's START_TURN and each art pixel dragged sideways adds turnPerPixel.
+      // The turn is known: it starts at src/page/scene.ts's START_TURN and each art pixel dragged leftward adds turnPerPixel (rightward subtracts it).
       let turn = 0.5;
       let seams = 0;
       let partial = 0;
@@ -580,7 +580,7 @@ test.describe('the faces of the house meet with no seam', () => {
       for (const dx of [23, 41, -37, 58, -19, 77]) {
         await page.mouse.move(from.x, from.y);
         await page.mouse.down();
-        for (let k = 1; k <= 4; k++) await page.mouse.move(from.x + (dx * css * k) / 4, from.y);
+        for (let k = 1; k <= 4; k++) await page.mouse.move(from.x - (dx * css * k) / 4, from.y);
         await page.mouse.up();
         turn += dx * DRAG_SETTINGS.turnPerPixel;
         // The lean springs back upright (about e^-3t): wait until its shift is under half an art pixel everywhere.

@@ -37,12 +37,14 @@ of every file.
 
 ## Visual work
 
-- Before asking the owner to review anything visual (art, colours, layout,
-  text), take screenshots of the real result and look at every one yourself:
-  each changed picture, every phase, and both a wide and a phone-width view.
-  Fix what you see (clipping, touching edges, wrong colours, stale or error
-  banners, old and new mixed up) before asking. Say in the hand-back which
-  screenshots you checked and what you found and fixed.
+- Visual work is checked on a live dev prototype, not on screenshots. Before
+  asking the owner to review anything visual (art, colours, layout, text),
+  start the dev server on a network address (`HOST=<address> pnpm dev`; see the
+  commands above) with the change in it, and open that page yourself in a
+  wide and a phone-width view, in every phase. Fix what you see (clipping,
+  touching edges, wrong colours, stale or error banners, old and new mixed up)
+  before asking. Give the owner the live address, and say in the hand-back what
+  you checked and what you found and fixed.
 
 ## Golden test file
 New unit tests follow `src/page/loop-observer.test.ts`: a hand-written fake that implements the real interface, a clock the test drives, and no `vi.mock`. Run one file with `pnpm vitest run <file> --reporter=dot --bail=1`.

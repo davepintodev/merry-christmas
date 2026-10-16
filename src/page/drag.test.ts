@@ -65,11 +65,11 @@ describe('turning', () => {
     expect(drag.step(5).turn).toBe(1.25);
   });
 
-  it('turns in proportion to the horizontal distance, rightward positive', () => {
+  it('turns in proportion to the horizontal distance, rightward negative (it carries the front surface right, XMAS-67)', () => {
     const drag = make(1);
     drag.pointerDown(1, 10, 0, 0);
     drag.pointerMove(1, 40, 0, 0.5);
-    expect(drag.step(FRAME).turn).toBeCloseTo(1 + 30 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(1 - 30 * S.turnPerPixel, 9);
   });
 
   it('turns by the horizontal movement only: a vertical drag does not turn, a diagonal turns by its x', () => {
@@ -80,14 +80,14 @@ describe('turning', () => {
     const diagonal = make();
     diagonal.pointerDown(1, 0, 0, 0);
     diagonal.pointerMove(1, 30, 40, 0.5);
-    expect(diagonal.step(FRAME).turn).toBeCloseTo(30 * S.turnPerPixel, 9);
+    expect(diagonal.step(FRAME).turn).toBeCloseTo(-30 * S.turnPerPixel, 9);
   });
 
   it('turns the other way for a leftward drag', () => {
     const drag = make();
     drag.pointerDown(1, 50, 0, 0);
     drag.pointerMove(1, 20, 0, 0.5);
-    expect(drag.step(FRAME).turn).toBeCloseTo(-30 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(30 * S.turnPerPixel, 9);
   });
 
   it('accumulates across several moves and back-and-forth', () => {
@@ -96,7 +96,7 @@ describe('turning', () => {
     drag.pointerMove(1, 30, 0, 0.2);
     drag.pointerMove(1, 10, 0, 0.4);
     drag.pointerMove(1, 15, 0, 0.6);
-    expect(drag.step(FRAME).turn).toBeCloseTo(15 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-15 * S.turnPerPixel, 9);
   });
 
   it('keeps the turn after release and starts the next drag from it', () => {
@@ -108,7 +108,7 @@ describe('turning', () => {
     expect(drag.step(2).turn).toBe(held);
     drag.pointerDown(1, 100, 0, 10);
     drag.pointerMove(1, 110, 0, 11);
-    expect(drag.step(FRAME).turn).toBeCloseTo(held + 10 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(held - 10 * S.turnPerPixel, 9);
   });
 
   it('does not turn when the pointer is not down', () => {
@@ -651,7 +651,7 @@ describe('ending a drag', () => {
     drag.pointerDown(1, 0, 0, 0);
     drag.pointerMove(1, 20, 0, 1);
     drag.pointerCancel(1);
-    expect(drag.step(FRAME).turn).toBeCloseTo(20 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-20 * S.turnPerPixel, 9);
   });
 
   it('ignores an up, cancel or move for an unknown pointer when nothing is down', () => {
@@ -686,7 +686,7 @@ describe('two pointers', () => {
     expect(out.turn).toBe(0);
     expect(out.raise).toBe(0);
     drag.pointerMove(1, 10, 0, 0.3);
-    expect(drag.step(FRAME).turn).toBeCloseTo(10 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-10 * S.turnPerPixel, 9);
   });
 
   it('does not end the drag when the second finger lifts', () => {
@@ -695,7 +695,7 @@ describe('two pointers', () => {
     drag.pointerDown(2, 100, 0, 0.1);
     drag.pointerUp(2, 0.2);
     drag.pointerMove(1, 10, 0, 0.3);
-    expect(drag.step(FRAME).turn).toBeCloseTo(10 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-10 * S.turnPerPixel, 9);
   });
 
   it('does not end the drag when the second finger is cancelled', () => {
@@ -704,7 +704,7 @@ describe('two pointers', () => {
     drag.pointerDown(2, 100, 0, 0.1);
     drag.pointerCancel(2);
     drag.pointerMove(1, 10, 0, 0.3);
-    expect(drag.step(FRAME).turn).toBeCloseTo(10 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-10 * S.turnPerPixel, 9);
   });
 
   it('gives no burst when a second finger lifts while the first is still', () => {
@@ -746,7 +746,7 @@ describe('two pointers', () => {
     drag.pointerMove(1, 20, 0, 0.2);
     drag.pointerUp(1, 0.3);
     drag.pointerUp(2, 0.4);
-    expect(drag.step(FRAME).turn).toBeCloseTo(20 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-20 * S.turnPerPixel, 9);
   });
 });
 
@@ -784,7 +784,7 @@ describe('invalid input', () => {
     expect(out.raise).toBe(0);
     expect(out.push).toEqual({ x: 0, y: 0, z: 0 });
     drag.pointerMove(1, 10, 0, 0.2);
-    expect(drag.step(FRAME).turn).toBeCloseTo(10 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-10 * S.turnPerPixel, 9);
   });
 
   it('leaves nothing tracked after a rejected down', () => {
@@ -794,7 +794,7 @@ describe('invalid input', () => {
     expect(drag.step(FRAME).turn).toBe(0);
     drag.pointerDown(2, 0, 0, 0.2);
     drag.pointerMove(2, 10, 0, 0.3);
-    expect(drag.step(FRAME).turn).toBeCloseTo(10 * S.turnPerPixel, 9);
+    expect(drag.step(FRAME).turn).toBeCloseTo(-10 * S.turnPerPixel, 9);
   });
 
   it('keeps the drag going after a rejected up, with no burst', () => {
@@ -805,7 +805,7 @@ describe('invalid input', () => {
     expect(() => drag.pointerUp(1, NaN)).toThrow(RangeError);
     expect(drag.step(0).raise).toBe(0);
     drag.pointerMove(1, 50, 0, 0.1);
-    expect(drag.step(0).turn).toBeCloseTo(50 * S.turnPerPixel, 9);
+    expect(drag.step(0).turn).toBeCloseTo(-50 * S.turnPerPixel, 9);
   });
 
   it.each([NaN, Infinity, -1])('throws a RangeError for a step of %s seconds', (bad) => {

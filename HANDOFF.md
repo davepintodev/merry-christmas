@@ -45,7 +45,7 @@ State and next steps for the next session. Ticket keys are in the planning store
 
 ## VISUAL RESET (read for context; XMAS-42 onward is paused)
 
-The owner judged the live page far worse than the approved prototype (`prototype/visual-direction/`, open `?variant=B&pal=4`; not committed, lives only in the owner's main checkout) and stopped feature work until the visuals match it. Reference pictures approved one object at a time hid this. The gate for every visual ticket is now: build, serve `dist`, screenshot the whole page at 360x700 @2x (phone) and 1920x1130 @1x (laptop) with `?now=2026-10-14T12:00:00`, put them beside the prototype's shots, and show the owner before anything else.
+The owner judged the live page far worse than the approved prototype (`prototype/visual-direction/`, open `?variant=B&pal=4`; not committed, lives only in the owner's main checkout) and stopped feature work until the visuals match it. Reference pictures approved one object at a time hid this. The gate for every visual ticket is now: serve the change on a live dev prototype (`HOST=<address> pnpm dev`), check the whole page yourself at 360x700 (phone) and 1920x1130 (laptop) with `?now=2026-10-14T12:00:00` beside the prototype, and give the owner the live address before anything else. No screenshots as the gate.
 
 Done:
 - visual-reset-1 committed (`ca2f094`): `pagePixels` picks `scale` from the 112-wide globe only, so the globe fills ~86-90% of a phone; the countdown has its own `digitScale` 1..4 (largest that fits width-8); 1 blank art row above the countdown (it was clipped at the window top); the Christmas Day greeting uses a 1-row gap so it stays inside the 42-row reserved strip. Review log has both rounds.
@@ -64,7 +64,9 @@ Still wrong against the prototype (next rounds, in this order; each ends with th
 5. Countdown colours: prototype has a white drop shadow under red digits and green unit labels on Frosty morning; ours is single-ink red. Spec 6.6 contrast (4.5:1 in every phase and blend) must keep holding if this changes.
 6. Check the other phases (Dawn, Sunset, Purple night) and turned views (90/180/270) on the real page after each round, and `?now=2026-12-25T10:00:00` for the greeting.
 
-Process reminders for this reset: use the `scene-artist` agent for art (give it the prototype path and the shots); it may not edit tests, so it lists failing tests and the new values; a new test-writer then updates them; ticket-impl only for code outside art. Nothing in the repo may name hosts, home paths or machines. The owner wants to see screenshots first, before tests and review, each round. Flaky: `tests/repo/rough-art.test.ts`, `src/scene/frame.test.ts:561` under full parallel load.
+Process reminders for this reset: use the `scene-artist` agent for art (give it the prototype path and the shots); it may not edit tests, so it lists failing tests and the new values; a new test-writer then updates them; ticket-impl only for code outside art. Nothing in the repo may name hosts, home paths or machines. The owner wants to use a live dev prototype first, before tests and review, each round (not screenshots). Flaky: `tests/repo/rough-art.test.ts`, `src/scene/frame.test.ts:561` under full parallel load.
+
+- XMAS-67 done (drag direction: `turn -= dx * turnPerPixel` in `src/page/drag.ts`, so a rightward drag moves the front surface and Santa right; sign proven against `projectPoint` and `santaPlacement` in `src/scene/santa.test.ts`, browser test in `tests/browser/drag.spec.ts`; owner approved on the live dev prototype). Visual gate is now a live dev prototype, not screenshots (AGENTS.md "Visual work"). Known load flakes: colon blink test, countdown dpr 3, `?perf` worst frame.
 
 ## Review log
 
@@ -137,3 +139,4 @@ Process reminders for this reset: use the `scene-artist` agent for art (give it 
 | XMAS-85 | 2 | approve | no findings lane=full |
 | XMAS-70 | 1 | changes needed | bug x1 (leaning globe left a notch with no backdrop), test-gap x2 (no per-phase check that hills/pines/clouds differ from sky; sky, stars and lean tests all ran with the backdrop off), nit x2 lane=full |
 | XMAS-70 | 2 | approve with nits | nit x1 (1px hill-free halo around the glass not pinned by a test) - left, no re-review lane=full |
+| XMAS-67 | 1 | approve with nits | nit x1 (flick test now sums 5 samples over 1 s, threshold 1.3 to 1.2, weaker than before; said in the commit) lane=full |

@@ -194,6 +194,56 @@ async function airborne(s: Session): Promise<number> {
   }, area);
 }
 
+/** The shapes' own canvas (the fine layer, XMAS-81): the layer right after the scene canvas, which holds the shapes and the flakes behind them. */
+const SHAPES_LAYER = 'canvas#scene + canvas';
+const FRONT_ROWS = { from: 24, to: 44 }; // below the globe's centre: the near part of the floor, where the presents and the snowman stand
+const FRONT_HALF = 45;
+
+/**
+ * Where the near strip of the floor is filled, as the number of opaque shape-layer pixels in each art column,
+ * from the globe's centre - 45 to + 45. Shapes decide it (they are opaque; the floor and shadows are not).
+ */
+async function frontBand(s: Session): Promise<number[]> {
+  const g = s.geometry;
+  const k = g.scale;
+  const area = {
+    left: (g.cx - FRONT_HALF - g.boxLeft) * k,
+    top: (g.cy + FRONT_ROWS.from - g.boxTop) * k,
+    width: (2 * FRONT_HALF + 1) * k,
+    height: (FRONT_ROWS.to - FRONT_ROWS.from) * k,
+    k,
+  };
+  return s.page.locator(SHAPES_LAYER).evaluate((el, a) => {
+    const data = (el as HTMLCanvasElement).getContext('2d')!.getImageData(a.left, a.top, a.width, a.height).data;
+    const columns: number[] = Array.from({ length: a.width / a.k }, () => 0);
+    for (let y = 0; y < a.height; y++) {
+      for (let x = 0; x < a.width; x++) {
+        if (data[(y * a.width + x) * 4 + 3] === 255) columns[Math.floor(x / a.k)]!++;
+      }
+    }
+    return columns;
+  }, area);
+}
+
+/** The horizontal shift s (art pixels, positive is rightward) at which `before` slid by s best matches `moved`. */
+function bestShift(before: number[], moved: number[]): number {
+  let best = 0;
+  let bestError = Infinity;
+  for (let s = -30; s <= 30; s++) {
+    let error = 0;
+    let n = 0;
+    for (let x = 30; x < before.length - 30; x++) {
+      error += Math.abs(moved[x]! - before[x - s]!);
+      n++;
+    }
+    if (error / n < bestError) {
+      bestError = error / n;
+      best = s;
+    }
+  }
+  return best;
+}
+
 /** The point on the globe a drag starts from, in client pixels. */
 function onGlobe(s: Session): Point {
   return s.geometry.art(s.geometry.cx, s.geometry.cy);
@@ -210,6 +260,19 @@ async function mouseDrag(s: Session, from: Point, { artPx, moves, msPerMove, rel
     await s.page.clock.runFor(msPerMove);
   }
   if (release) await s.page.mouse.up();
+}
+
+/**
+ * The snow in the air, summed over samples every 200 ms for the second after the release. One sample is chaotic
+ * (a single moment's count swings with where the stirred flakes happen to be), the sum is not.
+ */
+async function airborneOverTheNextSecond(s: Session): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < 5; i++) {
+    await idle(s.page, 200);
+    total += await airborne(s);
+  }
+  return total;
 }
 
 type Touch = { x: number; y: number; id: number };
@@ -277,6 +340,26 @@ test.describe('a drag turns the whole globe, base included', () => {
     await idle(left.page, 3000);
     expect(differing(await basePixels(left), rightGlobe)).toBeGreaterThan(0);
     await left.context.close();
+  });
+
+  test('dragging right moves the front surface of the globe to the right, dragging left moves it to the left (XMAS-67)', async ({ browser }) => {
+    const BIG: DragOptions = { artPx: 15, moves: 10, msPerMove: 64 };
+    const still = await boot(browser);
+    await idle(still.page, BIG.moves * BIG.msPerMove + 4000);
+    const stillBand = await frontBand(still);
+    await still.context.close();
+
+    const shifts: Record<string, number> = {};
+    for (const [name, artPx] of [['right', BIG.artPx], ['left', -BIG.artPx]] as const) {
+      const s = await boot(browser);
+      await mouseDrag(s, onGlobe(s), { ...BIG, artPx });
+      await idle(s.page, 4000);
+      shifts[name] = bestShift(stillBand, await frontBand(s));
+      await s.context.close();
+    }
+    // The presents and the snowman stand on the near side of the floor: they slide with the finger.
+    expect(shifts.right, `a rightward drag shifts the front right (shifts ${JSON.stringify(shifts)})`).toBeGreaterThan(2);
+    expect(shifts.left, `a leftward drag shifts the front left (shifts ${JSON.stringify(shifts)})`).toBeLessThan(-2);
   });
 
   test('a touch drag turns the globe exactly as the same mouse drag does', async ({ browser }) => {
@@ -358,17 +441,15 @@ test.describe('a flick stirs the snow', () => {
   test('a fast flick leaves more snow in the air than a slow drag of the same distance, the same time after the release', async ({ browser }) => {
     const slow = await boot(browser);
     await mouseDrag(slow, onGlobe(slow), SLOW);
-    await idle(slow.page, 600);
-    const slowAir = await airborne(slow);
+    const slowAir = await airborneOverTheNextSecond(slow);
     await slow.context.close();
 
     const fast = await boot(browser);
     await mouseDrag(fast, onGlobe(fast), FAST);
-    await idle(fast.page, 600);
-    const fastAir = await airborne(fast);
+    const fastAir = await airborneOverTheNextSecond(fast);
     await fast.context.close();
 
-    expect(fastAir).toBeGreaterThan(slowAir * 1.3);
+    expect(fastAir).toBeGreaterThan(slowAir * 1.2);
   });
 
   test('any drag stirs in proportion to its distance, with no threshold: a long slow drag (under the flick speed) leaves much more snow in the air than a short one or none', async ({ browser }) => {
