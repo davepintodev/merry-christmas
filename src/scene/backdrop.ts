@@ -13,6 +13,8 @@ import {
   BELLY, BLUE, BULB, CLOUD_BODY, CLOUD_LIT, CLOUD_SHADE, FAR_HILL, FAR_PINE_LIT, FAR_PINE_SHADE, FAR_SHADE, FLOOR_LIGHT, FLOOR_SHADE, GREEN, MID_HILL,
   MID_RIM, MID_SHADE, NEAR_HILL, NEAR_RIM, NEAR_SHADE, NEAR_SPECK, NONE, PINE_LIT, PINE_SHADE, RED, ROCK, ROCK_LIT, SNOW_CAP, SPARKLE, TRUNK, TUFT,
 } from './backdrop-codes.ts';
+import { BASE_WIDTH } from './base-fine.ts';
+import { BASE_SINK } from './globe.ts';
 import { bird, bunny, cabin, CABIN, fence, gifts, topStar, type Put } from './scenery.ts';
 
 /** A seeded PRNG (mulberry32); the scene's only randomness. */
@@ -59,8 +61,9 @@ const NEAR_HEIGHT = 5;
 const FAR_HEIGHT = 17;
 const MID_HEIGHT = 10;
 
-/** Whether (x, y) lies inside the globe's glass, plus a rim of one pixel: the backdrop stops short of it. */
+/** Whether (x, y) lies inside the globe's glass, plus a rim of one pixel, or under the base's top rows that rise over the glass's foot (XMAS-68): the backdrop stops short of it. */
 function behindGlass(layout: SceneLayout, x: number, y: number): boolean {
+  if (Math.abs(x + 0.5 - layout.globe.cx) <= BASE_WIDTH / 2 && y >= layout.groundTop - BASE_SINK) return true;
   const dx = x + 0.5 - layout.globe.cx;
   const dy = y + 0.5 - layout.globe.cy;
   return dx * dx + dy * dy <= (layout.globe.radius + 1) ** 2;

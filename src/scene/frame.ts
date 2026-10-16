@@ -13,6 +13,7 @@ import { pictureWithOpenBackdrop } from './backdrop-lean.ts';
 import { type Backdrop, backdropFor, covered, paintBackdrop, random } from './backdrop.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
+import { BASE_WIDTH } from './base-fine.ts';
 import { BASE_SINK, drawGlobe, type SnowFlakes } from './globe.ts';
 import type { ShapeParts } from './shapes-draw.ts';
 import { paintHint } from './hint.ts';
@@ -214,6 +215,8 @@ function placeStars(width: number, groundTop: number, globe: Circle, disc: Rect,
     const dx = x + 0.5 - globe.cx;
     const dy = y + 0.5 - globe.cy;
     if (dx * dx + dy * dy <= (GLOBE_RADIUS + 1) ** 2) continue;
+    // The base's top rows rise over the glass's foot (XMAS-68).
+    if (Math.abs(dx) <= BASE_WIDTH / 2 && y >= groundTop - BASE_SINK) continue;
     if (touches(taken, width, x, y)) continue;
     taken.add(y * width + x);
     stars.push({ x, y });

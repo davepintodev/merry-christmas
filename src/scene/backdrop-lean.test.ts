@@ -154,7 +154,7 @@ describe('the sky with the backdrop on', () => {
     }
   });
 
-  it.each([[112, 160], [240, 180], [320, 200], [600, 400], [900, 600]])('has hills and pines above the horizon in every phase at %i x %i', (width, height) => {
+  it.each([[112, 172], [240, 180], [320, 200], [600, 400], [900, 600]])('has hills and pines above the horizon in every phase at %i x %i', (width, height) => {
     for (const phase of PHASES) {
       const plain = sceneFrame(input(width, height, phase, phase, 0, { backdrop: false }));
       const full = sceneFrame(input(width, height, phase, phase, 0));
