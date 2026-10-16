@@ -20,7 +20,8 @@
 import { masterColours } from '../../art/colours.ts';
 import type { Drawing } from '../shared/art.generated.ts';
 import type { SceneLayout } from '../scene/frame.ts';
-import { NO_FRONT } from '../scene/globe.ts';
+import { BASE_ROWS, BASE_WIDTH, renderBase } from '../scene/base-fine.ts';
+import { BASE_SINK, NO_FRONT } from '../scene/globe.ts';
 import { leanBox, rowShift } from '../scene/lean.ts';
 import { drawListOf, shadowDrawList, turnBodies, type SantaDraw, type ShadowStep, type TurnBodies } from '../scene/shape-draw-list.ts';
 import { SHADOW_INK, SHADOW_STRENGTH, type FaceDraw } from '../scene/shapes-draw.ts';
@@ -618,6 +619,11 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
   let shapes: Layer | null = null;
   /** The flakes in front, on the screen's pixel grid, over the shapes and Santa. */
   let snowFronts: Layer | null = null;
+  /** The base, on the screen's pixel grid over all of them (XMAS-68), kept while its turn, size and scale hold. */
+  let baseLayer: Layer | null = null;
+  let baseColours: Uint32Array<ArrayBuffer> = new Uint32Array(0);
+  let basePixels: Pixels | null = null;
+  let baseKept: { turn: number; k: number } | null = null;
   /** The colour numbers of the box at the screen's size, kept while the size holds: the snow and Santa are drawn into them, then made into words. */
   let colours: Uint32Array<ArrayBuffer> = new Uint32Array(0);
   /** The flakes and Santa behind the glass centre, at the screen's size: put onto the shapes (or their flat copy) under the faces. */
@@ -652,9 +658,12 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
       shapes.context ??= shapes.canvas.getContext('2d');
       snowFronts ??= { canvas: layerAfter(shapes.canvas), context: null };
       snowFronts.context ??= snowFronts.canvas.getContext('2d');
+      baseLayer ??= { canvas: layerAfter(snowFronts.canvas), context: null };
+      baseLayer.context ??= baseLayer.canvas.getContext('2d');
+      const baseContext = baseLayer.context;
       const shapesContext = shapes.context;
       const snowContext = snowFronts.context;
-      if (shapesContext === null || snowContext === null) return false;
+      if (shapesContext === null || snowContext === null || baseContext === null) return false;
       if (santaTimeMs !== undefined) {
         santa ??= { canvas: document.createElement('canvas'), context: null };
         santa.context ??= santa.canvas.getContext('2d');
@@ -736,6 +745,22 @@ export function makeFineLayer(main: HTMLCanvasElement): FineLayer {
         putDirty(snowContext, snowPixels.image, frontDirty);
       }
       place(snowFronts.canvas, x0, y0, bw * css, bh * css);
+
+      // The base over everything, at the screen's pixel size: worked out again only when the turn or the scale changes.
+      const baseW = BASE_WIDTH * k;
+      const baseH = BASE_ROWS * k;
+      const resized = baseLayer.canvas.width !== baseW || baseLayer.canvas.height !== baseH;
+      sizeTo(baseLayer.canvas, baseW, baseH);
+      if (resized || baseKept === null || baseKept.turn !== turn || baseKept.k !== k) {
+        baseColours = colourBuffer(baseColours, baseW * baseH);
+        baseColours.fill(NO_FRONT);
+        renderBase(baseColours, baseW, 0, 0, k, turn);
+        basePixels = pixelsFor(baseContext, baseW, baseH, basePixels);
+        wordsFrom(baseColours, basePixels.words, baseW, { left: 0, top: 0, right: baseW, bottom: baseH });
+        baseContext.putImageData(basePixels.image, 0, 0);
+        baseKept = { turn, k };
+      }
+      place(baseLayer.canvas, left + (cx - BASE_WIDTH / 2) * css, (layout.groundTop - BASE_SINK) * css, BASE_WIDTH * css, BASE_ROWS * css);
       return true;
     },
   };

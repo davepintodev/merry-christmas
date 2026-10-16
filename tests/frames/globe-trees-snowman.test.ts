@@ -39,8 +39,8 @@ const SIZES: [number, number][] = [
   [W, H],
   [320, 180],
   [240, 300],
-  [161, 160],
-  [2 * GLOBE_RADIUS, 160],
+  [161, 172],
+  [2 * GLOBE_RADIUS, 172],
 ];
 /** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by a shape. */
 const FILL_A = 0x010203;
@@ -234,7 +234,7 @@ function onlyIn(name: string, others: readonly string[]): Set<number> {
  * drawing's own colours, the furthest any edge of their box jumped in one
  * step, with where.
  */
-function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = sceneLayout(161, 160, SEED)): { bad: string; jump: number; where: string } {
+function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = sceneLayout(161, 172, SEED)): { bad: string; jump: number; where: string } {
   const shapes: readonly GlobeShape[] = Array.isArray(shape) ? shape : [shape as GlobeShape];
   const width = layout.width;
   const allowed = new Set<number>([FILL_A, ...SPRITE_COLOURS]);

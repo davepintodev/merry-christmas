@@ -9,7 +9,9 @@ import { describe, expect, it } from 'vitest';
 import type { Drawing } from '../shared/art.generated.ts';
 import type { PhaseReading } from '../shared/clock.ts';
 import { masterColours } from '../../art/colours.ts';
+import { BASE_WIDTH, renderBase } from './base-fine.ts';
 import { sceneFrame, sceneLayout, type SceneInput, type SceneLayout } from './frame.ts';
+import { BASE_SINK } from './globe.ts';
 import { renderDrawList, renderShadowSteps, shadowDrawList, shapeDrawList, type DrawStep, type ShadowStep } from './shape-draw-list.ts';
 import { drawShapes } from './shapes-draw.ts';
 import { globeShapes, onFloor, projectShape, sheet, wrapTurn, type GlobeShape } from './shapes.ts';
@@ -94,13 +96,25 @@ function expectedStep(face: { drawing: string; corners: readonly (readonly [numb
  * holds no Santa, so where the list painted a pixel the whole frame must hold it; where the list painted nothing the two frames
  * must agree. Also reports how many painted pixels matched.
  */
+/**
+ * XMAS-68: the base is the page's last layer, over the shapes and Santa, so a bodiless frame has no base body either
+ * (shapeBodies false leaves it to the fine layer). Lays it, at one pixel to an art pixel, over `picture` as the frame draws it.
+ */
+function withBase(picture: Uint32Array, layout: SceneLayout, turn: number): Uint32Array {
+  renderBase(picture, layout.width, layout.globe.cx - BASE_WIDTH / 2, layout.groundTop - BASE_SINK, 1, wrapTurn(turn));
+  return picture;
+}
+
 function overlayMismatch(turn: number, phase: PhaseReading = NIGHT): { bad: number; matched: number } {
   const whole = sceneFrame(sceneInput({ turn, phase }));
   const bare = sceneFrame(withBodies(false, { turn, phase }));
-  const list = renderedWithSanta(turn, 1);
+  // The base goes over the bodies and Santa; the bodiless frame is without it, so it goes on all three.
+  const list = withBase(renderedWithSanta(turn, 1), whole.layout, turn);
   // XMAS-82: the bodiless frame has no shadows either; where the shadows go, the whole frame may hold them over the bare one.
   const shaded = Uint32Array.from(bare.picture);
   renderShadowSteps(shaded, W, bare.layout, shadowDrawList(turn), 1);
+  withBase(shaded, whole.layout, turn);
+  withBase(bare.picture, whole.layout, turn);
   let bad = 0;
   let matched = 0;
   for (let i = 0; i < whole.picture.length; i++) {
@@ -475,6 +489,8 @@ describe('the list at zoom 1 is today\'s drawShapes bodies', () => {
         if (whole.picture[i] === bare.picture[i]) continue;
         const x = (i % W) - cx;
         const y = Math.floor(i / W) - cy;
+        // The bodiless frame is without the base's body too (XMAS-68): the base's box is the page's own layer.
+        if (Math.abs(x) <= BASE_WIDTH / 2 && y + cy >= LAYOUT.groundTop - BASE_SINK) continue;
         expect(Math.abs(x)).toBeLessThanOrEqual(radius);
         expect(Math.abs(y)).toBeLessThanOrEqual(radius + 1);
         inside += 1;
@@ -584,11 +600,12 @@ describe('sceneFrame: the shapeBodies option', () => {
       const bare = sceneFrame(withBodies(false, { turn }));
       const covered = renderedWithSanta(turn, 1);
       const shadowed = shadowsOn(turn, 1, FILL);
+      const based = withBase(filled(LAYOUT, 1, FILL), LAYOUT, turn);
       let differing = 0;
       for (let i = 0; i < whole.picture.length; i++) {
         if (whole.picture[i] !== bare.picture[i]) {
           differing += 1;
-          expect(covered[i] !== FILL || shadowed[i] !== FILL).toBe(true); // a body, Santa or a shadow pixel
+          expect(covered[i] !== FILL || shadowed[i] !== FILL || based[i] !== FILL).toBe(true); // a body, Santa, a shadow or a base pixel
         }
       }
       expect(differing).toBeGreaterThan(0);
@@ -601,12 +618,13 @@ describe('sceneFrame: the shapeBodies option', () => {
       const bare = sceneFrame(withBodies(false, { turn }));
       const bodies = renderedWithSanta(turn, 1);
       const shadows = shadowsOn(turn, 1, FILL);
+      const based = withBase(filled(LAYOUT, 1, FILL), LAYOUT, turn);
       let shadowOnly = 0;
       let shadowOnlyGone = 0;
       for (let i = 0; i < whole.picture.length; i++) {
-        const covered = bodies[i] !== FILL || shadows[i] !== FILL;
+        const covered = bodies[i] !== FILL || shadows[i] !== FILL || based[i] !== FILL;
         if (!covered) expect(bare.picture[i]).toBe(whole.picture[i]);
-        if (bodies[i] === FILL && shadows[i] !== FILL) {
+        if (bodies[i] === FILL && shadows[i] !== FILL && based[i] === FILL) {
           shadowOnly += 1;
           // A shadow-only pixel of the whole frame is shaded; the bare frame has no shade there (Santa included).
           if (whole.picture[i] !== bare.picture[i]) shadowOnlyGone += 1;
@@ -627,6 +645,7 @@ describe('sceneFrame: the shapeBodies option', () => {
     const back = Uint32Array.from(bare.picture);
     renderShadowSteps(back, W, bare.layout, shadowDrawList(turn), 1);
     renderDrawList(back, W, bare.layout, shapeDrawList(turn, globeShapes, T), 1);
+    withBase(back, bare.layout, turn);
     expect(back).toEqual(whole.picture);
     expect(bodies.some((p) => p !== FILL)).toBe(true);
     const { bad, matched } = overlayMismatch(turn);

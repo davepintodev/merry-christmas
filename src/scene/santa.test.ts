@@ -935,7 +935,7 @@ describe('drawGlobe: Santa\'s colours and what he leaves alone', () => {
   });
 
   it('changes nothing outside the glass as he flies: two times at one turn differ only inside the circle', () => {
-    for (const layout of [LAYOUT, sceneLayout(161, 160, SEED), sceneLayout(320, 180, SEED)]) {
+    for (const layout of [LAYOUT, sceneLayout(161, 172, SEED), sceneLayout(320, 180, SEED)]) {
       const a = globe(1.7, 3_000, NIGHT, layout);
       const b = globe(1.7, 8_500, NIGHT, layout);
       let differ = 0;

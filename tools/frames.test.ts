@@ -9,7 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { BASE_ROWS } from '../src/scene/base-fine.ts';
 import { sceneFrame } from '../src/scene/frame.ts';
+import { BASE_SINK } from '../src/scene/globe.ts';
 import { fineFrame } from './fine-frames.ts';
 import { drawSanta } from '../src/scene/santa.ts';
 import type { PhaseName } from '../src/shared/clock.ts';
@@ -112,8 +114,8 @@ describe('referenceFrames', () => {
       const x = i % flat.width;
       const y = Math.floor(i / flat.width);
       const inGlass = (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= radius ** 2;
-      // The lettering slides on the base with the turn, so the base's box may change too.
-      const onBase = y >= flat.layout.groundTop && y < flat.layout.groundTop + 30 && Math.abs(x + 0.5 - cx) <= radius;
+      // The lettering wraps round the base with the turn (XMAS-68), so the base's box may change too.
+      const onBase = y >= flat.layout.groundTop - BASE_SINK && y < flat.layout.groundTop - BASE_SINK + BASE_ROWS && Math.abs(x + 0.5 - cx) <= radius;
       if (inGlass) inside++;
       else if (!onBase) expect.fail(`${name}: pixel ${x},${y} outside the glass and base differs from ${phase}`);
     }

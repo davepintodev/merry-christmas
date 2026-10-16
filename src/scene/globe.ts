@@ -1,15 +1,14 @@
-// XMAS-32a "The globe", slice 1: glass, floor tint, base and sliding lettering.
+// XMAS-32a "The globe", slice 1: glass, floor tint, base and its lettering.
 // The glass (tinted by the phase, with its rim, frost and the window and disc
 // reflections that travel round it with the turn), the floor seen through it,
-// the Base sheet's drawing under it and the lettering "Fam. Pinto Merry
-// Christmas" from the font glyphs, sliding smoothly over the base as the globe
-// turns: the whole picture is worked out in code, except the base drawing and
-// the font glyphs, which come from their packed sheets. Nothing outside the
-// globe, its base and the base's cast shadow changes.
+// and the base under it: the whole picture is worked out in code. The base's
+// body (base-fine.ts) is drawn at one pixel to an art pixel only where the page
+// has no fine layer; with one, the page draws it at the screen's pixel size.
+// Nothing outside the globe, its base and the base's shadow changes.
 import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
-import { glyph, glyphWidth, GLYPH_HEIGHT } from '../shared/font.ts';
+import { renderBase } from './base-fine.ts';
 import { blendShade, edgeCoverage } from './blend.ts';
 import type { SceneLayout } from './frame.ts';
 import { keepBackdrop, leanGlass } from './lean.ts';
@@ -82,9 +81,11 @@ const FROST_TOP = -0.2;
 const FROST_SPAN = 0.95;
 /** Frost fades out this far round towards the glass's middle (1 faces the visitor squarely). */
 const FROST_FACE = 0.62;
-/** The cast shadow's reach right of the base and its depth down the ground, in art pixels. */
-const SHADOW_REACH = 20;
-const SHADOW_DEPTH = 8;
+/** The cast shadow's reach beyond the base's sides and its depth down the ground, in art pixels. */
+const SHADOW_REACH = 16;
+const SHADOW_DEPTH = 9;
+/** How far right of the base's middle the shadow's middle lies. */
+const SHADOW_LEAN = 8;
 /** How much of the shadow shade the darkest point of the cast shadow reaches. */
 const SHADOW_STRENGTH = 0.5;
 /** The shade the ground falls to in the cast shadow: the darkest sky colour of the master list. */
@@ -95,28 +96,8 @@ const SHADOW_INK = 0x1a1433;
  * remaps the shadow step by step instead of splitting a shade on rounding.
  */
 const SHADOW_STEPS = 16;
-/** The lettering on the base, in the font's uppercase glyphs. */
-const LETTERING = 'FAM. PINTO MERRY CHRISTMAS';
-/** The font's one-column gap after each glyph. */
-const GLYPH_GAP = 1;
-/** Each letter's first column in the text: the widths and gaps of the letters before it. */
-const LETTER_STARTS: readonly number[] = ((): number[] => {
-  const starts: number[] = [];
-  let at = 0;
-  for (const char of LETTERING) {
-    starts.push(at);
-    at += glyphWidth(char) + GLYPH_GAP;
-  }
-  return starts;
-})();
-/** The whole text's width in art pixels: its last glyph's last column plus one. */
-const TEXT_WIDTH = (LETTER_STARTS.at(-1) ?? 0) + glyphWidth(LETTERING.at(-1) ?? '');
-/** The lettering's first column in the base's box at turn 0, so the whole text faces the visitor. */
-const LETTER_X = 2;
-/** The lettering's first row in the base's box: the middle of the base's face. */
-const LETTER_Y = 9;
-/** One turn scrolls the lettering this far: the text and the clear gap to its next copy. */
-const LETTER_PERIOD = 116;
+/** How many of the base's top rows rise above the horizon, over the glass's foot, so the glass runs behind the gold lip and joins the base. */
+export const BASE_SINK = 5;
 
 /**
  * The parts of the glass a phase paints; every colour is a master colour: the
@@ -518,19 +499,21 @@ function paintReflections(picture: Uint32Array, width: number, layout: SceneLayo
 }
 
 /**
- * The globe and its base cast a shadow on the ground to the right, away from
- * the disc at the top left: a smooth tone falling off from the base's right
- * foot. It only writes ground rows right of the base (the base's box and the
- * sky stay as they are) and does not change with the turn.
+ * The globe and its base cast a shadow on the ground, away from the disc at the
+ * top left: a smooth tone in an ellipse tied to the base's bottom, leaning to the
+ * right, so it comes out from under the drum's rounded bottom and reaches past
+ * its right side. It only writes ground rows (the sky stays as it is) and does
+ * not change with the turn; the base is drawn over it.
  */
-function paintCastShadow(picture: Uint32Array, width: number, layout: SceneLayout, right: number, foot: number): void {
-  const firstRow = Math.max(layout.groundTop, Math.floor(foot - 2 * SHADOW_DEPTH));
-  const lastRow = Math.min(layout.height - 1, Math.ceil(foot + 2 * SHADOW_DEPTH));
-  const lastColumn = Math.min(width - 1, Math.ceil(right + SHADOW_REACH));
+function paintCastShadow(picture: Uint32Array, width: number, layout: SceneLayout, boxX: number, boxWidth: number, foot: number): void {
+  const centre = boxX + boxWidth / 2 + SHADOW_LEAN;
+  const reach = boxWidth / 2 + SHADOW_REACH;
+  const firstRow = Math.max(layout.groundTop, Math.floor(foot - SHADOW_DEPTH));
+  const lastRow = Math.min(layout.height - 1, Math.ceil(foot + SHADOW_DEPTH));
   for (let y = firstRow; y <= lastRow; y++) {
     const dy = (y + 0.5 - foot) / SHADOW_DEPTH;
-    for (let x = Math.max(0, right); x <= lastColumn; x++) {
-      const dx = (x + 0.5 - right) / SHADOW_REACH;
+    for (let x = Math.max(0, Math.floor(centre - reach)); x <= Math.min(width - 1, Math.ceil(centre + reach)); x++) {
+      const dx = (x + 0.5 - centre) / reach;
       const coverage = clamp((1 - Math.hypot(dx, dy)) * 2) * SHADOW_STRENGTH;
       const tone = Math.round(coverage * SHADOW_STEPS) / SHADOW_STEPS;
       if (tone <= 0) continue;
@@ -539,81 +522,12 @@ function paintCastShadow(picture: Uint32Array, width: number, layout: SceneLayou
   }
 }
 
-/** The text's lit pixels as runs of columns, one base row each: [base row, first column, past the last]. */
-const LETTER_RUNS: readonly (readonly [number, number, number])[] = ((): (readonly [number, number, number])[] => {
-  const lit = (row: number, column: number): boolean => {
-    let index = 0;
-    while ((LETTER_STARTS[index + 1] ?? Infinity) <= column) index++;
-    const stroke = glyph(LETTERING[index] ?? '');
-    const x = column - (LETTER_STARTS[index] ?? 0);
-    if (stroke === undefined || x >= stroke.width) return false;
-    return (stroke.pixels[row * stroke.width + x] ?? 0) !== 0;
-  };
-  const runs: (readonly [number, number, number])[] = [];
-  for (let row = 0; row < GLYPH_HEIGHT; row++) {
-    let start = -1;
-    for (let column = 0; column <= TEXT_WIDTH; column++) {
-      if (column < TEXT_WIDTH && lit(row, column)) {
-        if (start < 0) start = column;
-        continue;
-      }
-      if (start >= 0) runs.push([LETTER_Y + row, start, column]);
-      start = -1;
-    }
-  }
-  return runs;
-})();
-
-/** The font's one ink colour, as the glyph sheet draws it. */
-const FONT_INK = ((): number => {
-  for (const char of LETTERING) {
-    const stroke = glyph(char);
-    const n = stroke?.pixels.find((p) => p !== 0) ?? 0;
-    if (n !== 0) return colourNumber(masterColours[n - 1] ?? '#000000');
-  }
-  return 0;
-})();
-
 /**
- * The lettering over the base's face. The text slides as the globe turns and
- * copies follow it round the base, so one turn scrolls the text exactly one
- * period. Each lit font pixel covers one column of its run, drawn as the
- * in-between shade between the base pixel and the font ink that the covered
- * share asks for, which keeps the sliding edges on the fixed grid.
+ * The base at (boxX, boxY): its shadow on the snow under it, then, when the picture is to hold it (the fine layer
+ * draws it on the page, at the screen's pixel size, otherwise), the base itself at one pixel to an art pixel.
  */
-function paintLettering(picture: Uint32Array, width: number, base: Drawing, boxX: number, boxY: number, turn: number): void {
-  const shift = LETTER_X - (turn / FULL_TURN) * LETTER_PERIOD;
-  for (let copy = -1; copy <= 1; copy++) {
-    const from = shift + copy * LETTER_PERIOD;
-    if (from >= base.width || from + TEXT_WIDTH <= 0) continue;
-    for (const [row, start, end] of LETTER_RUNS) {
-      const left = from + start;
-      const right = from + end;
-      if (right <= 0 || left >= base.width) continue;
-      const first = Math.max(0, Math.floor(left));
-      const last = Math.min(base.width, Math.ceil(right));
-      for (let x = first; x < last; x++) {
-        const coverage = edgeCoverage(right, x) - edgeCoverage(left, x);
-        if (coverage <= 0) continue;
-        const n = base.pixels[row * base.width + x] ?? 0;
-        if (n === 0) continue;
-        const under = colourNumber(masterColours[n - 1] ?? '#000000');
-        picture[(boxY + row) * width + boxX + x] = blendShade(under, FONT_INK, coverage);
-      }
-    }
-  }
-}
-
-/** The base drawing at (boxX, boxY), its lettering over the face. */
-function paintBase(picture: Uint32Array, width: number, base: Drawing, boxX: number, boxY: number, turn: number): void {
-  for (let y = 0; y < base.height; y++) {
-    for (let x = 0; x < base.width; x++) {
-      const n = base.pixels[y * base.width + x] ?? 0;
-      if (n === 0) continue;
-      picture[(boxY + y) * width + boxX + x] = colourNumber(masterColours[n - 1] ?? '#000000');
-    }
-  }
-  paintLettering(picture, width, base, boxX, boxY, turn);
+function paintBase(picture: Uint32Array, width: number, boxX: number, boxY: number, turn: number, body: boolean): void {
+  if (body) renderBase(picture, width, boxX, boxY, 1, turn);
 }
 
 /** The flakes as draw steps (snowDrawList): those behind the glass centre, and those in front. */
@@ -646,7 +560,7 @@ export function drawGlobe(
   const spin = wrapTurn(turn);
   const glass = glassOf(phase);
   const boxX = layout.globe.cx - base.width / 2;
-  const boxY = layout.groundTop;
+  const boxY = layout.groundTop - BASE_SINK;
   const isBehind = santaPlacement(spin, time).depth <= 0;
   if (lean !== 0) keepBackdrop(picture, width, layout, leanUnder);
   paintGlass(picture, width, layout, glass);
@@ -660,6 +574,6 @@ export function drawGlobe(
   if (bodies && !isBehind) drawSanta(picture, width, layout, spin, time);
   if (flakes !== undefined) renderSnowSteps(picture, width, layout, flakes.front, 1);
   if (lean !== 0) leanGlass(picture, width, layout, lean);
-  paintCastShadow(picture, width, layout, boxX + base.width, boxY + base.height - 2);
-  paintBase(picture, width, base, boxX, boxY, spin);
+  paintCastShadow(picture, width, layout, boxX, base.width, boxY + base.height - 2);
+  paintBase(picture, width, boxX, boxY, spin, bodies);
 }

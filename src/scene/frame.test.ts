@@ -12,6 +12,8 @@ import { SKY_ABOVE } from '../shared/sky.ts';
 import { drawings } from '../shared/art.generated.ts';
 import { phaseAt, type PhaseName, type PhaseReading } from '../shared/clock.ts';
 import { DISC_MARGIN, DISC_SIZE, GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
+import { BASE_ROWS, BASE_WIDTH } from './base-fine.ts';
+import { BASE_SINK } from './globe.ts';
 import { createGlobeSnow, stepGlobeSnow, type Flake, type GlobeSnow } from './snow.ts';
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
@@ -48,10 +50,17 @@ function at(f: SceneFrame, x: number, y: number): number {
 }
 
 /** Near the globe's reserved circle (pixel centre within radius + margin). */
-function nearGlobe(l: SceneLayout, x: number, y: number, margin = 2): boolean {
+function inGlass(l: SceneLayout, x: number, y: number, margin = 2): boolean {
   const dx = x + 0.5 - l.globe.cx;
   const dy = y + 0.5 - l.globe.cy;
   return dx * dx + dy * dy <= (l.globe.radius + margin) ** 2;
+}
+
+function nearGlobe(l: SceneLayout, x: number, y: number, margin = 2): boolean {
+  const dx = x + 0.5 - l.globe.cx;
+  if (inGlass(l, x, y, margin)) return true;
+  // XMAS-68: the base's top rows rise BASE_SINK rows above the horizon, over the glass's foot, across the base's width.
+  return Math.abs(dx) <= BASE_WIDTH / 2 && y >= l.groundTop - BASE_SINK && y < l.groundTop;
 }
 
 function inDisc(l: SceneLayout, x: number, y: number): boolean {
@@ -136,7 +145,7 @@ const DAWN_BLENDS = [
 const DAWN_SIZES: [number, number][] = [
   [130, 260],
   [120, 420],
-  [240, 170],
+  [240, 172],
 ];
 const DAWN_CASES: [number, number, number][] = DAWN_SIZES.flatMap(([w, h]) => [0.25, 0.5, 0.75].map((s): [number, number, number] => [w, h, s]));
 /** Most one channel may move from one sky row to the next before it shows as a band. */
@@ -206,12 +215,43 @@ describe('sceneFrame: the picture', () => {
     expect(sceneLayout(2 * GLOBE_RADIUS, MIN_HEIGHT, SEED).width).toBe(2 * GLOBE_RADIUS);
   });
 
-  it('needs a height of at least MIN_HEIGHT (160): the countdown area above the globe', () => {
-    expect(MIN_HEIGHT).toBe(160);
+  it('needs a height of at least MIN_HEIGHT (172): the countdown area above the globe', () => {
+    expect(MIN_HEIGHT).toBe(172);
     expect(() => sceneFrame(input({ height: MIN_HEIGHT - 1 }))).toThrow(RangeError);
     expect(() => sceneLayout(W, MIN_HEIGHT - 1, SEED)).toThrow(RangeError);
     expect(() => sceneLayout(W, 2 * GLOBE_RADIUS, SEED)).toThrow(RangeError);
     expect(sceneFrame(input({ height: MIN_HEIGHT })).picture.length).toBe(W * MIN_HEIGHT);
+  });
+
+  // XMAS-68: the base is 28 rows, its top 5 over the glass's foot; under its bottom row the layout keeps 12 rows (its shadow and a margin).
+  it.each([[240, MIN_HEIGHT], [112, MIN_HEIGHT], [240, 180], [320, 300], [130, 260], [200, 1130]])('keeps the base and 12 rows under it inside a %i x %i picture: groundTop is at most height - 35', (width, height) => {
+    const l = sceneLayout(width, height, SEED);
+    expect(l.groundTop).toBeLessThanOrEqual(height - 35);
+    expect(l.groundTop - BASE_SINK + BASE_ROWS + 12).toBeLessThanOrEqual(height);
+    // The ground line is the globe's bottom where there is room, and never below it.
+    expect(l.groundTop).toBeLessThanOrEqual(l.globe.cy + l.globe.radius);
+  });
+
+  it('rests the glass on the horizon where the picture is tall enough: groundTop is the globe\'s bottom from 240 x 260 up', () => {
+    for (const height of [260, 300, 420, 1130]) {
+      const l = sceneLayout(240, height, SEED);
+      expect(l.groundTop, `height ${height}`).toBe(l.globe.cy + l.globe.radius);
+    }
+  });
+
+  it('sinks the glass\'s foot into the base at the shortest picture, with the base\'s bottom 12 rows above the picture\'s', () => {
+    const l = sceneLayout(240, MIN_HEIGHT, SEED);
+    expect(l.groundTop + BASE_ROWS - BASE_SINK).toBe(MIN_HEIGHT - 12);
+    expect(l.globe.cy + l.globe.radius, 'the glass reaches below the horizon').toBeGreaterThan(l.groundTop);
+    expect(l.globe.cy - l.globe.radius, 'and stays under the countdown').toBeGreaterThanOrEqual(l.countdown.height);
+  });
+
+  it('raises the globe, never below the countdown, so that the base always fits: cy falls as the base needs room', () => {
+    for (let height = MIN_HEIGHT; height <= 400; height += 7) {
+      const l = sceneLayout(240, height, SEED);
+      expect(l.globe.cy - l.globe.radius, `height ${height}`).toBeGreaterThanOrEqual(l.countdown.height);
+      expect(l.globe.cy + l.globe.radius - BASE_SINK, `height ${height}`).toBeLessThanOrEqual(height);
+    }
   });
 
   it('throws a RangeError for a NaN time or seed', () => {
@@ -300,8 +340,8 @@ describe('sceneLayout: places', () => {
     [W, H],
     [320, 180],
     [240, 300],
-    [161, 160],
-    [2 * GLOBE_RADIUS, 160],
+    [161, 172],
+    [2 * GLOBE_RADIUS, 172],
   ];
 
   it.each(SIZES)('keeps a %s x %s picture: frame.layout matches sceneLayout', (width, height) => {
@@ -334,7 +374,7 @@ describe('sceneLayout: places', () => {
     if (discClearsAt(l, 0)) expect(discClearsAt(l, l.disc.x), 'disc clear of the globe').toBe(true);
   });
 
-  const HEIGHTS = [MIN_HEIGHT, 161, 175, 200, 350, 700, 1130];
+  const HEIGHTS = [MIN_HEIGHT, 173, 175, 200, 350, 700, 1130];
   const NARROW_TO_WIDE = [
     ...Array.from({ length: 300 - 2 * GLOBE_RADIUS + 1 }, (_, i) => 2 * GLOBE_RADIUS + i),
     301, 320, 360, 375, 390, 393, 412, 428, 480, 600, 640, 768, 800, 810, 820, 960, 1024, 1180, 1280, 1366, 1440, 1536, 1920, 2560, 3840,
@@ -476,7 +516,7 @@ describe('sceneLayout: places', () => {
       for (const [width, height] of SIZES) {
         const l = sceneLayout(width, height, seed * 2654435761);
         for (const s of l.stars) {
-          if (nearGlobe(l, s.x, s.y, 1)) expect.fail(`seed ${seed} ${width}x${height}: star ${s.x},${s.y} in the globe`);
+          if (inGlass(l, s.x, s.y, 1)) expect.fail(`seed ${seed} ${width}x${height}: star ${s.x},${s.y} in the globe`);
         }
       }
     }
@@ -802,7 +842,7 @@ describe('sceneFrame: blends', () => {
     it('gives the same frame for the same inputs, also after a frame of another size', () => {
       const reading: PhaseReading = { from, to, share: 0.5 };
       const first = Array.from(sceneFrame(input({ width: 130, height: 260, phase: reading })).picture);
-      sceneFrame(input({ width: 240, height: 170, phase: { from, to, share: 0.25 } }));
+      sceneFrame(input({ width: 240, height: 172, phase: { from, to, share: 0.25 } }));
       const again = sceneFrame(input({ width: 130, height: 260, phase: reading }));
       expect(Array.from(again.picture)).toEqual(first);
       expect(Array.from(sceneFrame(input({ width: 130, height: 260, phase: reading })).picture)).toEqual(first);
@@ -933,8 +973,8 @@ describe('sceneLayout: the countdown area', () => {
   });
   const AREA_SIZES: [number, number][] = [
     [130, 260],
-    [130, 160],
-    [2 * GLOBE_RADIUS, 160],
+    [130, 172],
+    [2 * GLOBE_RADIUS, 172],
     [W, H],
     [320, 200],
   ];

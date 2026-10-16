@@ -29,6 +29,9 @@ const STEP_MS = 16; // Playwright's fake requestAnimationFrame interval
 /** The flakes in front, over the shapes and Santa: a screen pixel layer that holds nothing but those flakes (XMAS-84, XMAS-83). */
 const SNOW_FRONTS = "canvas#scene + canvas + canvas";
 
+/** The base layer, drawn last (XMAS-68). */
+const BASE_LAYER = "canvas#scene + canvas + canvas + canvas";
+
 type Geometry = { art: (x: number, y: number) => { x: number; y: number }; cx: number; cy: number; radius: number; baseTop: number; baseBottom: number; scale: number; boxLeft: number; boxTop: number };
 type Point = { x: number; y: number };
 type Session = { context: BrowserContext; page: Page; cdp: CDPSession | null; geometry: Geometry };
@@ -165,9 +168,12 @@ async function globePixels(s: Session): Promise<number[]> {
   return pixels(s.page, b.x, b.y, b.width, b.height);
 }
 
+/** The base: its own layer at the screen's pixel size (XMAS-68), over the snow in front, whole. */
 async function basePixels(s: Session): Promise<number[]> {
-  const g = s.geometry;
-  return pixels(s.page, g.cx - g.radius, g.baseTop, 2 * g.radius + 1, g.baseBottom - g.baseTop + 1);
+  return s.page.locator(BASE_LAYER).evaluate((el) => {
+    const c = el as HTMLCanvasElement;
+    return Array.from(c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data);
+  });
 }
 
 /**

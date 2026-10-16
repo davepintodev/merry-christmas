@@ -457,8 +457,8 @@ describe('outside snow drawing: edges of the picture', () => {
 
   it('a picture row of a different width draws on the width it was given', () => {
     const w = 120;
-    const layout = sceneLayout(w, 160, 3);
-    const pic = new Uint32Array(w * 160);
+    const layout = sceneLayout(w, 172, 3);
+    const pic = new Uint32Array(w * 172);
     drawOutsideSnow(pic, w, layout, snowOf([flake(w - 1 + 0.5, 20.5, 0.1), flake(5.5, 30.5, 0.1)]), 0);
     expect(pic[20 * w + w - 1]).not.toBe(0);
     expect(pic[30 * w + 5]).not.toBe(0);
