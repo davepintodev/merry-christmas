@@ -576,6 +576,18 @@ describe('AC5 cache headers: fingerprinted files immutable, page revalidates', (
     expect(d.get('max-age')).toBe('31536000');
   });
 
+  it('favicon and icon files get Cache-Control: public, max-age=86400, not immutable', () => {
+    for (const p of ['/favicon.ico', '/apple-touch-icon.png', '/icon-192.png', '/icon-32.png']) {
+      const rule = headerRules().find((r) => r.pattern === p);
+      expect(rule, `${p} rule`).toBeDefined();
+      const cc = rule!.headers.filter(([k]) => k === 'cache-control');
+      expect(cc, p).toHaveLength(1);
+      const d = cacheDirectives(cc[0]![1]);
+      expect(d.get('max-age'), p).toBe('86400');
+      expect(d.has('immutable'), p).toBe(false);
+    }
+  });
+
   it('no rule that matches the page gives it a long cache or immutable', () => {
     for (const page of ['/', '/index.html']) {
       for (const rule of headerRules()) {
@@ -590,13 +602,18 @@ describe('AC5 cache headers: fingerprinted files immutable, page revalidates', (
     }
   });
 
-  it('only /assets/ (fingerprinted) patterns are long-cached or immutable', () => {
+  it('only /assets/ (fingerprinted) patterns are immutable; off /assets/ only the four icons get a max-age, at most one day', () => {
+    const icons = ['/favicon.ico', '/apple-touch-icon.png', '/icon-192.png', '/icon-32.png'];
     const bad: string[] = [];
     for (const rule of headerRules()) {
+      const pattern = rule.pattern.replace(/^https?:\/\/[^/]+/, '');
+      const fingerprinted = /^\/assets\//.test(pattern);
       for (const [k, v] of rule.headers) {
         if (k !== 'cache-control') continue;
         const d = cacheDirectives(v);
-        if ((d.has('immutable') || maxAge(d) > 0) && !/^\/assets\//.test(rule.pattern.replace(/^https?:\/\/[^/]+/, ''))) bad.push(rule.pattern);
+        if (d.has('immutable') && !fingerprinted) bad.push(`${rule.pattern} is immutable`);
+        if (fingerprinted || maxAge(d) === 0) continue;
+        if (!icons.includes(pattern) || maxAge(d) > 86_400) bad.push(`${rule.pattern} has max-age=${maxAge(d)}`);
       }
     }
     expect(bad).toEqual([]);
