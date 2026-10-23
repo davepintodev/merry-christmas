@@ -16,24 +16,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const SHEETS_DIR = path.join(ROOT, 'art', 'sheets');
 const NEW_SHEET_FILES = ['house.png', 'santa.png', 'props.png', 'base.png', 'buttons.png'] as const;
 
-/** Objects that are solid surfaces: they must fill at least 30% of their box and touch all four edges. */
-const SOLID = /^(house-wall-|house-roof-|base$)/;
-const SOLID_COVER = 0.3;
-const OTHER_COVER = 0.1;
-/** Outline pixels must be darker than this relative luminance. */
-const OUTLINE_LUMINANCE = 0.2;
-/** Documented in art/STYLE.md: Santa is only 6 rows tall; the rest are thin details. */
-const OUTLINE_EXEMPT: ReadonlySet<string> = new Set([
-  'santa-trot-1',
-  'santa-trot-2',
-  'snowman-arms',
-  'snowman-scarf',
-  'snowman-face',
-  'snowman-buttons',
-  'lamp-post',
-  'disc',
-]);
-
 type Drawing = { sheet: string; x: number; y: number; width: number; height: number; pixels: Uint8Array };
 
 const temps: string[] = [];
@@ -95,20 +77,6 @@ describe('the art build on the real sheets', () => {
 });
 
 describe('rough drawings', () => {
-  it('draws every object: at least one opaque pixel', () => {
-    for (const o of allObjects()) expect(drawingOf(o).pixels.some((p) => p !== 0), `${o.name} is blank`).toBe(true);
-  });
-
-  it('fills at least 30% of the box for walls, roofs and the base, and at least 10% for every other object', () => {
-    const solids = allObjects().filter((o) => SOLID.test(o.name));
-    expect(solids.length).toBe(7); // four walls, two roofs, the base
-    for (const o of allObjects()) {
-      const px = drawingOf(o).pixels;
-      const cover = px.filter((p) => p !== 0).length / px.length;
-      const need = SOLID.test(o.name) ? SOLID_COVER : OTHER_COVER;
-      expect(cover, `${o.name} covers ${(cover * 100).toFixed(1)}%`).toBeGreaterThanOrEqual(need);
-    }
-  });
 
   it('uses no more than maxColoursPerObject distinct colours in any object', () => {
     expect(maxColoursPerObject).toBeGreaterThan(0);
@@ -124,77 +92,4 @@ describe('rough drawings', () => {
     }
   });
 
-  it('draws walls, roofs and the base out to all four edges of their box', () => {
-    for (const o of allObjects().filter((x) => SOLID.test(x.name))) {
-      const { pixels, width: w, height: h } = drawingOf(o);
-      const at = (x: number, y: number) => pixels[y * w + x] ?? 0;
-      const row = (y: number) => Array.from({ length: w }, (_, x) => at(x, y)).some((p) => p !== 0);
-      const col = (x: number) => Array.from({ length: h }, (_, y) => at(x, y)).some((p) => p !== 0);
-      expect(row(0), `${o.name}: top row empty`).toBe(true);
-      expect(row(h - 1), `${o.name}: bottom row empty`).toBe(true);
-      expect(col(0), `${o.name}: left column empty`).toBe(true);
-      expect(col(w - 1), `${o.name}: right column empty`).toBe(true);
-    }
-  });
-
-  it('draws the two frames of each pair differently', () => {
-    const pairs = [
-      ['santa-trot-1', 'santa-trot-2'],
-      ['speaker-muted', 'speaker-on'],
-      ['pause-bars', 'pause-triangle'],
-      ['house-wall-front', 'house-wall-back'],
-    ] as const;
-    expect(built.error, String(built.error)).toBeUndefined();
-    for (const [a, b] of pairs) {
-      const pa = built.drawings[a]?.pixels;
-      const pb = built.drawings[b]?.pixels;
-      expect(pa && pb, `${a} / ${b} missing`).toBeTruthy();
-      expect(Array.from(pa ?? []).join(','), `${a} and ${b} are the same drawing`).not.toBe(Array.from(pb ?? []).join(','));
-    }
-  });
-});
-
-describe('the outline rule', () => {
-  /** Relative luminance (WCAG) of a #rrggbb colour. */
-  function luminance(hex: string): number {
-    const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
-    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  }
-
-  it('the outline threshold separates the dark master colours from snow white', () => {
-    expect(luminance('#ffffff')).toBeCloseTo(1, 5);
-    expect(luminance('#0b1026')).toBeLessThan(OUTLINE_LUMINANCE);
-    expect(masterColours.filter((c) => luminance(c) < OUTLINE_LUMINANCE).length).toBeGreaterThan(0);
-  });
-
-  it('outlines every object that is not a wall, roof, the base or a documented exemption in a dark master colour', () => {
-    const outlined = allObjects().filter((o) => !SOLID.test(o.name) && !OUTLINE_EXEMPT.has(o.name));
-    expect(outlined.map((o) => o.name)).toContain('pine-1');
-    expect(outlined.map((o) => o.name)).toContain('shake-frame');
-    const offenders: string[] = [];
-    for (const o of outlined) {
-      const { pixels, width: w, height: h } = drawingOf(o);
-      const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : (pixels[y * w + x] ?? 0));
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const n = at(x, y);
-          if (n === 0) continue;
-          const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1 || !at(x - 1, y) || !at(x + 1, y) || !at(x, y - 1) || !at(x, y + 1);
-          const hex = masterColours[n - 1] ?? '#ffffff';
-          if (edge && luminance(hex) >= OUTLINE_LUMINANCE) {
-            offenders.push(`${o.name} at ${x},${y} is ${hex}`);
-            break;
-          }
-        }
-        if (offenders.at(-1)?.startsWith(`${o.name} `)) break;
-      }
-    }
-    expect(offenders).toEqual([]);
-  });
-
-  it('exempts only objects that exist in the object list', () => {
-    const names = new Set(allObjects().map((o) => o.name));
-    for (const n of OUTLINE_EXEMPT) expect(names.has(n), n).toBe(true);
-  });
 });

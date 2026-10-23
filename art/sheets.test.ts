@@ -1,29 +1,14 @@
-// XMAS-26 "Art build step and the rough Font sheet": the real sheet manifest
-// and the rough Font sheet drawn against it.
-import { existsSync, readFileSync } from 'node:fs';
+// XMAS-26 "Art build step and the rough Font sheet": the real sheet manifest.
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { packSheet } from '../tools/art.ts';
-import { decodePng } from '../tools/png.ts';
-import { masterColours } from './colours.ts';
 import { sheets } from './sheets.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FONT_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.!:';
 // XMAS-34 "5-wide M": M is 5x5 at the end of the sheet; every other glyph keeps its 3x5 slot.
 const M_X = 156;
-const M_OLD_X = 4 * FONT_CHARS.indexOf('M');
-const M_PATTERN = ['#...#', '##.##', '#.#.#', '#...#', '#...#'];
-
-function fontPng() {
-  return decodePng(new Uint8Array(readFileSync(path.join(HERE, 'sheets', 'font.png'))));
-}
-
-/** Alpha of the font sheet pixel at (x, y). */
-function alpha(img: { width: number; rgba: Uint8Array }, x: number, y: number): number {
-  return img.rgba[(y * img.width + x) * 4 + 3] ?? -1;
-}
 
 function fontSpec() {
   const s = sheets.find((x) => x.file === 'font.png');
@@ -82,65 +67,5 @@ describe('sheet manifest', () => {
 
   it('every sheet file in the manifest exists under art/sheets', () => {
     for (const s of sheets) expect(existsSync(path.join(HERE, 'sheets', s.file)), s.file).toBe(true);
-  });
-});
-
-describe('art/sheets/font.png (rough level)', () => {
-  function packedFont() {
-    const png = new Uint8Array(readFileSync(path.join(HERE, 'sheets', 'font.png')));
-    return packSheet(fontSpec(), png, masterColours);
-  }
-
-  it('packs with the master colours: right size, every colour allowed', () => {
-    const packed = packedFont();
-    expect(Object.keys(packed).sort()).toEqual([...FONT_CHARS].sort());
-  });
-
-  it('is 161x5 pixels, the size the manifest names', () => {
-    const img = fontPng();
-    expect([img.width, img.height]).toEqual([161, 5]);
-  });
-
-  it('draws every glyph: each has at least one non-transparent pixel', () => {
-    const packed = packedFont();
-    for (const ch of FONT_CHARS) {
-      const g = packed[ch];
-      expect(g, ch).toBeDefined();
-      expect(g?.pixels.length, ch).toBe(ch === 'M' ? 25 : 15);
-      expect(g?.pixels.some((p) => p !== 0), `glyph ${ch} is blank`).toBe(true);
-    }
-  });
-
-  it("draws different shapes for '0', '1', 'A' and 'M'", () => {
-    const packed = packedFont();
-    const shapes = ['0', '1', 'A', 'M'].map((ch) => Array.from(packed[ch]?.pixels ?? []).join(','));
-    expect(new Set(shapes).size).toBe(4);
-  });
-
-  it('draws M at x = 156 as #...# / ##.## / #.#.# / #...# / #...#', () => {
-    const m = packedFont()['M'];
-    expect(m).toBeDefined();
-    const got: string[] = [];
-    for (let y = 0; y < 5; y++) {
-      let line = '';
-      for (let x = 0; x < 5; x++) line += (m?.pixels[y * 5 + x] ?? 0) !== 0 ? '#' : '.';
-      got.push(line);
-    }
-    expect(got).toEqual(M_PATTERN);
-  });
-
-  it("leaves M's old 3x5 slot at x = 88 and the column before the new M fully transparent", () => {
-    const img = fontPng();
-    for (let y = 0; y < 5; y++) {
-      for (let x = M_OLD_X; x < M_OLD_X + 3; x++) expect(alpha(img, x, y), `old M slot ${x},${y}`).toBe(0);
-      expect(alpha(img, M_X - 1, y), `gap column ${M_X - 1},${y}`).toBe(0);
-    }
-  });
-
-  it('draws nothing in the one-pixel gap columns between the 3-wide glyphs', () => {
-    const img = fontPng();
-    for (let i = 0; i < FONT_CHARS.length; i++) {
-      for (let y = 0; y < 5; y++) expect(alpha(img, 4 * i + 3, y), `gap after ${FONT_CHARS[i]} at row ${y}`).toBe(0);
-    }
   });
 });

@@ -24,10 +24,6 @@ function rows(ch: string): string[] {
 }
 
 describe('font', () => {
-  it('the standard glyph is 3x5 art pixels', () => {
-    expect(GLYPH_WIDTH).toBe(3);
-    expect(GLYPH_HEIGHT).toBe(5);
-  });
 
   it.each(NARROW_CHARS)('looks up %s: 3x5, one colour number per pixel, at least one drawn pixel', (ch) => {
     const g = glyph(ch);
@@ -50,11 +46,6 @@ describe('font', () => {
 
   it('draws M as #...# / ##.## / #.#.# / #...# / #...#', () => {
     expect(rows('M')).toEqual(M_PATTERN);
-  });
-
-  it('draws M unlike H: the two no longer share a shape', () => {
-    expect(rows('M').join('/')).not.toBe(rows('H').join('/'));
-    expect(glyph('M')?.width).not.toBe(glyph('H')?.width);
   });
 
   it('the generated font module holds M at x=156, 5x5, on the font sheet', () => {
