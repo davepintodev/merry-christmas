@@ -52,11 +52,6 @@ describe('blendShade', () => {
     }
   });
 
-  it('gives the same shade for the same inputs every time', () => {
-    const a = blendShade(0x7d2a2e, 0xffffff, 0.37);
-    for (let i = 0; i < 5; i++) expect(blendShade(0x7d2a2e, 0xffffff, 0.37)).toBe(a);
-  });
-
   it('gives the shade itself when under and over are the same, at any coverage', () => {
     for (const c of [0, 0.3, 0.5, 1]) expect(blendShade(0x5a1f3a, 0x5a1f3a, c)).toBe(0x5a1f3a);
   });

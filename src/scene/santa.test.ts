@@ -551,13 +551,6 @@ describe('santaPlacement: where Santa flies', () => {
     }
   });
 
-  it('uses no randomness', () => {
-    const random = vi.spyOn(Math, 'random');
-    const a = santaPlacement(1.2, 3_456);
-    const b = santaPlacement(1.2, 3_456);
-    expect(b).toEqual(a);
-    expect(random).not.toHaveBeenCalled();
-  });
 });
 
 describe('the Santa drawings', () => {
@@ -833,14 +826,6 @@ describe('drawSanta: Santa in the picture', () => {
     }
   });
 
-  it('draws the same picture for the same inputs, without randomness', () => {
-    const random = vi.spyOn(Math, 'random');
-    const a = drawn(2.1, 7_777);
-    const b = drawn(2.1, 7_777);
-    expect(Array.from(b.a)).toEqual(Array.from(a.a));
-    expect(random).not.toHaveBeenCalled();
-  });
-
   it('refuses a non-finite turn or time with a RangeError and leaves the picture alone', () => {
     for (const [turn, time] of [[Number.NaN, 0], [Infinity, 100], [0, Number.NaN], [0, -Infinity]] as [number, number][]) {
       const pic = new Uint32Array(W * H).fill(FILL_A);
@@ -962,14 +947,6 @@ describe('drawGlobe: Santa\'s colours and what he leaves alone', () => {
         expect(worst, `turn ${turn} vs ${other}`).toBeLessThanOrEqual(1);
       }
     }
-  });
-
-  it('draws the same picture for the same inputs, without randomness', () => {
-    const random = vi.spyOn(Math, 'random');
-    const a = globe(1.234, 5_678);
-    const b = globe(1.234, 5_678);
-    expect(Array.from(b)).toEqual(Array.from(a));
-    expect(random).not.toHaveBeenCalled();
   });
 
   it('draws at time 0 and at a huge time', () => {

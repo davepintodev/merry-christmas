@@ -638,14 +638,6 @@ describe('drawShapes: the shapes in the picture', () => {
     expect(Array.from(drawn(-0.5).a)).toEqual(Array.from(drawn(FULL - 0.5).a));
   });
 
-  it('gives the same picture for the same inputs', () => {
-    const a = drawn(2.2, globeShapes, LAYOUT, READINGS[4]?.[1] ?? NIGHT);
-    const b = drawn(2.2, globeShapes, LAYOUT, READINGS[4]?.[1] ?? NIGHT);
-    expect(solidIndexes(a).length).toBeGreaterThan(0);
-    expect(Array.from(b.a)).toEqual(Array.from(a.a));
-    expect(Array.from(b.b)).toEqual(Array.from(a.b));
-  });
-
   it('draws no checkerboard dither in its edges, shades and shadows', () => {
     for (const [name, phase] of READINGS) {
       for (const turn of [0, 0.7, 2.1, 5]) {

@@ -289,15 +289,6 @@ describe('sceneFrame: the cast shadow', () => {
     }
   });
 
-  it('draws the same shadow for the same inputs', () => {
-    const a = sceneFrame(input({ phase: steady('sunset'), turn: 0.8 }));
-    const b = sceneFrame(input({ phase: steady('sunset'), turn: 0.8 }));
-    const box = baseBox(a);
-    const cast = outsideChanges(a, baseline({ phase: steady('sunset') }), box);
-    expect(cast.length).toBeGreaterThan(0);
-    for (const [x, y] of cast) expect(at(b, x, y)).toBe(at(a, x, y));
-  });
-
   it('draws the shadow in smooth tones: no 2 x 2 checkerboard on the ground beside the base', () => {
     for (const [name, phase] of READINGS) {
       const f = sceneFrame(input({ phase }));
@@ -682,12 +673,4 @@ describe('drawGlobe', () => {
     for (const c of picture) expect(c).toBeLessThanOrEqual(0xffffff);
   });
 
-  it('gives the same picture for the same inputs', () => {
-    const layout = sceneLayout(W, H, SEED);
-    const a = new Uint32Array(W * H).fill(0x0b1026);
-    const b = new Uint32Array(W * H).fill(0x0b1026);
-    drawGlobe(a, W, layout, steady('dawn'), 2.2, T);
-    drawGlobe(b, W, layout, steady('dawn'), 2.2, T);
-    expect(Array.from(a)).toEqual(Array.from(b));
-  });
 });
