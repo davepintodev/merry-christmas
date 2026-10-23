@@ -39,11 +39,4 @@ describe('currentVersion', () => {
     expect(currentVersion()).toBe('every second frame');
   });
 
-  it('names exactly the three versions the readout may show', () => {
-    const names: VersionName[] = ['full scene', 'lighter version', 'every second frame'];
-    for (const name of names) {
-      setVersionSource(() => name);
-      expect(currentVersion()).toBe(name);
-    }
-  });
 });

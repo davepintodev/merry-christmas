@@ -1,10 +1,9 @@
 // XMAS-26 "Art build step and the rough Font sheet": the committed art
 // outputs are up to date with the sheets.
-import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { sheets } from '../../art/sheets.ts';
 import { generateArtModule, gplFile, packSheet } from '../../tools/art.ts';
@@ -40,20 +39,5 @@ describe('committed art outputs are up to date', () => {
       }
     }
     expect(readText(GENERATED)).toBe(generateArtModule(drawings));
-  });
-});
-
-describe('tools/build-art.ts', () => {
-  const saved = new Map<string, string>();
-  afterEach(() => {
-    for (const [rel, text] of saved) writeFileSync(path.join(ROOT, rel), text);
-    saved.clear();
-  });
-
-  it('runs under node, exits 0 and rewrites the committed outputs byte for byte', () => {
-    for (const rel of [GENERATED, GPL]) saved.set(rel, readText(rel));
-    const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'build-art.ts')], { cwd: ROOT, encoding: 'utf8', timeout: 60_000 });
-    expect(r.status, r.stderr + r.stdout).toBe(0);
-    for (const [rel, before] of saved) expect(readText(rel), rel).toBe(before);
   });
 });

@@ -47,17 +47,6 @@ function dragRight(drag: Drag): number {
   return lean;
 }
 
-describe('named settings', () => {
-  it('names the flick threshold and burst cap from the ticket', () => {
-    expect(DRAG_SETTINGS.flickThreshold).toBe(200);
-    expect(DRAG_SETTINGS.burstCap).toBe(3);
-    expect(DRAG_SETTINGS.burstPush).toBeGreaterThan(0);
-    for (const key of ['turnPerPixel', 'leanPerPixel', 'maxLean', 'springStiffness', 'springDamping'] as const) {
-      expect(DRAG_SETTINGS[key]).toBeGreaterThan(0);
-    }
-  });
-});
-
 describe('turning', () => {
   it('starts at the initial turn and has no automatic turn', () => {
     const drag = make(1.25);

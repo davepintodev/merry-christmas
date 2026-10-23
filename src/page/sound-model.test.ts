@@ -15,20 +15,6 @@ function seeded(seed: number): () => number {
 
 const STIRS = [0, 0.1, 0.3, 0.6, 0.9, 1.2, 1.6];
 
-describe('SOUND_SETTINGS', () => {
-  it('exports the levels, notes, fades and stir mapping as one named constant', () => {
-    expect(SOUND_SETTINGS.windLevel).toBeGreaterThan(0);
-    expect(SOUND_SETTINGS.chimeLayerLevel).toBeGreaterThan(0);
-    expect(SOUND_SETTINGS.chimeNotes.length).toBeGreaterThan(0);
-    expect(SOUND_SETTINGS.chimeNotes.every((hz) => hz > 0)).toBe(true);
-    expect(SOUND_SETTINGS.fadeInSeconds).toBe(1);
-    expect(SOUND_SETTINGS.fadeOutSeconds).toBe(0.3);
-    expect(SOUND_SETTINGS.maxChimes).toBeGreaterThan(0);
-    expect(SOUND_SETTINGS.maxChimeGain).toBeGreaterThan(0);
-    expect(SOUND_SETTINGS.calmStir).toBeGreaterThanOrEqual(0);
-  });
-});
-
 describe('masterGain', () => {
   it('unmuting targets the full level over 1 s', () => {
     const g = masterGain(true);

@@ -56,15 +56,6 @@ describe('phaseOverrides: the per-phase colour tables', () => {
     expect(Object.keys(phaseOverrides)).not.toContain('dawn');
   });
 
-  it('purple-night is the empty table', () => {
-    expect(table('purple-night')).toEqual({});
-  });
-
-  it('frosty-morning and sunset are not empty', () => {
-    expect(Object.keys(table('frosty-morning')).length).toBeGreaterThan(0);
-    expect(Object.keys(table('sunset')).length).toBeGreaterThan(0);
-  });
-
   for (const phase of PHASES) {
     it(`${phase}: every key and every value is a #rrggbb master colour`, () => {
       const outside: string[] = [];

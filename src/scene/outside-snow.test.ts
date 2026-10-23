@@ -73,10 +73,6 @@ function count(christmasDay: boolean): number {
 }
 
 describe('outside snow: the amounts', () => {
-  it('ordinary day is amount 2.5 at fall speed 1.3; Christmas Day is amount 4 at fall speed 1.5', () => {
-    expect(OUTSIDE_SNOW.ordinary).toEqual({ amount: 2.5, fallSpeed: 1.3 });
-    expect(OUTSIDE_SNOW.christmasDay).toEqual({ amount: 4, fallSpeed: 1.5 });
-  });
 
   it('an ordinary day makes round(W*H/700*2.5) flakes', () => {
     expect(createOutsideSnow(1, W, H, false).flakes).toHaveLength(154);

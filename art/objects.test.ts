@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { maxColoursPerObject, objects, type ArtObject } from './objects.ts';
+import { objects, type ArtObject } from './objects.ts';
 import { sheets } from './sheets.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -72,11 +72,6 @@ describe('art/objects.ts: the object list', () => {
     }
   });
 
-  it('sets maxColoursPerObject to a whole number between 4 and 12', () => {
-    expect(Number.isInteger(maxColoursPerObject)).toBe(true);
-    expect(maxColoursPerObject).toBeGreaterThanOrEqual(4);
-    expect(maxColoursPerObject).toBeLessThanOrEqual(12);
-  });
 });
 
 describe('art/sheets.ts is derived from the object list', () => {

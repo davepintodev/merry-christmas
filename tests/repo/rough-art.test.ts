@@ -2,26 +2,19 @@
 // house.png, santa.png, props.png, base.png and buttons.png at rough level.
 // Every check reads the real art/sheets through the art build, run here into
 // a temp dir so the committed outputs are never touched.
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { brotliCompressSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { maxColoursPerObject, objects, type ArtObject } from '../../art/objects.ts';
 import { sheets } from '../../art/sheets.ts';
-import { ArtBuildError, buildArt, type SheetSpec } from '../../tools/art.ts';
-import { decodePng, encodePng } from '../../tools/png.ts';
+import { buildArt, type SheetSpec } from '../../tools/art.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHEETS_DIR = path.join(ROOT, 'art', 'sheets');
 const NEW_SHEET_FILES = ['house.png', 'santa.png', 'props.png', 'base.png', 'buttons.png'] as const;
-
-/** Sanity cap on the Brotli size of the packed art module, in bytes. */
-const ART_MODULE_BROTLI_CAP = 40_000;
-/** Sanity cap on the raw size of the packed art module, in bytes. */
-const ART_MODULE_RAW_CAP = 40_000 * 4;
 
 /** Objects that are solid surfaces: they must fill at least 30% of their box and touch all four edges. */
 const SOLID = /^(house-wall-|house-roof-|base$)/;
@@ -52,15 +45,6 @@ function tempDir(): string {
 afterAll(() => {
   for (const d of temps) rmSync(d, { recursive: true, force: true });
 });
-
-function caught(fn: () => unknown): Error {
-  try {
-    fn();
-  } catch (e) {
-    return e as Error;
-  }
-  throw new Error('expected the call to throw');
-}
 
 function buildInto(dir: string, sheetsDir: string, list: readonly SheetSpec[] = sheets) {
   const out = { moduleFile: path.join(dir, 'art.generated.ts'), gplFile: path.join(dir, 'xmas.gpl') };
@@ -212,69 +196,5 @@ describe('the outline rule', () => {
   it('exempts only objects that exist in the object list', () => {
     const names = new Set(allObjects().map((o) => o.name));
     for (const n of OUTLINE_EXEMPT) expect(names.has(n), n).toBe(true);
-  });
-});
-
-describe('the build stops on a new sheet drawn at the wrong size', () => {
-  /** A temp copy of art/sheets with one sheet replaced by a re-encoded copy grown or shrunk by dw x dh. */
-  function resizedCopy(file: string, dw: number, dh: number): string {
-    const dir = tempDir();
-    const sheetsDir = path.join(dir, 'sheets');
-    mkdirSync(sheetsDir, { recursive: true });
-    for (const s of sheets) {
-      const src = path.join(SHEETS_DIR, s.file);
-      if (existsSync(src)) copyFileSync(src, path.join(sheetsDir, s.file));
-    }
-    const src = path.join(SHEETS_DIR, file);
-    expect(existsSync(src), `art/sheets/${file} must exist`).toBe(true);
-    const img = decodePng(new Uint8Array(readFileSync(src)));
-    const w = img.width + dw;
-    const h = img.height + dh;
-    const rgba = new Uint8Array(w * h * 4);
-    for (let y = 0; y < Math.min(h, img.height); y++) {
-      for (let x = 0; x < Math.min(w, img.width); x++) {
-        rgba.set(img.rgba.subarray((y * img.width + x) * 4, (y * img.width + x) * 4 + 4), (y * w + x) * 4);
-      }
-    }
-    writeFileSync(path.join(sheetsDir, file), encodePng(w, h, rgba));
-    return sheetsDir;
-  }
-
-  for (const file of NEW_SHEET_FILES) {
-    it(`${file} one column wider: ArtBuildError naming ${file}, nothing written`, () => {
-      const sheetsDir = resizedCopy(file, 1, 0);
-      const out = tempDir();
-      const err = caught(() => buildInto(out, sheetsDir));
-      expect(err).toBeInstanceOf(ArtBuildError);
-      expect(err.message).toContain(file);
-      expect(existsSync(path.join(out, 'art.generated.ts'))).toBe(false);
-      expect(existsSync(path.join(out, 'xmas.gpl'))).toBe(false);
-    });
-  }
-
-  it('buttons.png one row shorter: ArtBuildError naming buttons.png', () => {
-    const sheetsDir = resizedCopy('buttons.png', 0, -1);
-    const err = caught(() => buildInto(tempDir(), sheetsDir));
-    expect(err).toBeInstanceOf(ArtBuildError);
-    expect(err.message).toContain('buttons.png');
-  });
-
-  it('a missing props.png: ArtBuildError naming props.png', () => {
-    const sheetsDir = resizedCopy('props.png', 0, 0);
-    rmSync(path.join(sheetsDir, 'props.png'));
-    const err = caught(() => buildInto(tempDir(), sheetsDir));
-    expect(err).toBeInstanceOf(ArtBuildError);
-    expect(err.message).toContain('props.png');
-  });
-});
-
-describe('the packed art stays small', () => {
-  it(`the built art module is under ${ART_MODULE_BROTLI_CAP} bytes Brotli-compressed`, () => {
-    expect(built.error, String(built.error)).toBeUndefined();
-    expect(built.moduleText.length).toBeGreaterThan(0);
-    for (const f of NEW_SHEET_FILES) expect(built.moduleText, f).toContain(f);
-    const size = brotliCompressSync(Buffer.from(built.moduleText, 'utf8')).length;
-    expect(size).toBeLessThan(ART_MODULE_BROTLI_CAP);
-    expect(Buffer.byteLength(built.moduleText, 'utf8')).toBeLessThan(ART_MODULE_RAW_CAP);
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { colours, phaseColours } from '../../art/colours.ts';
 import { phaseAt, type PhaseName } from '../shared/clock.ts';
 import { skyAndInk } from './colours.ts';
+import { contrast, relativeLuminance } from './contrast.ts';
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 // The four blends; a test below checks this list against phaseAt.
@@ -18,22 +19,6 @@ const BLEND_PAIRS: [PhaseName, PhaseName][] = [
 const TENTHS = Array.from({ length: 11 }, (_, i) => i / 10);
 const MIN_RATIO = 4.5;
 
-/** WCAG 2 relative luminance of a '#rrggbb' colour. */
-function relativeLuminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((at) => {
-    const c = Number.parseInt(hex.slice(at, at + 2), 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** WCAG 2 contrast ratio between two '#rrggbb' colours, 1 to 21. */
-function contrast(a: string, b: string): number {
-  const la = relativeLuminance(a);
-  const lb = relativeLuminance(b);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
 function expectReadable(where: string, sky: string, ink: string): void {
   const ratio = contrast(sky, ink);
   expect(
@@ -41,15 +26,6 @@ function expectReadable(where: string, sky: string, ink: string): void {
     `${where}: ink ${ink} on sky ${sky} is ${ratio.toFixed(2)}:1, needs ${MIN_RATIO}:1`,
   ).toBeGreaterThanOrEqual(MIN_RATIO);
 }
-
-describe('contrast helper', () => {
-  it('matches known WCAG ratios', () => {
-    expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 5);
-    expect(contrast('#ffffff', '#ffffff')).toBeCloseTo(1, 5);
-    expect(contrast('#767676', '#ffffff')).toBeCloseTo(4.54, 2);
-    expect(contrast('#ffffff', '#767676')).toBe(contrast('#767676', '#ffffff'));
-  });
-});
 
 const ROLES = ['ink', 'label', 'title'] as const;
 

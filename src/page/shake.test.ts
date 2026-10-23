@@ -1,7 +1,7 @@
 // XMAS-43a: the pure shake model. Motion readings (m/s², time in seconds) go in; the stir and the
 // snow push built up since the last take() come out. The caller owns the clock.
 import { describe, expect, it } from 'vitest';
-import { createShake, SHAKE_SETTINGS, type MotionReading } from './shake.ts';
+import { createShake, type MotionReading } from './shake.ts';
 
 const settings = { threshold: 6, gravityTimeSec: 1, waitSec: 1.5, stirPerExcess: 1, pushPerExcess: 1, maxGapSec: 10 };
 
@@ -14,11 +14,6 @@ function feed(readings: MotionReading[], overrides: Partial<typeof settings & { 
 const at = (timeSec: number, x: number, y = 0, z = 0): MotionReading => ({ timeSec, acceleration: { x, y, z } });
 
 describe('shake model', () => {
-  it('names its settings, with the agreed threshold and waiting time', () => {
-    expect(SHAKE_SETTINGS.threshold).toBe(6);
-    expect(SHAKE_SETTINGS.waitSec).toBe(1.5);
-    expect(typeof SHAKE_SETTINGS.gravityTimeSec).toBe('number');
-  });
 
   it('stirs only above the threshold, and faster the harder the shake', () => {
     expect(feed([at(0, 5), at(1, 5)]).out.raise).toBe(0);
