@@ -1,21 +1,19 @@
 // XMAS-32c "The globe", slice 3: the three pines and the snowman inside the
-// globe (XMAS-32 acceptance criteria). The pines (pine-1, pine-2, pine-3) and
-// the snowman's body are flat drawings that always face the visitor, like the
-// lamp post: never narrowed, mirrored or turned, standing on the floor disc
-// and carried round with it. The snowman's face, arms and scarf turn with the
-// globe: at turn 0 his face shows; half a turn on his back shows (no face,
-// arms and scarf from behind). Everything is blended on the fixed grid, takes
-// its place in the depth order with the turning shapes, and keeps its colours
-// in every phase (only the glass tints).
+// globe (XMAS-32 acceptance criteria). The pines and the snowman's body are
+// flat drawings that always face the visitor, like the lamp post: never
+// narrowed, mirrored or turned, standing on the floor disc and carried round
+// with it. The snowman's face, arms and scarf turn with the globe: his face
+// shows at turn 0; half a turn on, his back shows (no face, arms and scarf from
+// behind). Everything is blended on the fixed grid, takes its place in the
+// depth order with the turning shapes, and keeps its colours in every phase
+// (only the glass tints).
 //
 // Interface pinned here: ShapeKind gains 'pine' and 'snowman'; globeShapes
 // holds the three pines and the one snowman next to the ten turning shapes;
 // projectShape(pine, turn) returns one face named after its drawing, and
 // projectShape(snowman, turn) returns 'snowman-body' plus, when seen,
-// 'snowman-face', 'snowman-arms' and 'snowman-scarf'. As for every
-// ProjectedFace, a four-cornered face's corners are its drawing's top left,
-// top right, bottom right and bottom left. drawShapes and sceneFrame draw
-// them like the other shapes.
+// 'snowman-face', 'snowman-arms' and 'snowman-scarf'. A four-cornered face's
+// corners are its drawing's top left, top right, bottom right and bottom left.
 import { describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../../src/shared/art.generated.ts';
@@ -35,28 +33,16 @@ const H = 180;
 const SEED = 12345;
 const T = 1_000_000;
 const FULL = 2 * Math.PI;
-const SIZES: [number, number][] = [
-  [W, H],
-  [320, 180],
-  [240, 300],
-  [161, 172],
-  [2 * GLOBE_RADIUS, 172],
-];
+const SIZES: [number, number][] = [[W, H], [320, 180], [240, 300], [161, 172], [2 * GLOBE_RADIUS, 172]];
 /** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by a shape. */
 const FILL_A = 0x010203;
 const FILL_B = 0xfdfcfb;
 const LAYOUT = sceneLayout(W, H, SEED);
 const NIGHT: PhaseReading = { from: 'purple-night', to: 'purple-night', share: 0 };
 /** The rows below the globe's centre still above the base, in the shortest picture. */
-const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => {
-  const l = sceneLayout(w, h, SEED);
-  return l.groundTop - l.globe.cy;
-}));
-const PINE_DRAWINGS = ['pine-1', 'pine-2', 'pine-3'];
+const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => sceneLayout(w, h, SEED)).map((l) => l.groundTop - l.globe.cy));
 /** Every colour any drawing uses: the only colours a shape pixel may take besides the floor shadow's shade. */
-const SPRITE_COLOURS = new Set<number>(
-  Object.values(drawings).flatMap((d) => Array.from(d.pixels).filter((n) => n !== 0).map((n) => Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16))),
-);
+const SPRITE_COLOURS = new Set<number>(Object.values(drawings).flatMap((d) => [...palette(d)]));
 const SNOWMAN_DRAWINGS = ['snowman-body', 'snowman-face', 'snowman-arms', 'snowman-scarf', 'snowman-buttons'];
 const TURNING_KINDS = new Set(['house', 'present', 'lamp-post']);
 
@@ -99,9 +85,7 @@ function palette(d: Drawing): Set<number> {
 }
 
 function opaqueCount(d: Drawing): number {
-  let n = 0;
-  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) if (colourAt(d, x, y) >= 0) n++;
-  return n;
+  return Array.from(d.pixels).filter((n) => n !== 0).length;
 }
 
 function only<T>(list: readonly T[]): T {
@@ -117,35 +101,18 @@ const figures = (): GlobeShape[] => [...pines(), ...snowmen()];
 const turning = (): GlobeShape[] => globeShapes.filter((s) => TURNING_KINDS.has(s.kind));
 
 /** The one drawing a pine carries. */
-function pineName(pine: GlobeShape): string {
-  return only(projectShape(pine, 0)).drawing;
-}
-
-function face(faces: readonly ProjectedFace[], name: string): ProjectedFace | undefined {
-  return faces.find((f) => f.drawing === name);
-}
+const pineName = (pine: GlobeShape): string => only(projectShape(pine, 0)).drawing;
 
 function must(faces: readonly ProjectedFace[], name: string, why: string): ProjectedFace {
-  const f = face(faces, name);
+  const f = faces.find((g) => g.drawing === name);
   if (f === undefined) expect.fail(`${why}: no ${name} face`);
   return f;
 }
 
-function names(faces: readonly ProjectedFace[]): string[] {
-  return faces.map((f) => f.drawing);
-}
-
-function xs(f: ProjectedFace): number[] {
-  return f.corners.map((c) => c[0]);
-}
-
-function ys(f: ProjectedFace): number[] {
-  return f.corners.map((c) => c[1]);
-}
-
-function centreX(f: ProjectedFace): number {
-  return xs(f).reduce((s, x) => s + x, 0) / f.corners.length;
-}
+const names = (faces: readonly ProjectedFace[]): string[] => faces.map((f) => f.drawing);
+const xs = (f: ProjectedFace): number[] => f.corners.map((c) => c[0]);
+const ys = (f: ProjectedFace): number[] => f.corners.map((c) => c[1]);
+const centreX = (f: ProjectedFace): number => xs(f).reduce((s, x) => s + x, 0) / f.corners.length;
 
 function corner(f: ProjectedFace, i: number): readonly [number, number] {
   const c = f.corners[i];
@@ -158,12 +125,30 @@ function expectUpright(f: ProjectedFace, why: string): void {
   const d = drawing(f.drawing);
   expect(f.corners.length, `${why}: four corners`).toBe(4);
   const [tl, tr, br, bl] = [corner(f, 0), corner(f, 1), corner(f, 2), corner(f, 3)];
-  expect(tr[0] - tl[0], `${why}: top edge runs left to right at full width`).toBeCloseTo(d.width, 6);
-  expect(tr[1] - tl[1], `${why}: top edge level`).toBeCloseTo(0, 6);
-  expect(bl[1] - tl[1], `${why}: left edge runs down at full height`).toBeCloseTo(d.height, 6);
-  expect(bl[0] - tl[0], `${why}: left edge upright`).toBeCloseTo(0, 6);
-  expect(br[0] - bl[0], `${why}: bottom edge at full width`).toBeCloseTo(d.width, 6);
-  expect(br[1] - tr[1], `${why}: right edge at full height`).toBeCloseTo(d.height, 6);
+  const checks: [string, number, number][] = [
+    ['top edge runs left to right at full width', tr[0] - tl[0], d.width],
+    ['top edge level', tr[1] - tl[1], 0],
+    ['left edge runs down at full height', bl[1] - tl[1], d.height],
+    ['left edge upright', bl[0] - tl[0], 0],
+    ['bottom edge at full width', br[0] - bl[0], d.width],
+    ['right edge at full height', br[1] - tr[1], d.height],
+  ];
+  for (const [what, got, want] of checks) expect(got, `${why}: ${what}`).toBeCloseTo(want, 6);
+}
+
+/** The middle of the face's foot is on the shape's floor point at turn t. */
+function expectOnFoot(f: ProjectedFace, s: GlobeShape, t: number, why: string): void {
+  const [footX, footY] = projectPoint(s.x, s.z, 0, t);
+  expect(Math.abs(centreX(f) - footX), `${why}: foot across`).toBeLessThanOrEqual(0.25);
+  expect(Math.abs(Math.max(...ys(f)) - footY), `${why}: foot on the floor`).toBeLessThanOrEqual(0.25);
+}
+
+/** The face's left and top edges, in the default layout, are whole art pixels. */
+function expectOnGrid(f: ProjectedFace, why: string): void {
+  const left = LAYOUT.globe.cx + Math.min(...xs(f));
+  const top = LAYOUT.globe.cy + Math.min(...ys(f));
+  expect(Math.abs(left - Math.round(left)), `${why}: left edge on the grid`).toBeLessThan(1e-9);
+  expect(Math.abs(top - Math.round(top)), `${why}: top edge on the grid`).toBeLessThan(1e-9);
 }
 
 interface Drawn { a: Uint32Array; b: Uint32Array; layout: SceneLayout; width: number }
@@ -183,15 +168,8 @@ function solid(d: Drawn, i: number): boolean {
   return d.a[i] === d.b[i] && d.a[i] !== FILL_A;
 }
 
-function bare(d: Drawn, i: number): boolean {
-  return d.a[i] === FILL_A && d.b[i] === FILL_B;
-}
-
-function solidIndexes(d: Drawn): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < d.a.length; i++) if (solid(d, i)) out.push(i);
-  return out;
-}
+const bare = (d: Drawn, i: number): boolean => d.a[i] === FILL_A && d.b[i] === FILL_B;
+const solidIndexes = (d: Drawn): number[] => Array.from(d.a, (_, i) => i).filter((i) => solid(d, i));
 
 /** The colours wholly covered pixels show. */
 function solidColours(d: Drawn): Set<number> {
@@ -227,6 +205,29 @@ function onlyIn(name: string, others: readonly string[]): Set<number> {
 }
 
 /**
+ * The drawing's opaque pixels, placed where `f` puts them at turn 0 on the grid,
+ * that are not painted as drawn over both backgrounds (`skip` leaves some out).
+ * Returns how many were checked and the "x,y" of each that is wrong.
+ */
+function paintedAsDrawn(pic: Drawn, f: ProjectedFace, skip: (px: number, py: number) => boolean = () => false): { checked: number; wrong: string[] } {
+  const d = drawing(f.drawing);
+  const left = Math.round(LAYOUT.globe.cx + Math.min(...xs(f)));
+  const top = Math.round(LAYOUT.globe.cy + Math.min(...ys(f)));
+  let checked = 0;
+  const wrong: string[] = [];
+  for (let y = 0; y < d.height; y++) {
+    for (let x = 0; x < d.width; x++) {
+      const want = colourAt(d, x, y);
+      if (want < 0 || skip(left + x + 0.5 - LAYOUT.globe.cx, top + y + 0.5 - LAYOUT.globe.cy)) continue;
+      checked++;
+      const i = (top + y) * W + left + x;
+      if (pic.a[i] !== want || pic.b[i] !== want) wrong.push(`${x},${y}`);
+    }
+  }
+  return { checked, wrong };
+}
+
+/**
  * Draws `shape` alone over a plain background at every 0.001 rad all the way
  * round, in the smallest picture. Returns the first pixel that is not crisp
  * (neither the background, one of the drawings' own colours nor the floor
@@ -249,18 +250,11 @@ function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = 
     return pic;
   };
   const boxOf = (pic: Uint32Array): [number, number, number, number] => {
-    let l = Infinity;
-    let r = -Infinity;
-    let tp = Infinity;
-    let bt = -Infinity;
-    for (let i = 0; i < pic.length; i++) {
-      if (!SPRITE_COLOURS.has(pic[i] ?? -1)) continue;
-      l = Math.min(l, i % width);
-      r = Math.max(r, i % width);
-      tp = Math.min(tp, Math.floor(i / width));
-      bt = Math.max(bt, Math.floor(i / width));
-    }
-    return [l, r, tp, bt];
+    let box: [number, number, number, number] = [Infinity, -Infinity, Infinity, -Infinity];
+    pic.forEach((c, i) => {
+      if (SPRITE_COLOURS.has(c)) box = [Math.min(box[0], i % width), Math.max(box[1], i % width), Math.min(box[2], Math.floor(i / width)), Math.max(box[3], Math.floor(i / width))];
+    });
+    return box;
   };
   const STEP = 0.001;
   let prev = boxOf(paint(0));
@@ -296,7 +290,7 @@ describe('globeShapes: the pines and the snowman', () => {
   it('holds three pines, one of each pine drawing, each as wide and tall as its drawing', () => {
     const list = pines();
     expect(list.length).toBe(3);
-    expect(list.map(pineName).sort()).toEqual(PINE_DRAWINGS);
+    expect(list.map(pineName).sort()).toEqual(['pine-1', 'pine-2', 'pine-3']);
     for (const p of list) {
       const d = drawing(pineName(p));
       expect([p.width, p.height], `${pineName(p)} size`).toEqual([d.width, d.height]);
@@ -360,7 +354,6 @@ describe('globeShapes: room round the pines and the snowman', () => {
   // their middles, so a figure whose drawing could reach another shape's
   // footprint at some turn would swap order with it while they overlap.
   it('keeps every pine and the snowman clear of every other shape: its drawing\'s reach round its foot never meets another footprint', () => {
-    expect(figures().length).toBe(4);
     const clashes: string[] = [];
     for (const fig of figures()) {
       const r = reach(fig);
@@ -378,8 +371,7 @@ describe('globeShapes: room round the pines and the snowman', () => {
 });
 
 describe('projectShape: the pines always face the visitor', () => {
-  it('shows each pine as its one drawing, upright, unmirrored and at full size, at every turn', () => {
-    expect(pines().length).toBe(3);
+  it('shows each pine as its one drawing, upright, unmirrored and at full size, standing on its floor point, at every turn', () => {
     for (const p of pines()) {
       const name = pineName(p);
       for (let k = 0; k < 48; k++) {
@@ -388,18 +380,7 @@ describe('projectShape: the pines always face the visitor', () => {
         expect(f.drawing, `turn ${t.toFixed(2)}`).toBe(name);
         expectUpright(f, `${name} turn ${t.toFixed(2)}`);
       }
-    }
-  });
-
-  it('stands each pine with the middle of its foot on its floor point, carried round with the floor', () => {
-    expect(pines().length).toBe(3);
-    for (const p of pines()) {
-      for (const t of [0, 0.7, Math.PI / 2, 2.9, Math.PI, 4.6, -1.2]) {
-        const f = only(projectShape(p, t));
-        const [footX, footY] = projectPoint(p.x, p.z, 0, t);
-        expect(Math.abs(centreX(f) - footX), `${pineName(p)} turn ${t}: foot across`).toBeLessThanOrEqual(0.25);
-        expect(Math.abs(Math.max(...ys(f)) - footY), `${pineName(p)} turn ${t}: foot on the floor`).toBeLessThanOrEqual(0.25);
-      }
+      for (const t of [0, 0.7, Math.PI / 2, 2.9, Math.PI, 4.6, -1.2]) expectOnFoot(only(projectShape(p, t)), p, t, `${name} turn ${t}`);
     }
   });
 });
@@ -413,9 +394,7 @@ describe('projectShape: the snowman', () => {
       for (const n of names(faces)) expect(SNOWMAN_DRAWINGS, `snowman face ${n}`).toContain(n);
       const body = must(faces, 'snowman-body', `turn ${t.toFixed(2)}`);
       expectUpright(body, `snowman-body turn ${t.toFixed(2)}`);
-      const [footX, footY] = projectPoint(snowman.x, snowman.z, 0, t);
-      expect(Math.abs(centreX(body) - footX), `turn ${t.toFixed(2)}: body foot across`).toBeLessThanOrEqual(0.25);
-      expect(Math.abs(Math.max(...ys(body)) - footY), `turn ${t.toFixed(2)}: body on the floor`).toBeLessThanOrEqual(0.25);
+      expectOnFoot(body, snowman, t, `turn ${t.toFixed(2)}: body`);
     }
   });
 
@@ -431,7 +410,7 @@ describe('projectShape: the snowman', () => {
     expect(Math.min(...ys(head))).toBeGreaterThanOrEqual(Math.min(...ys(body)) - 1e-6);
   });
 
-  it('hides his face for the back half of a turn and shows it for the front half', () => {
+  it('hides his face for the back half of a turn and shows it for the front half, arms and scarf still there from behind', () => {
     const snowman = only(snowmen());
     for (let k = -8; k <= 8; k++) {
       const front = (k * Math.PI) / 32; // within a quarter turn of facing the visitor
@@ -439,12 +418,8 @@ describe('projectShape: the snowman', () => {
       const back = Math.PI + front;
       expect(names(projectShape(snowman, back)), `turn ${back.toFixed(2)}: face hidden`).not.toContain('snowman-face');
     }
-  });
-
-  it('still shows his arms and scarf from behind at half a turn, but no face', () => {
-    const faces = projectShape(only(snowmen()), Math.PI);
-    expect(names(faces)).toEqual(expect.arrayContaining(['snowman-body', 'snowman-arms', 'snowman-scarf']));
-    expect(names(faces)).not.toContain('snowman-face');
+    const behind = names(projectShape(snowman, Math.PI));
+    expect(behind).toEqual(expect.arrayContaining(['snowman-body', 'snowman-arms', 'snowman-scarf']));
   });
 
   it('turns his face with the globe: it slides left of his middle for a small turn and right for a small turn back', () => {
@@ -472,47 +447,18 @@ describe('projectShape: the snowman', () => {
 
 describe('drawShapes: the pines and the snowman in the picture', () => {
   it('paints each pine at turn 0 on the grid in its own drawing colours, pixel for pixel', () => {
-    expect(pines().length).toBe(3);
     for (const p of pines()) {
       const f = only(projectShape(p, 0));
-      const d = drawing(f.drawing);
-      const left = LAYOUT.globe.cx + Math.min(...xs(f));
-      const top = LAYOUT.globe.cy + Math.min(...ys(f));
-      expect(Math.abs(left - Math.round(left)), `${f.drawing}: left edge on the grid`).toBeLessThan(1e-9);
-      expect(Math.abs(top - Math.round(top)), `${f.drawing}: top edge on the grid`).toBeLessThan(1e-9);
-      const pic = drawn(0, [p]);
-      const wrong: string[] = [];
-      for (let y = 0; y < d.height; y++) {
-        for (let x = 0; x < d.width; x++) {
-          const want = colourAt(d, x, y);
-          if (want < 0) continue;
-          const i = (Math.round(top) + y) * W + Math.round(left) + x;
-          if (pic.a[i] !== want || pic.b[i] !== want) wrong.push(`${x},${y}`);
-        }
-      }
-      expect(wrong, `${f.drawing}: drawing pixels not painted as drawn`).toEqual([]);
-    }
-  });
-
-  it('keeps each pine whole at every turn: about as many covered pixels as its drawing', () => {
-    expect(pines().length).toBe(3);
-    for (const p of pines()) {
-      const d = drawing(pineName(p));
-      for (let k = 0; k < 24; k++) {
-        const t = (k * FULL) / 24 + 0.013;
-        const covered = solidIndexes(drawn(t, [p]));
-        // Point-sampled: a pine slid off the grid keeps nearly every pixel of its drawing, give or take its edge rows and columns.
-        expect(covered.length, `${pineName(p)} turn ${t.toFixed(2)}: covered pixels`).toBeGreaterThanOrEqual(0.8 * opaqueCount(d));
-        expect(covered.length, `${pineName(p)} turn ${t.toFixed(2)}: no bigger than its drawing`).toBeLessThanOrEqual(opaqueCount(d));
-      }
+      expectOnGrid(f, f.drawing);
+      expect(paintedAsDrawn(drawn(0, [p]), f).wrong, `${f.drawing}: drawing pixels not painted as drawn`).toEqual([]);
     }
   });
 
   // XMAS-75: sprites are point-sampled. Off the grid a pine pixel takes the one
   // drawing pixel under its centre, whole: its colour is one of the drawing's
-  // own, never a mix of the pixels it straddles.
-  it('paints each pine off the grid as the one drawing pixel under each picture pixel\'s centre, never a mix', () => {
-    expect(pines().length).toBe(3);
+  // own, never a mix of the pixels it straddles. A pine slid off the grid keeps
+  // nearly every pixel of its drawing, give or take its edge rows and columns.
+  it('keeps each pine whole off the grid, painted as the one drawing pixel under each picture pixel\'s centre, never a mix', () => {
     const { cx, cy } = LAYOUT.globe;
     for (const p of pines()) {
       const name = pineName(p);
@@ -523,11 +469,13 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
       const wrong: string[] = [];
       for (let k = 0; k < 24; k++) {
         const t = (k * FULL) / 24 + 0.013;
-        const f = only(projectShape(p, t));
-        const [ax, ay] = corner(f, 0);
+        const [ax, ay] = corner(only(projectShape(p, t)), 0);
         const pic = drawn(t, [p]);
+        const covered = solidIndexes(pic);
+        expect(covered.length, `${name} turn ${t.toFixed(2)}: covered pixels`).toBeGreaterThanOrEqual(0.8 * opaqueCount(d));
+        expect(covered.length, `${name} turn ${t.toFixed(2)}: no bigger than its drawing`).toBeLessThanOrEqual(opaqueCount(d));
         // Every solid pixel is one of the drawing's own colours.
-        for (const i of solidIndexes(pic)) {
+        for (const i of covered) {
           if (!own.has(pic.a[i] ?? -1)) wrong.push(`turn ${t.toFixed(2)} pixel ${i % W},${Math.floor(i / W)}: ${(pic.a[i] ?? 0).toString(16)} is not a colour of ${name}`);
         }
         const y0 = Math.floor(cy + ay) - 1;
@@ -556,12 +504,9 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
   // Review nit (XMAS-32c round 1): which pine drawing a pine carries belongs
   // to the shape itself, not to its identity in the list.
   it('gives a copy of each pine the same drawing as the pine itself', () => {
-    expect(pines().length).toBe(3);
     for (const p of pines()) {
       const copy: GlobeShape = Object.freeze({ ...p });
-      for (const t of [0, 1.3, Math.PI]) {
-        expect(only(projectShape(copy, t)).drawing, `copy of ${pineName(p)} turn ${t}`).toBe(pineName(p));
-      }
+      for (const t of [0, 1.3, Math.PI]) expect(only(projectShape(copy, t)).drawing, `copy of ${pineName(p)} turn ${t}`).toBe(pineName(p));
     }
   });
 
@@ -569,28 +514,12 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
     const snowman = only(snowmen());
     const faces = projectShape(snowman, 0);
     const body = must(faces, 'snowman-body', 'turn 0');
-    const d = drawing('snowman-body');
-    const left = LAYOUT.globe.cx + Math.min(...xs(body));
-    const top = LAYOUT.globe.cy + Math.min(...ys(body));
-    expect(Math.abs(left - Math.round(left)), 'body left edge on the grid').toBeLessThan(1e-9);
-    expect(Math.abs(top - Math.round(top)), 'body top edge on the grid').toBeLessThan(1e-9);
+    expectOnGrid(body, 'body');
+    expectOnGrid(must(faces, 'snowman-face', 'turn 0'), 'face');
     const parts = faces.filter((f) => f.drawing !== 'snowman-body');
     const nearPart = (px: number, py: number): boolean =>
       parts.some((f) => px >= Math.min(...xs(f)) - 1 && px <= Math.max(...xs(f)) + 1 && py >= Math.min(...ys(f)) - 1 && py <= Math.max(...ys(f)) + 1);
-    const pic = drawn(0, [snowman]);
-    let checked = 0;
-    const wrong: string[] = [];
-    for (let y = 0; y < d.height; y++) {
-      for (let x = 0; x < d.width; x++) {
-        const want = colourAt(d, x, y);
-        if (want < 0) continue;
-        const px = Math.round(left) + x;
-        const py = Math.round(top) + y;
-        if (nearPart(px + 0.5 - LAYOUT.globe.cx, py + 0.5 - LAYOUT.globe.cy)) continue;
-        checked++;
-        if (pic.a[py * W + px] !== want) wrong.push(`${x},${y}`);
-      }
-    }
+    const { checked, wrong } = paintedAsDrawn(drawn(0, [snowman]), body, nearPart);
     expect(checked, 'body pixels clear of the turning parts').toBeGreaterThanOrEqual(20);
     expect(wrong, 'body pixels not painted as drawn').toEqual([]);
   });
@@ -612,20 +541,17 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
     }
   });
 
-  it('turns his face, arms and scarf in whole pixels: 0.001 rad never makes a mixed pixel, and his box never jumps more than two pixels, all the way round', () => {
-    const { bad, jump, where } = sweep(only(snowmen()));
-    expect(bad, 'first pixel that is not crisp').toBe('');
-    expect(jump, `furthest his box jumped in one step (${where})`).toBeLessThanOrEqual(2);
-  }, 60_000);
-
   // XMAS-75: the pines slide on the grid in whole pixels too, never a mix.
-  it.each([0, 1, 2])('slides pine %s in whole pixels: 0.001 rad never makes a mixed pixel, and its box never jumps more than a pixel, all the way round', (k) => {
-    const list = [...pines()].sort((a, b) => pineName(a).localeCompare(pineName(b)));
-    expect(list.length).toBe(3);
-    const p = list[k] as GlobeShape;
-    const { bad, jump, where } = sweep(p);
-    expect(bad, `${pineName(p)}: first pixel that is not crisp`).toBe('');
-    expect(jump, `${pineName(p)}: furthest its box jumped in one step (${where})`).toBeLessThanOrEqual(1);
+  it.each([
+    ['the snowman (his face, arms and scarf turn)', 0, 2],
+    ['pine-1', 1, 1],
+    ['pine-2', 2, 1],
+    ['pine-3', 3, 1],
+  ] as const)('turns %s in whole pixels: 0.001 rad never makes a mixed pixel, and its box never jumps more than the limit, all the way round', (label, k, limit) => {
+    const sorted = [...pines()].sort((a, b) => pineName(a).localeCompare(pineName(b)));
+    const { bad, jump, where } = sweep(k === 0 ? only(snowmen()) : (sorted[k - 1] as GlobeShape));
+    expect(bad, `${label}: first pixel that is not crisp`).toBe('');
+    expect(jump, `${label}: furthest its box jumped in one step (${where}); limit ${limit}`).toBeLessThanOrEqual(limit);
   }, 60_000);
 
   // Review bug (XMAS-32c round 2): a pine stood so near a present that its
@@ -634,7 +560,6 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
   // Point-sampled, a swap is a crisp pop by design, so what is pinned is that
   // every pixel stays a drawing's own colour or the shadow's flat shade.
   it('turns the whole globe (all its shapes together) in whole pixels: 0.001 rad never makes a mixed pixel, all the way round', () => {
-    expect(globeShapes.length).toBe(14);
     const { bad } = sweep(globeShapes, LAYOUT);
     expect(bad, 'first pixel that is not crisp').toBe('');
   }, 300_000);
@@ -653,14 +578,6 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
     expect(changed, 'house pixels a pine or the snowman covers at turn 0').toEqual([]);
   });
 
-  it('puts the snowman\'s face on the grid at turn 0: its left and top edges are whole art pixels', () => {
-    const head = must(projectShape(only(snowmen()), 0), 'snowman-face', 'turn 0');
-    const left = LAYOUT.globe.cx + Math.min(...xs(head));
-    const top = LAYOUT.globe.cy + Math.min(...ys(head));
-    expect(Math.abs(left - Math.round(left)), 'face left edge on the grid').toBeLessThan(1e-9);
-    expect(Math.abs(top - Math.round(top)), 'face top edge on the grid').toBeLessThan(1e-9);
-  });
-
   it('keeps the pines and the snowman in the same colours in every phase and blend (only the glass tints)', () => {
     for (const turn of [0, 0.8, Math.PI, 3.6]) {
       const first = drawn(turn, figures(), LAYOUT, NIGHT);
@@ -674,7 +591,6 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
   });
 
   it('puts the pines and the snowman in depth order with the turning shapes: the nearer one covers, whatever the list order', () => {
-    expect(figures().length).toBe(4);
     let overlaps = 0;
     for (let k = 0; k < 24; k++) {
       const turn = (k * FULL) / 24 + 0.05;
