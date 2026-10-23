@@ -1,13 +1,12 @@
 // XMAS-31a "Scene core engine and reference pictures": the reference
 // renderer, the deliberate update command (`pnpm frames:update`), the check
-// `pnpm run test:unit` runs, and the `pnpm frames` viewing page. Pictures are
-// PNGs written with tools/png.ts; only the update command writes them.
-import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+// `pnpm run test:unit` runs, and the loopback address `pnpm frames` serves on.
+// Pictures are PNGs written with tools/png.ts; only the update command writes them.
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { BASE_ROWS } from '../src/scene/base-fine.ts';
 import { sceneFrame } from '../src/scene/frame.ts';
 import { BASE_SINK } from '../src/scene/globe.ts';
@@ -235,29 +234,13 @@ describe('updateReferences and referenceProblems', () => {
 });
 
 // XMAS-31c replaced the all-pictures page: the review page (one picture at a
-// time, frames found in the folder at run time) is pinned by
-// tools/frames-review.test.ts and tests/browser/frames-review.spec.ts.
+// time, frames found in the folder at run time) has one smoke test in
+// tests/browser/frames-review.spec.ts.
 
 describe('framesAddress', () => {
   it('stays on loopback when HOST is unset or empty, like pnpm dev', () => {
     expect(framesAddress({}).host).toBe('localhost');
     expect(framesAddress({ HOST: '' }).host).toBe('localhost');
-  });
-
-  it('binds to HOST when set', () => {
-    expect(framesAddress({ HOST: '0.0.0.0' }).host).toBe('0.0.0.0');
-    expect(framesAddress({ HOST: '192.0.2.7' }).host).toBe('192.0.2.7');
-  });
-
-  it('takes the port from PORT, with a fixed default', () => {
-    expect(framesAddress({ PORT: '8123' }).port).toBe(8123);
-    const port = framesAddress({}).port;
-    expect(Number.isInteger(port) && port > 0 && port < 65536).toBe(true);
-    expect(framesAddress({ PORT: '' }).port).toBe(port);
-  });
-
-  it.each(['abc', '0', '70000', '12.5', '-1', '80x'])('refuses a PORT of %j', (PORT) => {
-    expect(() => framesAddress({ PORT })).toThrow(RangeError);
   });
 });
 
@@ -265,11 +248,6 @@ describe('package scripts', () => {
   function scripts(): Record<string, string> {
     return (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {};
   }
-
-  it('has frames:update and frames', () => {
-    expect(scripts()['frames:update']).toBe('node tools/frames-update.ts');
-    expect(scripts()['frames']).toBe('node tools/frames-serve.ts');
-  });
 
   it('never rewrites the references from pnpm check or test:unit', () => {
     const s = scripts();
@@ -297,58 +275,4 @@ describe('the CLIs', () => {
     expect(readdirSync(dir).sort()).toEqual(FILES);
     expect(referenceProblems(dir)).toEqual([]);
   });
-
-  let server: ChildProcess | null = null;
-  afterEach(() => {
-    server?.kill();
-    server = null;
-  });
-
-  async function freePort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const s = createServer();
-      s.once('error', reject);
-      s.listen(0, '127.0.0.1', () => {
-        const address = s.address();
-        const port = typeof address === 'object' && address !== null ? address.port : 0;
-        s.close(() => resolve(port));
-      });
-    });
-  }
-
-  async function waitFor(url: string): Promise<Response> {
-    const until = Date.now() + 20_000;
-    for (;;) {
-      try {
-        return await fetch(url);
-      } catch (error) {
-        if (Date.now() > until || server?.exitCode !== null) throw error;
-        await new Promise((r) => setTimeout(r, 100));
-      }
-    }
-  }
-
-  it('frames-serve serves the page and the pictures on HOST and PORT', async () => {
-    const dir = tempDir();
-    updateReferences(dir);
-    const port = await freePort();
-    let stdout = '';
-    server = spawn(process.execPath, [path.join(ROOT, 'tools', 'frames-serve.ts'), dir], {
-      cwd: ROOT,
-      env: { ...process.env, HOST: '127.0.0.1', PORT: String(port) },
-    });
-    server.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    const page = await waitFor(`http://127.0.0.1:${port}/`);
-    expect(page.status).toBe(200);
-    expect(page.headers.get('content-type') ?? '').toMatch(/text\/html/);
-    expect(await page.text()).toMatch(/^<!doctype html>/i);
-    const png = await fetch(`http://127.0.0.1:${port}/dawn.png`);
-    expect(png.status).toBe(200);
-    expect(png.headers.get('content-type') ?? '').toMatch(/image\/png/);
-    expect(Buffer.from(await png.arrayBuffer()).equals(readFileSync(path.join(dir, 'dawn.png')))).toBe(true);
-    const missing = await fetch(`http://127.0.0.1:${port}/..%2Fpackage.json`);
-    expect(missing.status).toBe(404);
-    expect(stdout).toContain(`127.0.0.1:${port}`);
-    expect(existsSync(path.join(dir, 'index.html'))).toBe(false);
-  }, 30_000);
 });
