@@ -37,30 +37,34 @@ function input(over: Partial<SceneInput> = {}): SceneInput {
   return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
 }
 
-function hexNum(hex: string): number {
-  return Number.parseInt(hex.slice(1), 16);
+/** The picture of a frame as a plain array, for toEqual. */
+function pic(over: Partial<SceneInput> = {}): number[] {
+  return Array.from(sceneFrame(input(over)).picture);
 }
 
-function rgb(n: number): [number, number, number] {
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+const hexNum = (hex: string): number => Number.parseInt(hex.slice(1), 16);
+const hexOf = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
+const rgb = (n: number): [number, number, number] => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+const distance = (a: number, b: number): number => rgb(a).reduce((t, v, i) => t + Math.abs(v - (rgb(b)[i] ?? 0)), 0);
+const at = (f: SceneFrame, x: number, y: number): number => f.picture[y * f.width + x] ?? -1;
+
+function* grid(w: number, h: number): Generator<[number, number]> {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) yield [x, y];
 }
 
-function at(f: SceneFrame, x: number, y: number): number {
-  return f.picture[y * f.width + x] ?? -1;
+/** Every pixel of a rectangle of the picture. */
+function* cells(c: { x: number; y: number; width: number; height: number }): Generator<[number, number]> {
+  for (let y = c.y; y < c.y + c.height; y++) for (let x = c.x; x < c.x + c.width; x++) yield [x, y];
 }
 
 /** Near the globe's reserved circle (pixel centre within radius + margin). */
 function inGlass(l: SceneLayout, x: number, y: number, margin = 2): boolean {
-  const dx = x + 0.5 - l.globe.cx;
-  const dy = y + 0.5 - l.globe.cy;
-  return dx * dx + dy * dy <= (l.globe.radius + margin) ** 2;
+  return (x + 0.5 - l.globe.cx) ** 2 + (y + 0.5 - l.globe.cy) ** 2 <= (l.globe.radius + margin) ** 2;
 }
 
 function nearGlobe(l: SceneLayout, x: number, y: number, margin = 2): boolean {
-  const dx = x + 0.5 - l.globe.cx;
-  if (inGlass(l, x, y, margin)) return true;
   // XMAS-68: the base's top rows rise BASE_SINK rows above the horizon, over the glass's foot, across the base's width.
-  return Math.abs(dx) <= BASE_WIDTH / 2 && y >= l.groundTop - BASE_SINK && y < l.groundTop;
+  return inGlass(l, x, y, margin) || (Math.abs(x + 0.5 - l.globe.cx) <= BASE_WIDTH / 2 && y >= l.groundTop - BASE_SINK && y < l.groundTop);
 }
 
 function inDisc(l: SceneLayout, x: number, y: number): boolean {
@@ -81,9 +85,7 @@ function expectedDiscX(l: SceneLayout): number {
   return 0;
 }
 
-function starSet(l: SceneLayout): Set<string> {
-  return new Set(l.stars.map((s) => `${s.x},${s.y}`));
-}
+const starSet = (l: SceneLayout): Set<string> => new Set(l.stars.map((s) => `${s.x},${s.y}`));
 
 /** Most common colour on row y, skipping the disc and the globe's place. */
 function rowSky(f: SceneFrame, y: number): number {
@@ -97,16 +99,6 @@ function rowSky(f: SceneFrame, y: number): number {
   let most = -1;
   for (const [c, n] of counts) if (n > most) [best, most] = [c, n];
   return best;
-}
-
-function distance(a: number, b: number): number {
-  const [ar, ag, ab] = rgb(a);
-  const [br, bg, bb] = rgb(b);
-  return Math.abs(ar - br) + Math.abs(ag - bg) + Math.abs(ab - bb);
-}
-
-function hexOf(n: number): string {
-  return `#${n.toString(16).padStart(6, '0')}`;
 }
 
 /** The sky colour directly beside a star on its own row (stars never touch, so x - 1 or x + 1 is sky). */
@@ -138,25 +130,14 @@ const STAR_READINGS: [string, PhaseReading][] = [
 ];
 
 /** The blends with Dawn in them, which bend through a via ramp instead of mixing straight. */
-const DAWN_BLENDS = [
-  ['purple-night', 'dawn'],
-  ['dawn', 'frosty-morning'],
-] as const;
-const DAWN_SIZES: [number, number][] = [
-  [130, 260],
-  [120, 420],
-  [240, 172],
-];
+const DAWN_BLENDS = BLEND_PAIRS.slice(0, 2);
+const DAWN_SIZES: [number, number][] = [[130, 260], [120, 420], [240, 172]];
 const DAWN_CASES: [number, number, number][] = DAWN_SIZES.flatMap(([w, h]) => [0.25, 0.5, 0.75].map((s): [number, number, number] => [w, h, s]));
 /** Most one channel may move from one sky row to the next before it shows as a band. */
 const MAX_SKY_STEP = 8;
 /** Mid-blend horizon floors: below these the colour reads as grey. */
 const MIN_HORIZON_CHROMA = 36;
 const MIN_HORIZON_SATURATION = 0.3;
-
-function rgb2n(r: number, g: number, b: number): number {
-  return (r << 16) | (g << 8) | b;
-}
 
 /** 3 seconds at 60 steps a second. */
 function sweep(phase: PhaseReading, seed = SEED): SceneFrame[] {
@@ -184,19 +165,17 @@ describe('sceneFrame: the picture', () => {
     },
   );
 
-  it('draws into a reused target the same picture as a fresh one', () => {
+  it('draws into a reused target the same picture as a fresh one; a target of the wrong length is a RangeError and is left alone', () => {
     const target = new Uint32Array(W * H);
     sceneFrame(input({ phase: steady('frosty-morning'), seed: 7 }), target);
     sceneFrame(input(), target);
-    expect(Array.from(target)).toEqual(Array.from(sceneFrame(input()).picture));
+    expect(Array.from(target)).toEqual(pic());
+    const short = new Uint32Array(W * H - 1).fill(SENTINEL);
+    expect(() => sceneFrame(input(), short)).toThrow(RangeError);
+    expect(short.every((c) => c === SENTINEL)).toBe(true);
   });
 
-  it('throws a RangeError for a target of the wrong length and leaves it alone', () => {
-    const target = new Uint32Array(W * H - 1).fill(SENTINEL);
-    expect(() => sceneFrame(input(), target)).toThrow(RangeError);
-    expect(target.every((c) => c === SENTINEL)).toBe(true);
-  });
-
+  // The last three rows: too narrow to hold the globe, too short for the countdown above it, and a height that is only the globe's.
   it.each([
     [0, H],
     [W, 0],
@@ -204,22 +183,17 @@ describe('sceneFrame: the picture', () => {
     [W + 0.5, H],
     [W, Number.NaN],
     [Number.POSITIVE_INFINITY, H],
+    [2 * GLOBE_RADIUS - 1, H],
+    [W, MIN_HEIGHT - 1],
+    [W, 2 * GLOBE_RADIUS],
   ])('throws a RangeError for a picture size of %s x %s', (width, height) => {
     expect(() => sceneFrame(input({ width, height }))).toThrow(RangeError);
     expect(() => sceneLayout(width, height, SEED)).toThrow(RangeError);
   });
 
-  it('throws a RangeError for a picture too narrow to hold the globe', () => {
-    expect(() => sceneFrame(input({ width: 2 * GLOBE_RADIUS - 1, height: H }))).toThrow(RangeError);
-    expect(() => sceneLayout(2 * GLOBE_RADIUS - 1, H, SEED)).toThrow(RangeError);
+  it('accepts the narrowest picture that holds the globe and the shortest, MIN_HEIGHT (172): the countdown area above the globe', () => {
     expect(sceneLayout(2 * GLOBE_RADIUS, MIN_HEIGHT, SEED).width).toBe(2 * GLOBE_RADIUS);
-  });
-
-  it('needs a height of at least MIN_HEIGHT (172): the countdown area above the globe', () => {
     expect(MIN_HEIGHT).toBe(172);
-    expect(() => sceneFrame(input({ height: MIN_HEIGHT - 1 }))).toThrow(RangeError);
-    expect(() => sceneLayout(W, MIN_HEIGHT - 1, SEED)).toThrow(RangeError);
-    expect(() => sceneLayout(W, 2 * GLOBE_RADIUS, SEED)).toThrow(RangeError);
     expect(sceneFrame(input({ height: MIN_HEIGHT })).picture.length).toBe(W * MIN_HEIGHT);
   });
 
@@ -232,25 +206,19 @@ describe('sceneFrame: the picture', () => {
     expect(l.groundTop).toBeLessThanOrEqual(l.globe.cy + l.globe.radius);
   });
 
-  it('rests the glass on the horizon where the picture is tall enough: groundTop is the globe\'s bottom from 240 x 260 up', () => {
+  it('rests the glass on the horizon from 240 x 260 up, sinks its foot into the base at the shortest picture, and raises the globe, never below the countdown, as the base needs room', () => {
     for (const height of [260, 300, 420, 1130]) {
       const l = sceneLayout(240, height, SEED);
       expect(l.groundTop, `height ${height}`).toBe(l.globe.cy + l.globe.radius);
     }
-  });
-
-  it('sinks the glass\'s foot into the base at the shortest picture, with the base\'s bottom 12 rows above the picture\'s', () => {
     const l = sceneLayout(240, MIN_HEIGHT, SEED);
     expect(l.groundTop + BASE_ROWS - BASE_SINK).toBe(MIN_HEIGHT - 12);
     expect(l.globe.cy + l.globe.radius, 'the glass reaches below the horizon').toBeGreaterThan(l.groundTop);
     expect(l.globe.cy - l.globe.radius, 'and stays under the countdown').toBeGreaterThanOrEqual(l.countdown.height);
-  });
-
-  it('raises the globe, never below the countdown, so that the base always fits: cy falls as the base needs room', () => {
     for (let height = MIN_HEIGHT; height <= 400; height += 7) {
-      const l = sceneLayout(240, height, SEED);
-      expect(l.globe.cy - l.globe.radius, `height ${height}`).toBeGreaterThanOrEqual(l.countdown.height);
-      expect(l.globe.cy + l.globe.radius - BASE_SINK, `height ${height}`).toBeLessThanOrEqual(height);
+      const g = sceneLayout(240, height, SEED);
+      expect(g.globe.cy - g.globe.radius, `height ${height}`).toBeGreaterThanOrEqual(g.countdown.height);
+      expect(g.globe.cy + g.globe.radius - BASE_SINK, `height ${height}`).toBeLessThanOrEqual(height);
     }
   });
 
@@ -261,23 +229,18 @@ describe('sceneFrame: the picture', () => {
 });
 
 describe('sceneFrame: determinism', () => {
-  it('gives an identical picture for identical inputs, in a fresh array each time', () => {
+  it('gives an identical picture for identical inputs, in a fresh array each time, with no hidden state: other calls in between change nothing', () => {
     const a = sceneFrame(input());
+    sceneFrame(input({ seed: 999, width: 320, height: 200, phase: steady('dawn'), time: 5 }));
+    sceneLayout(400, 300, 4242);
     const b = sceneFrame(input());
     expect(b.picture).not.toBe(a.picture);
     expect(Array.from(b.picture)).toEqual(Array.from(a.picture));
     expect(b.layout).toEqual(a.layout);
   });
 
-  it('keeps no hidden state: other calls in between do not change the result', () => {
-    const first = Array.from(sceneFrame(input()).picture);
-    sceneFrame(input({ seed: 999, width: 320, height: 200, phase: steady('dawn'), time: 5 }));
-    sceneLayout(400, 300, 4242);
-    expect(Array.from(sceneFrame(input()).picture)).toEqual(first);
-  });
-
   it('never calls Math.random, Date.now or performance.now', () => {
-    const expected = Array.from(sceneFrame(input()).picture);
+    const expected = pic();
     const stars = sceneLayout(W, H, SEED + 1).stars;
     vi.spyOn(Math, 'random').mockImplementation(() => {
       throw new Error('Math.random called');
@@ -288,22 +251,16 @@ describe('sceneFrame: determinism', () => {
     vi.spyOn(performance, 'now').mockImplementation(() => {
       throw new Error('performance.now called');
     });
-    expect(Array.from(sceneFrame(input()).picture)).toEqual(expected);
+    expect(pic()).toEqual(expected);
     expect(sceneLayout(W, H, SEED + 1).stars).toEqual(stars);
   });
 
-  it('takes the stars from the seed: a different seed moves them, the same seed keeps them', () => {
+  it('takes the stars from the seed: a different seed moves them, the same seed keeps them, and the edges 0 and 2^32 - 1 are accepted', () => {
     const a = sceneLayout(W, H, 1);
-    const b = sceneLayout(W, H, 2);
-    expect(b.stars).not.toEqual(a.stars);
+    expect(sceneLayout(W, H, 2).stars).not.toEqual(a.stars);
     expect(sceneLayout(W, H, 1).stars).toEqual(a.stars);
     expect(sceneFrame(input({ seed: 1 })).layout.stars).toEqual(a.stars);
-    const pa = Array.from(sceneFrame(input({ seed: 1 })).picture);
-    const pb = Array.from(sceneFrame(input({ seed: 2 })).picture);
-    expect(pb).not.toEqual(pa);
-  });
-
-  it('accepts the seed range edges 0 and 2^32 - 1', () => {
+    expect(pic({ seed: 2 })).not.toEqual(pic({ seed: 1 }));
     expect(sceneLayout(W, H, 0).stars.length).toBeGreaterThan(0);
     expect(sceneLayout(W, H, 0xffffffff).stars.length).toBeGreaterThan(0);
   });
@@ -313,44 +270,30 @@ describe('sceneFrame: determinism', () => {
     const a = sceneFrame(input({ time: T }));
     const b = sceneFrame(input({ time: T + 7_000 }));
     const stars = starSet(a.layout);
-    const { cx, cy, radius } = a.layout.globe;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        if (stars.has(`${x},${y}`)) continue;
-        if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= radius ** 2) continue;
-        if (at(a, x, y) !== at(b, x, y)) expect.fail(`non-star pixel ${x},${y} outside the glass changed with time`);
-      }
+    for (const [x, y] of grid(W, H)) {
+      if (stars.has(`${x},${y}`) || inGlass(a.layout, x, y, 0)) continue;
+      if (at(a, x, y) !== at(b, x, y)) expect.fail(`non-star pixel ${x},${y} outside the glass changed with time`);
     }
   });
 
   it('changes nothing outside the globe when only drag changes', () => {
     const a = sceneFrame(input({ drag: 0 }));
     const b = sceneFrame(input({ drag: 1.25 }));
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        if (nearGlobe(a.layout, x, y, 0)) continue;
-        if (at(a, x, y) !== at(b, x, y)) expect.fail(`pixel ${x},${y} outside the globe changed with drag`);
-      }
+    for (const [x, y] of grid(W, H)) {
+      if (nearGlobe(a.layout, x, y, 0)) continue;
+      if (at(a, x, y) !== at(b, x, y)) expect.fail(`pixel ${x},${y} outside the globe changed with drag`);
     }
   });
 });
 
 describe('sceneLayout: places', () => {
-  const SIZES: [number, number][] = [
-    [W, H],
-    [320, 180],
-    [240, 300],
-    [161, 172],
-    [2 * GLOBE_RADIUS, 172],
-  ];
+  const SIZES: [number, number][] = [[W, H], [320, 180], [240, 300], [161, 172], [2 * GLOBE_RADIUS, 172]];
 
-  it.each(SIZES)('keeps a %s x %s picture: frame.layout matches sceneLayout', (width, height) => {
+  it.each(SIZES)('lays out a %s x %s picture: frame.layout matches sceneLayout, the 21-across disc sits at the top left clear of the globe, radius 56, centred across, wholly inside', (width, height) => {
     expect(sceneFrame(input({ width, height })).layout).toEqual(sceneLayout(width, height, SEED));
     expect(sceneFrame(input({ width, height })).picture.length).toBe(width * height);
-  });
-
-  it.each(SIZES)('reserves the globe at %s x %s: radius 56, centred across, wholly inside', (width, height) => {
-    const { globe } = sceneLayout(width, height, SEED);
+    const l = sceneLayout(width, height, SEED);
+    const { globe } = l;
     expect(GLOBE_RADIUS).toBe(56);
     expect(globe.radius).toBe(GLOBE_RADIUS);
     expect(Math.abs(globe.cx - width / 2)).toBeLessThanOrEqual(0.5);
@@ -358,10 +301,6 @@ describe('sceneLayout: places', () => {
     expect(globe.cx + globe.radius).toBeLessThanOrEqual(width);
     expect(globe.cy - globe.radius).toBeGreaterThanOrEqual(0);
     expect(globe.cy + globe.radius).toBeLessThanOrEqual(height);
-  });
-
-  it.each(SIZES)('puts the 21-across disc at the top left of %s x %s, clear of the globe', (width, height) => {
-    const l = sceneLayout(width, height, SEED);
     expect(DISC_SIZE).toBe(21);
     expect(l.disc.width).toBe(21);
     expect(l.disc.height).toBe(21);
@@ -380,68 +319,27 @@ describe('sceneLayout: places', () => {
     301, 320, 360, 375, 390, 393, 412, 428, 480, 600, 640, 768, 800, 810, 820, 960, 1024, 1180, 1280, 1366, 1440, 1536, 1920, 2560, 3840,
   ];
 
-  it('leaves a 6 art pixel gap between the disc and the left edge', () => {
+  it('puts the disc at min(6, the widest left gap that clears the globe), at every width and height, in whole art pixels, never narrower than at a smaller width', () => {
+    const wrong: string[] = [];
     expect(DISC_MARGIN).toBe(6);
-  });
-
-  it.each([
-    ['360x700 at 2x', 180, 350],
-    ['1920x1130 at 1x', 1920, 1130],
-  ])('leaves a clear gap of several art pixels left of the disc at %s', (_name, width, height) => {
-    const l = sceneLayout(width, height, SEED);
-    expect(l.disc.x).toBe(6);
-    expect(l.disc.x).toBeGreaterThanOrEqual(4);
-  });
-
-  it('puts the disc at min(6, the widest left gap that clears the globe), never below 0, at every width and height', () => {
-    const wrong: string[] = [];
-    for (const height of HEIGHTS) {
-      for (const width of NARROW_TO_WIDE) {
-        const l = sceneLayout(width, height, SEED);
-        const want = expectedDiscX(l);
-        if (l.disc.x !== want) wrong.push(`${width}x${height}: x ${l.disc.x}, want ${want}`);
-      }
-    }
-    expect(wrong).toEqual([]);
-  });
-
-  it('keeps the full 6 gap at every width from 180 up, at every height', () => {
-    const wrong: string[] = [];
-    for (const height of HEIGHTS) {
-      for (const width of [...NARROW_TO_WIDE, 1000, 1500, 2000]) {
-        if (width < 180) continue;
-        const x = sceneLayout(width, height, SEED).disc.x;
-        if (x !== DISC_MARGIN) wrong.push(`${width}x${height}: x ${x}`);
-      }
-    }
-    expect(wrong).toEqual([]);
-  });
-
-  it('never lets the disc touch the globe where a gap exists that clears it, and never shrinks the gap needlessly', () => {
-    const wrong: string[] = [];
-    for (const height of HEIGHTS) {
-      for (const width of NARROW_TO_WIDE) {
-        const l = sceneLayout(width, height, SEED);
-        if (!discClearsAt(l, 0)) continue;
-        if (!discClearsAt(l, l.disc.x)) wrong.push(`${width}x${height}: disc at ${l.disc.x} overlaps the globe`);
-        if (l.disc.x < DISC_MARGIN && discClearsAt(l, l.disc.x + 1)) wrong.push(`${width}x${height}: gap ${l.disc.x} is narrower than needed`);
-      }
-    }
-    expect(wrong).toEqual([]);
-  });
-
-  it('keeps the gap in whole art pixels, from 0 to 6, and never shrinks it as the picture gets wider', () => {
     for (const height of HEIGHTS) {
       let last = -1;
-      for (const width of NARROW_TO_WIDE) {
-        const x = sceneLayout(width, height, SEED).disc.x;
-        expect(Number.isInteger(x), `${width}x${height}`).toBe(true);
-        expect(x).toBeGreaterThanOrEqual(0);
-        expect(x).toBeLessThanOrEqual(DISC_MARGIN);
-        expect(x, `${width}x${height} narrower than at the previous width`).toBeGreaterThanOrEqual(last);
+      for (const width of [...NARROW_TO_WIDE, 1000, 1500, 2000]) {
+        const l = sceneLayout(width, height, SEED);
+        const x = l.disc.x;
+        const want = expectedDiscX(l);
+        const where = `${width}x${height}`;
+        if (x !== want) wrong.push(`${where}: x ${x}, want ${want}`);
+        if (!Number.isInteger(x) || x < 0 || x > DISC_MARGIN) wrong.push(`${where}: x ${x} is not a whole gap from 0 to ${DISC_MARGIN}`);
+        if (x < last) wrong.push(`${where}: gap ${x} narrower than at the previous width (${last})`);
         last = x;
+        if (width >= 180 && x !== DISC_MARGIN) wrong.push(`${where}: x ${x}, not the full gap from 180 up`);
+        if (!discClearsAt(l, 0)) continue;
+        if (!discClearsAt(l, x)) wrong.push(`${where}: disc at ${x} overlaps the globe`);
+        if (x < DISC_MARGIN && discClearsAt(l, x + 1)) wrong.push(`${where}: gap ${x} is narrower than needed`);
       }
     }
+    expect(wrong).toEqual([]);
   });
 
   it('does not let the seed move the disc', () => {
@@ -465,16 +363,13 @@ describe('sceneLayout: places', () => {
     expect(x).toBe(6);
   });
 
-  it('has sky above and ground below, both growing with a taller picture', () => {
+  it('has sky above and ground below, both growing with a taller picture, and runs the same sky bands and ground right across a wider picture', () => {
     const small = sceneLayout(W, H, SEED);
     const tall = sceneLayout(W, H + 60, SEED);
     expect(small.groundTop).toBeGreaterThan(0);
     expect(small.groundTop).toBeLessThan(H);
     expect(tall.groundTop).toBeGreaterThan(small.groundTop);
     expect(H + 60 - tall.groundTop).toBeGreaterThanOrEqual(H - small.groundTop);
-  });
-
-  it('runs the same sky bands and ground right across a wider picture', () => {
     const narrow = sceneFrame(input({ phase: steady('frosty-morning') }));
     const wide = sceneFrame(input({ phase: steady('frosty-morning'), width: W + 80 }));
     expect(wide.layout.groundTop).toBe(narrow.layout.groundTop);
@@ -486,27 +381,18 @@ describe('sceneLayout: places', () => {
     expect(at(wide, W + 79, top)).not.toBe(rowSky(wide, top - 1));
   });
 
-  it('places stars only in open sky: above the ground, off the disc, outside the globe', () => {
-    const l = sceneLayout(W, H, SEED);
+  it.each([SEED, 1, 2, 3, 77, 0xffffffff])('places stars only in open sky (above the ground, off the disc, outside the globe) and never lets two touch (seed %s)', (seed) => {
+    const l = sceneLayout(W, H, seed);
+    const set = starSet(l);
     expect(l.stars.length).toBeGreaterThanOrEqual(10);
+    expect(set.size).toBe(l.stars.length);
     for (const s of l.stars) {
       expect(Number.isInteger(s.x) && Number.isInteger(s.y)).toBe(true);
       expect(s.x >= 0 && s.x < W && s.y >= 0 && s.y < l.groundTop, `star ${s.x},${s.y}`).toBe(true);
       expect(inDisc(l, s.x, s.y), `star ${s.x},${s.y} on the disc`).toBe(false);
       expect(nearGlobe(l, s.x, s.y, 1), `star ${s.x},${s.y} in the globe`).toBe(false);
-    }
-  });
-
-  it.each([1, 2, 3, 77, 0xffffffff])('never lets two stars touch (seed %s)', (seed) => {
-    const l = sceneLayout(W, H, seed);
-    const set = starSet(l);
-    expect(set.size).toBe(l.stars.length);
-    for (const s of l.stars) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          expect(set.has(`${s.x + dx},${s.y + dy}`), `stars touch at ${s.x},${s.y}`).toBe(false);
-        }
+      for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
+        expect(set.has(`${s.x + dx},${s.y + dy}`), `stars touch at ${s.x},${s.y}`).toBe(false);
       }
     }
   });
@@ -552,27 +438,16 @@ describe('sceneFrame: sky, ground and disc', () => {
     }
   });
 
-  it.each(PHASES)('keeps the top sky row identical to the countdown plain sky in %s', (p) => {
-    expect(rowSky(sceneFrame(input({ phase: steady(p) })), 0)).toBe(hexNum(skyAndInk(steady(p)).sky));
-  });
-
-  it.each([
-    ['purple-night', 'dawn'],
-    ['dawn', 'frosty-morning'],
-    ['frosty-morning', 'sunset'],
-    ['sunset', 'purple-night'],
-  ] as const)('keeps the top sky row identical to the countdown sky through the %s -> %s blend', (from, to) => {
+  it('keeps the top sky row identical to the countdown sky in every phase, through every blend, and at a clock reading taken by phaseAt (17:20, sunset blend)', () => {
     const shares = [...Array.from({ length: 21 }, (_, i) => i / 20).filter((s) => s < 1), 0.39, 0.4, 0.41, 0.999];
-    for (const share of shares) {
-      const reading: PhaseReading = { from, to, share };
-      expect(rowSky(sceneFrame(input({ phase: reading })), 0), `share ${share}`).toBe(hexNum(skyAndInk(reading).sky));
-    }
-  });
-
-  it('matches the countdown sky at a clock reading taken by phaseAt (17:20, sunset blend)', () => {
+    const same = (reading: PhaseReading, label: string): void => {
+      expect(rowSky(sceneFrame(input({ phase: reading })), 0), label).toBe(hexNum(skyAndInk(reading).sky));
+    };
+    for (const p of PHASES) same(steady(p), p);
+    for (const [from, to] of BLEND_PAIRS) for (const share of shares) same({ from, to, share }, `${from} -> ${to} share ${share}`);
     const reading = phaseAt(new Date(2026, 11, 1, 17, 20, 0));
     expect(reading.share).toBeGreaterThan(0);
-    expect(rowSky(sceneFrame(input({ phase: reading })), 0)).toBe(hexNum(skyAndInk(reading).sky));
+    same(reading, 'phaseAt 17:20');
   });
 
   /** The disc drawing from the Props sheet, and the colour number of its body (its most used drawn colour). */
@@ -588,7 +463,8 @@ describe('sceneFrame: sky, ground and disc', () => {
   }
 
   /** The one frame colour of every body pixel; fails if the body pixels disagree. */
-  function bodyColour(f: SceneFrame): number {
+  function bodyColour(phase: PhaseReading): number {
+    const f = sceneFrame(input({ phase }));
     const { pixels, body } = discArt();
     const seen = new Set<number>();
     for (let i = 0; i < 441; i++) if (pixels[i] === body) seen.add(at(f, f.layout.disc.x + (i % 21), f.layout.disc.y + Math.floor(i / 21)));
@@ -596,72 +472,59 @@ describe('sceneFrame: sky, ground and disc', () => {
     return [...seen][0] ?? -1;
   }
 
-  it.each(PHASES)('draws the disc in %s from the Props sheet shape: one colour per drawn colour, the sky through its clear pixels', (p) => {
-    const { pixels } = discArt();
-    const f = sceneFrame(input({ phase: steady(p) }));
-    const { x: dx, y: dy } = f.layout.disc;
-    const byNumber = new Map<number, number>();
-    for (let y = 0; y < 21; y++) {
-      for (let x = 0; x < 21; x++) {
-        const n = pixels[y * 21 + x] ?? 0;
-        const got = at(f, dx + x, dy + y);
-        if (n === 0) {
-          expect(got, `${p}: clear disc pixel ${x},${y} shows the sky`).toBe(rowSky(f, dy + y));
-          continue;
-        }
-        const seen = byNumber.get(n);
-        if (seen === undefined) byNumber.set(n, got);
-        else expect(got, `${p}: disc pixel ${x},${y} (drawn colour ${n})`).toBe(seen);
-      }
-    }
-    // The outline still reads: the drawn rim colour is not the sky behind it.
-    expect(byNumber.size).toBeGreaterThan(1);
-  });
-
-  it.each(STAR_READINGS)('keeps the disc\'s snow-white highlight pure white in %s (as the base\'s white lettering ink is)', (_name, phase) => {
+  it.each(STAR_READINGS)('draws the disc in %s from the Props sheet shape: one colour per drawn colour, the sky through its clear pixels, the snow-white highlight pure white (as the base\'s white lettering ink is)', (p, phase) => {
     const { pixels } = discArt();
     const white = masterColours.indexOf('#ffffff') + 1;
     const f = sceneFrame(input({ phase }));
     const { x: dx, y: dy } = f.layout.disc;
-    let seen = 0;
-    for (let y = 0; y < 21; y++) {
-      for (let x = 0; x < 21; x++) {
-        if ((pixels[y * 21 + x] ?? 0) !== white) continue;
-        seen++;
-        expect(at(f, dx + x, dy + y), `highlight pixel ${x},${y}`).toBe(0xffffff);
+    const byNumber = new Map<number, number>();
+    let highlights = 0;
+    for (const [x, y] of grid(21, 21)) {
+      const n = pixels[y * 21 + x] ?? 0;
+      const got = at(f, dx + x, dy + y);
+      if (n === white) {
+        highlights++;
+        expect(got, `${p}: highlight pixel ${x},${y}`).toBe(0xffffff);
       }
+      if (n === 0) {
+        expect(got, `${p}: clear disc pixel ${x},${y} shows the sky`).toBe(rowSky(f, dy + y));
+        continue;
+      }
+      const seen = byNumber.get(n);
+      if (seen === undefined) byNumber.set(n, got);
+      else expect(got, `${p}: disc pixel ${x},${y} (drawn colour ${n})`).toBe(seen);
     }
-    expect(seen, 'the Props sheet disc has snow-white highlight pixels').toBeGreaterThan(0);
+    // The outline still reads: the drawn rim colour is not the sky behind it.
+    expect(byNumber.size).toBeGreaterThan(1);
+    expect(highlights, 'the Props sheet disc has snow-white highlight pixels').toBeGreaterThan(0);
   });
 
-  it('shows a cool moon at night and a warm sun by day: the disc body changes colour, not shape', () => {
+  it('shows a cool moon at night and a warm sun by day, with dawn and sunset between: the disc body changes colour, not shape', () => {
     const night = sceneFrame(input({ phase: steady('purple-night') }));
     const day = sceneFrame(input({ phase: steady('frosty-morning') }));
     expect(day.layout.disc).toEqual(night.layout.disc);
-    const [nr, , nb] = rgb(bodyColour(night));
-    const [dr, , db] = rgb(bodyColour(day));
-    expect(nb, `night body #${bodyColour(night).toString(16)} must be cool (blue >= red)`).toBeGreaterThanOrEqual(nr);
-    expect(dr - db, `day body #${bodyColour(day).toString(16)} must be warm (red - blue >= 60)`).toBeGreaterThanOrEqual(60);
-    expect(distance(bodyColour(night), bodyColour(day)), 'moon and sun bodies clearly apart').toBeGreaterThanOrEqual(90);
-  });
-
-  it.each(['dawn', 'sunset'] as const)('gives the %s disc body a colour between the moon and the sun', (p) => {
-    const night = bodyColour(sceneFrame(input({ phase: steady('purple-night') })));
-    const day = bodyColour(sceneFrame(input({ phase: steady('frosty-morning') })));
-    const mid = bodyColour(sceneFrame(input({ phase: steady(p) })));
-    expect(mid, `${p} body is the moon's`).not.toBe(night);
+    const [moon, sun] = [bodyColour(steady('purple-night')), bodyColour(steady('frosty-morning'))];
+    const [nr, , nb] = rgb(moon);
+    const [dr, , db] = rgb(sun);
+    expect(nb, `night body #${moon.toString(16)} must be cool (blue >= red)`).toBeGreaterThanOrEqual(nr);
+    expect(dr - db, `day body #${sun.toString(16)} must be warm (red - blue >= 60)`).toBeGreaterThanOrEqual(60);
+    expect(distance(moon, sun), 'moon and sun bodies clearly apart').toBeGreaterThanOrEqual(90);
     const warmth = (c: number): number => rgb(c)[0] - rgb(c)[2];
-    expect(warmth(mid)).toBeGreaterThan(warmth(night));
-    expect(warmth(mid)).toBeLessThanOrEqual(warmth(day));
+    for (const p of ['dawn', 'sunset'] as const) {
+      const mid = bodyColour(steady(p));
+      expect(mid, `${p} body is the moon's`).not.toBe(moon);
+      expect(warmth(mid), `${p} warmer than the moon`).toBeGreaterThan(warmth(moon));
+      expect(warmth(mid), `${p} no warmer than the sun`).toBeLessThanOrEqual(warmth(sun));
+    }
   });
 
   it.each(BLEND_PAIRS)('moves the disc body steadily from %s to %s through the blend', (from, to) => {
-    const a = rgb(bodyColour(sceneFrame(input({ phase: steady(from) }))));
-    const b = rgb(bodyColour(sceneFrame(input({ phase: steady(to) }))));
+    const a = rgb(bodyColour(steady(from)));
+    const b = rgb(bodyColour(steady(to)));
     let prev = a;
     for (let i = 1; i <= 19; i++) {
       const share = i / 20;
-      const got = rgb(bodyColour(sceneFrame(input({ phase: { from, to, share } }))));
+      const got = rgb(bodyColour({ from, to, share }));
       for (let c = 0; c < 3; c++) {
         const lo = Math.min(a[c] ?? 0, b[c] ?? 0) - 1;
         const hi = Math.max(a[c] ?? 0, b[c] ?? 0) + 1;
@@ -682,28 +545,23 @@ describe('sceneFrame: phases are colour tables only', () => {
     expect(sceneFrame(input({ phase: { from: 'dawn', to: 'frosty-morning', share: 0.3 } })).layout).toEqual(base);
   });
 
-  it.each(PHASES.filter((p) => p !== 'purple-night'))(
-    'gives %s the same picture as purple night with only the colours swapped',
-    (p) => {
-      const night = sceneFrame(input({ phase: steady('purple-night') }));
-      const other = sceneFrame(input({ phase: steady(p) }));
-      const stars = starSet(night.layout);
-      const map = new Map<number, number>();
-      let changed = 0;
-      for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-          if (stars.has(`${x},${y}`) || nearGlobe(night.layout, x, y)) continue;
-          const n = at(night, x, y);
-          const o = at(other, x, y);
-          if (n !== o) changed++;
-          const seen = map.get(n);
-          if (seen === undefined) map.set(n, o);
-          else if (seen !== o) expect.fail(`${p}: night colour ${n.toString(16)} maps to both ${seen.toString(16)} and ${o.toString(16)} (at ${x},${y})`);
-        }
-      }
-      expect(changed).toBeGreaterThan(0);
-    },
-  );
+  it.each(PHASES.filter((p) => p !== 'purple-night'))('gives %s the same picture as purple night with only the colours swapped', (p) => {
+    const night = sceneFrame(input({ phase: steady('purple-night') }));
+    const other = sceneFrame(input({ phase: steady(p) }));
+    const stars = starSet(night.layout);
+    const map = new Map<number, number>();
+    let changed = 0;
+    for (const [x, y] of grid(W, H)) {
+      if (stars.has(`${x},${y}`) || nearGlobe(night.layout, x, y)) continue;
+      const n = at(night, x, y);
+      const o = at(other, x, y);
+      if (n !== o) changed++;
+      const seen = map.get(n);
+      if (seen === undefined) map.set(n, o);
+      else if (seen !== o) expect.fail(`${p}: night colour ${n.toString(16)} maps to both ${seen.toString(16)} and ${o.toString(16)} (at ${x},${y})`);
+    }
+    expect(changed).toBeGreaterThan(0);
+  });
 
   it('shows no stars in Frosty morning, faint ones at Dawn and Sunset, full ones in Purple night (lighter than the sky beside them)', () => {
     // Signed: a star darker than the sky beside it counts against its phase.
@@ -779,48 +637,38 @@ describe('sceneFrame: blends', () => {
     const from = sceneFrame(input({ phase: steady(reading.from) }));
     const to = sceneFrame(input({ phase: steady(reading.to) }));
     const stars = starSet(mixed.layout);
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        if (stars.has(`${x},${y}`) || nearGlobe(mixed.layout, x, y)) continue;
-        const a = rgb(at(from, x, y));
-        const b = rgb(at(to, x, y));
-        const got = rgb(at(mixed, x, y));
-        for (let c = 0; c < 3; c++) {
-          const want = (a[c] ?? 0) * (1 - share) + (b[c] ?? 0) * share;
-          if (Math.abs((got[c] ?? 0) - want) > 1) expect.fail(`pixel ${x},${y} channel ${c}: ${got[c]} is not the mix ${want}`);
-        }
+    for (const [x, y] of grid(W, H)) {
+      if (stars.has(`${x},${y}`) || nearGlobe(mixed.layout, x, y)) continue;
+      const a = rgb(at(from, x, y));
+      const b = rgb(at(to, x, y));
+      const got = rgb(at(mixed, x, y));
+      for (let c = 0; c < 3; c++) {
+        const want = (a[c] ?? 0) * (1 - share) + (b[c] ?? 0) * share;
+        if (Math.abs((got[c] ?? 0) - want) > 1) expect.fail(`pixel ${x},${y} channel ${c}: ${got[c]} is not the mix ${want}`);
       }
     }
   });
 
   describe.each(DAWN_BLENDS)('%s -> %s, through its via ramp', (from, to) => {
     it.each(DAWN_SIZES)('is the steady pictures at share 0 and 1, pixel for pixel, at %ix%i', (width, height) => {
-      const start = sceneFrame(input({ width, height, phase: { from, to, share: 0 } }));
-      const end = sceneFrame(input({ width, height, phase: { from, to, share: 1 } }));
-      expect(Array.from(start.picture)).toEqual(Array.from(sceneFrame(input({ width, height, phase: steady(from) })).picture));
-      expect(Array.from(end.picture)).toEqual(Array.from(sceneFrame(input({ width, height, phase: steady(to) })).picture));
+      expect(pic({ width, height, phase: { from, to, share: 0 } })).toEqual(pic({ width, height, phase: steady(from) }));
+      expect(pic({ width, height, phase: { from, to, share: 1 } })).toEqual(pic({ width, height, phase: steady(to) }));
     });
 
-    it.each(DAWN_CASES)('keeps the countdown strip the countdown sky at %ix%i, share %d', (width, height, share) => {
+    it.each(DAWN_CASES)('keeps the countdown strip the countdown sky, then runs the sky smoothly to the horizon (no channel steps more than 8 between rows), at %ix%i, share %d', (width, height, share) => {
       const reading: PhaseReading = { from, to, share };
       const f = sceneFrame(input({ width, height, phase: reading }));
       const want = hexNum(skyAndInk(reading).sky);
       const c = f.layout.countdown;
-      for (let y = c.y; y < c.y + c.height; y++) {
-        for (let x = c.x; x < c.x + c.width; x++) {
-          if (at(f, x, y) !== want) expect.fail(`countdown pixel ${x},${y} is ${hexOf(at(f, x, y))}, not the countdown sky ${hexOf(want)}`);
-        }
+      for (const [x, y] of cells(c)) {
+        if (at(f, x, y) !== want) expect.fail(`countdown pixel ${x},${y} is ${hexOf(at(f, x, y))}, not the countdown sky ${hexOf(want)}`);
       }
-    });
-
-    it.each(DAWN_CASES)('runs the sky smoothly from the strip to the horizon at %ix%i, share %d: no channel steps more than 8 between rows', (width, height, share) => {
-      const f = sceneFrame(input({ width, height, phase: { from, to, share } }));
       for (let y = 1; y < f.layout.groundTop; y++) {
         const above = rgb(rowSky(f, y - 1));
         const here = rgb(rowSky(f, y));
-        for (let c = 0; c < 3; c++) {
-          const step = Math.abs((here[c] ?? 0) - (above[c] ?? 0));
-          if (step > MAX_SKY_STEP) expect.fail(`row ${y - 1} -> ${y} channel ${c} steps ${step}`);
+        for (let ch = 0; ch < 3; ch++) {
+          const step = Math.abs((here[ch] ?? 0) - (above[ch] ?? 0));
+          if (step > MAX_SKY_STEP) expect.fail(`row ${y - 1} -> ${y} channel ${ch} steps ${step}`);
         }
       }
     });
@@ -830,29 +678,28 @@ describe('sceneFrame: blends', () => {
       // 0.36), dawn -> frosty morning #f5cad6 (chroma 43, saturation 0.68).
       // The straight mix would be #a2848f-ish (0.14) and #cbccc8 (0.04).
       const f = sceneFrame(input({ width, height, phase: { from, to, share: 0.5 } }));
-      const [r, g, b] = rgb(rowSky(f, f.layout.groundTop - 1));
+      const horizon = rowSky(f, f.layout.groundTop - 1);
+      const [r, g, b] = rgb(horizon);
       const max = Math.max(r, g, b);
       const min = Math.min(r, g, b);
       const lightness = (max + min) / 510;
       const saturation = max === min ? 0 : (max - min) / 255 / (1 - Math.abs(2 * lightness - 1));
-      expect(max - min, `horizon ${hexOf(rgb2n(r, g, b))} chroma`).toBeGreaterThanOrEqual(MIN_HORIZON_CHROMA);
-      expect(saturation, `horizon ${hexOf(rgb2n(r, g, b))} saturation`).toBeGreaterThanOrEqual(MIN_HORIZON_SATURATION);
+      expect(max - min, `horizon ${hexOf(horizon)} chroma`).toBeGreaterThanOrEqual(MIN_HORIZON_CHROMA);
+      expect(saturation, `horizon ${hexOf(horizon)} saturation`).toBeGreaterThanOrEqual(MIN_HORIZON_SATURATION);
     });
 
     it('gives the same frame for the same inputs, also after a frame of another size', () => {
       const reading: PhaseReading = { from, to, share: 0.5 };
-      const first = Array.from(sceneFrame(input({ width: 130, height: 260, phase: reading })).picture);
+      const first = pic({ width: 130, height: 260, phase: reading });
       sceneFrame(input({ width: 240, height: 172, phase: { from, to, share: 0.25 } }));
-      const again = sceneFrame(input({ width: 130, height: 260, phase: reading }));
-      expect(Array.from(again.picture)).toEqual(first);
-      expect(Array.from(sceneFrame(input({ width: 130, height: 260, phase: reading })).picture)).toEqual(first);
+      expect(pic({ width: 130, height: 260, phase: reading })).toEqual(first);
     });
   });
 
   it('differs mid-blend from both steady phases', () => {
-    const mid = Array.from(sceneFrame(input({ phase: { from: 'sunset', to: 'purple-night', share: 0.5 } })).picture);
-    expect(mid).not.toEqual(Array.from(sceneFrame(input({ phase: steady('sunset') })).picture));
-    expect(mid).not.toEqual(Array.from(sceneFrame(input({ phase: steady('purple-night') })).picture));
+    const mid = pic({ phase: { from: 'sunset', to: 'purple-night', share: 0.5 } });
+    expect(mid).not.toEqual(pic({ phase: steady('sunset') }));
+    expect(mid).not.toEqual(pic({ phase: steady('purple-night') }));
   });
 });
 
@@ -900,26 +747,16 @@ describe('sceneFrame: twinkling stars', () => {
 
 describe('sceneFrame: never touches the page', () => {
   it('runs with document, window and canvas globals that throw on any use', () => {
-    const trap = new Proxy(
-      {},
-      {
-        get: (_t, key) => {
-          throw new Error(`page global touched: ${String(key)}`);
-        },
-      },
-    );
-    vi.stubGlobal('document', trap);
-    vi.stubGlobal('window', trap);
-    vi.stubGlobal('OffscreenCanvas', trap);
-    vi.stubGlobal('ImageData', trap);
+    const trap = new Proxy({}, { get: (_t, key) => { throw new Error(`page global touched: ${String(key)}`); } });
+    for (const name of ['document', 'window', 'OffscreenCanvas', 'ImageData']) vi.stubGlobal(name, trap);
     const f = sceneFrame(input({ phase: { from: 'frosty-morning', to: 'sunset', share: 0.5 } }));
     expect(f.picture.length).toBe(W * H);
   });
 });
 
 /** A flake at art px (x, y) from the globe centre, depth z; a flake is one art pixel. */
-function flake(x: number, y: number, z: number, over: Partial<Flake> = {}): Flake {
-  return { x, y, z, resting: false, phase: 0, ...over };
+function flake(x: number, y: number, z: number): Flake {
+  return { x, y, z, resting: false, phase: 0 };
 }
 
 /** A settled snow of real flakes, stepped for a while so it has a spread of depths. */
@@ -930,25 +767,20 @@ function settledSnow(): GlobeSnow {
 }
 
 describe('globe snow is not in the scene picture (XMAS-84)', () => {
-  for (const p of PHASES) {
-    it(`in ${p} the picture is the same with the snow as without it`, () => {
-      const snow = settledSnow();
-      expect(sceneFrame(input({ snow, phase: steady(p) })).picture).toEqual(sceneFrame(input({ phase: steady(p) })).picture);
-    });
-  }
+  it.each(PHASES)('in %s the picture is the same with the snow as without it', (p) => {
+    expect(pic({ snow: settledSnow(), phase: steady(p) })).toEqual(pic({ phase: steady(p) }));
+  });
 
   it('the frame with the shapes left out carries no picture of Santa or the flakes: they are the page\'s steps (XMAS-83, XMAS-84)', () => {
-    const snow = settledSnow();
-    const withSnow = sceneFrame(input({ snow, shapeBodies: false }));
-    const without = sceneFrame(input({ shapeBodies: false }));
-    expect(withSnow).toEqual(without);
+    const withSnow = sceneFrame(input({ snow: settledSnow(), shapeBodies: false }));
+    expect(withSnow).toEqual(sceneFrame(input({ shapeBodies: false })));
     expect(Object.keys(withSnow).sort()).toEqual(['height', 'layout', 'picture', 'width']);
   });
 
   it('one flake in front and one behind leave the picture exactly as it was', () => {
     const snow: GlobeSnow = { flakes: [flake(10.25, -20.75, 20), flake(-5, 5, -20)], stir: 0 };
-    expect(sceneFrame(input({ snow })).picture).toEqual(sceneFrame(input()).picture);
-    expect(sceneFrame(input({ snow, shapeBodies: false })).picture).toEqual(sceneFrame(input({ shapeBodies: false })).picture);
+    expect(pic({ snow })).toEqual(pic());
+    expect(pic({ snow, shapeBodies: false })).toEqual(pic({ shapeBodies: false }));
   });
 });
 
@@ -969,13 +801,7 @@ describe('sceneLayout: the countdown area', () => {
     expect(sceneLayout(W, H, SEED).countdown.height).toBe(SKY_ABOVE + lastRow + 1);
     expect(COUNTDOWN_HEIGHT).toBe(SKY_ABOVE + lastRow + 1);
   });
-  const AREA_SIZES: [number, number][] = [
-    [130, 260],
-    [130, 172],
-    [2 * GLOBE_RADIUS, 172],
-    [W, H],
-    [320, 200],
-  ];
+  const AREA_SIZES: [number, number][] = [[130, 260], [130, 172], [2 * GLOBE_RADIUS, 172], [W, MIN_HEIGHT], [W, H], [320, 200]];
   const READINGS: PhaseReading[] = [
     ...PHASES.map(steady),
     ...BLEND_PAIRS.flatMap(([from, to]) =>
@@ -983,21 +809,19 @@ describe('sceneLayout: the countdown area', () => {
     ),
   ];
 
-  it.each(AREA_SIZES)('reserves the full-width top of a %s x %s picture, as tall as the countdown frame', (width, height) => {
-    const l = sceneLayout(width, height, SEED);
-    expect(l.countdown).toEqual({ x: 0, y: 0, width, height: COUNTDOWN_HEIGHT });
-    expect(sceneFrame(input({ width, height })).layout.countdown).toEqual(l.countdown);
-  });
-
-  it.each(AREA_SIZES)('keeps the globe, the disc and every star out of the countdown area at %s x %s', (width, height) => {
-    for (const seed of [1, 31, SEED, 0xffffffff]) {
+  it.each(AREA_SIZES)('reserves the full-width top of a %s x %s picture, as tall as the countdown frame, and keeps the globe, the disc and every star out of it', (width, height) => {
+    expect(sceneFrame(input({ width, height })).layout.countdown).toEqual(sceneLayout(width, height, SEED).countdown);
+    for (const seed of [0, 1, 31, SEED, 0xffffffff]) {
       const l = sceneLayout(width, height, seed);
       const c = l.countdown;
-      const inArea = (x: number, y: number): boolean => x >= c.x && x < c.x + c.width && y >= c.y && y < c.y + c.height;
-      expect(l.globe.cy - l.globe.radius, 'globe top').toBeGreaterThanOrEqual(c.y + c.height);
-      expect(l.disc.y, 'disc top').toBeGreaterThanOrEqual(c.y + c.height);
-      expect(l.groundTop).toBeGreaterThan(c.y + c.height);
-      for (const s of l.stars) expect(inArea(s.x, s.y), `seed ${seed}: star ${s.x},${s.y} in the countdown area`).toBe(false);
+      const bottom = c.y + c.height;
+      expect(c, 'countdown area').toEqual({ x: 0, y: 0, width, height: COUNTDOWN_HEIGHT });
+      expect(l.globe.cy - l.globe.radius, 'globe top').toBeGreaterThanOrEqual(bottom);
+      expect(l.disc.y, 'disc top').toBeGreaterThanOrEqual(bottom);
+      expect(l.groundTop).toBeGreaterThan(bottom);
+      // Where even x = 0 overlaps the globe (the narrowest pictures) there is nothing to assert.
+      if (discClearsAt(l, 0)) expect(discClearsAt(l, l.disc.x), 'disc in the globe').toBe(true);
+      for (const s of l.stars) expect(s.y >= bottom, `seed ${seed}: star ${s.x},${s.y} in the countdown area`).toBe(true);
     }
   });
 
@@ -1010,12 +834,10 @@ describe('sceneLayout: the countdown area', () => {
       const c = (f.layout.countdown as SceneLayout['countdown'] | undefined) ?? { x: 0, y: 0, width, height: COUNTDOWN_HEIGHT };
       let worst = Number.POSITIVE_INFINITY;
       let worstSky = '';
-      for (let y = c.y; y < c.y + c.height; y++) {
-        for (let x = c.x; x < c.x + c.width; x++) {
-          const sky = hexOf(at(f, x, y));
-          const ratio = contrast(sky, ink);
-          if (ratio < worst) [worst, worstSky] = [ratio, sky];
-        }
+      for (const [x, y] of cells(c)) {
+        const sky = hexOf(at(f, x, y));
+        const ratio = contrast(sky, ink);
+        if (ratio < worst) [worst, worstSky] = [ratio, sky];
       }
       if (worst < MIN_CONTRAST_RATIO) {
         failures.push(`${reading.from} -> ${reading.to} at ${reading.share}: ink ${ink} on sky ${worstSky} is ${worst.toFixed(2)}:1`);
@@ -1024,32 +846,13 @@ describe('sceneLayout: the countdown area', () => {
     expect(failures).toEqual([]);
   });
 
-  it('keeps the countdown area, the globe and the disc apart at the smallest picture, MIN_HEIGHT tall', () => {
-    for (const width of [2 * GLOBE_RADIUS, 130, W]) {
-      for (const seed of [0, 31, 0xffffffff]) {
-        const l = sceneLayout(width, MIN_HEIGHT, seed);
-        const c = l.countdown;
-        const bottom = c.y + c.height;
-        expect(c).toEqual({ x: 0, y: 0, width, height: COUNTDOWN_HEIGHT });
-        expect(l.globe.cy - l.globe.radius, `${width}: globe reaches the countdown area`).toBeGreaterThanOrEqual(bottom);
-        expect(l.disc.y, `${width}: disc in the countdown area`).toBeGreaterThanOrEqual(bottom);
-        // Where even x = 0 overlaps the globe (the narrowest pictures) there is nothing to assert.
-        if (discClearsAt(l, 0)) expect(discClearsAt(l, l.disc.x), `${width}: disc in the globe`).toBe(true);
-        for (const s of l.stars) expect(s.y >= bottom, `${width} seed ${seed}: star ${s.x},${s.y} in the countdown area`).toBe(true);
-      }
-    }
-  });
-
   it('keeps the countdown area plain sky: one colour per row, no star, no disc', () => {
     for (const reading of [steady('purple-night'), steady('sunset'), { from: 'frosty-morning', to: 'sunset', share: 0.5 } as PhaseReading]) {
       for (const time of [T, T + 1_500, T + 4_000]) {
         const f = sceneFrame(input({ width: 130, height: 260, phase: reading, time }));
         const c = f.layout.countdown;
-        for (let y = c.y; y < c.y + c.height; y++) {
-          const first = at(f, c.x, y);
-          for (let x = c.x; x < c.x + c.width; x++) {
-            if (at(f, x, y) !== first) expect.fail(`${reading.from}->${reading.to} t ${time}: countdown row ${y} is not one colour at x ${x}`);
-          }
+        for (const [x, y] of cells(c)) {
+          if (at(f, x, y) !== at(f, c.x, y)) expect.fail(`${reading.from}->${reading.to} t ${time}: countdown row ${y} is not one colour at x ${x}`);
         }
       }
     }
