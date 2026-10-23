@@ -1,11 +1,11 @@
 // XMAS-32d "The globe", slice 4: Santa with his sleigh and two reindeer
 // circling high inside the globe (XMAS-32 acceptance criteria). He is one flat
 // drawing (santa-trot-1 / santa-trot-2, 48 x 12 art pixels, from the Santa
-// sheet) with two trot frames, always at his full width (squeeze is exactly 1
-// all the way round), mirrored when flying the other way, point-sampled onto whole picture pixels (crisp: every pixel is one of
-// his own colours, never a mix; XMAS-75), clipped to the
-// glass, and painted in his own colours whatever the phase. Same inputs give
-// the same picture; nothing is random.
+// sheet), always at his full width (squeeze is exactly 1 all the way round),
+// mirrored when flying the other way, point-sampled onto whole picture pixels
+// (crisp: every pixel is one of his own colours, never a mix; XMAS-75),
+// clipped to the glass, and painted in his own colours whatever the phase.
+// Nothing is random.
 //
 // Interface pinned here (from prototype/visual-direction/variant-b.js):
 //   santaPlacement(turn, timeMs) -> { angle, x, y, depth, squeeze, mirrored, trot }
@@ -20,9 +20,9 @@
 //     projectPoint uses for depth), squeeze = 1,
 //     mirrored = depth > 0, trot = floor(7 t) % 2.
 //   drawSanta(picture, width, layout, turn, timeMs) paints the drawing centred
-//   on that placement (its box's middle on (cx + x, cy + y)), mirrored when mirrored, transparent pixels skipped, clipped to
-//   the glass circle. Non-finite turn or time: RangeError, picture untouched
-//   (as projectShape and drawShapes do).
+//   on that placement, mirrored when mirrored, transparent pixels skipped,
+//   clipped to the glass circle. Non-finite turn or time: RangeError, picture
+//   untouched (as projectShape and drawShapes do).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
@@ -40,17 +40,13 @@ vi.mock('./shapes-draw.ts', async (importOriginal) => {
   return {
     ...actual,
     drawShapes: (...args: Parameters<typeof actual.drawShapes>): void => {
-      if (!shapesMode.block) {
-        actual.drawShapes(...args);
-        return;
-      }
+      if (!shapesMode.block) return actual.drawShapes(...args);
       // An opaque block over the top of the glass, where Santa flies.
       const [picture, width, layout] = args;
       const { cx, cy, radius } = layout.globe;
       for (let y = Math.round(cy - 45); y < Math.round(cy - 5); y++) {
         for (let x = Math.round(cx - 45); x < Math.round(cx + 45); x++) {
-          if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > radius - 3) continue;
-          picture[y * width + x] = 0x123456;
+          if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= radius - 3) picture[y * width + x] = 0x123456;
         }
       }
     },
@@ -85,14 +81,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function hexNum(hex: string): number {
-  return Number.parseInt(hex.slice(1), 16);
-}
-
-function rgb(n: number): [number, number, number] {
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
 function drawing(name: string): Drawing {
   const d = drawings[name];
   if (d === undefined) throw new Error(`no drawing ${name}`);
@@ -101,20 +89,13 @@ function drawing(name: string): Drawing {
 
 function colourAt(d: Drawing, x: number, y: number): number {
   const n = d.pixels[y * d.width + x] ?? 0;
-  return n === 0 ? -1 : hexNum(masterColours[n - 1] ?? '#000000');
+  return n === 0 ? -1 : Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16);
 }
 
-function palette(d: Drawing): Set<number> {
-  const out = new Set<number>();
-  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) if (colourAt(d, x, y) >= 0) out.add(colourAt(d, x, y));
-  return out;
-}
-
-function opaqueCount(d: Drawing): number {
-  let n = 0;
-  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) if (colourAt(d, x, y) >= 0) n++;
-  return n;
-}
+/** The colour of every opaque pixel of the drawing. */
+const opaque = (d: Drawing): number[] => Array.from(d.pixels, (_, i) => colourAt(d, i % d.width, Math.floor(i / d.width))).filter((c) => c >= 0);
+const palette = (d: Drawing): Set<number> => new Set(opaque(d));
+const opaqueCount = (d: Drawing): number => opaque(d).length;
 
 const TROT = [drawing('santa-trot-1'), drawing('santa-trot-2')] as const;
 const SANTA_COLOURS = new Set([...palette(TROT[0]), ...palette(TROT[1])]);
@@ -136,20 +117,16 @@ function expected(turn: number, timeMs: number): Expected {
   };
 }
 
-interface Drawn { a: Uint32Array; b: Uint32Array; layout: SceneLayout; width: number }
+interface Drawn { a: Uint32Array; b: Uint32Array; width: number }
 
 /** drawSanta over the two plain backgrounds. */
 function drawn(turn: number, timeMs: number, layout: SceneLayout = LAYOUT): Drawn {
-  const width = layout.width;
-  const a = new Uint32Array(width * layout.height).fill(FILL_A);
-  const b = new Uint32Array(width * layout.height).fill(FILL_B);
-  drawSanta(a, width, layout, turn, timeMs);
-  drawSanta(b, width, layout, turn, timeMs);
-  return { a, b, layout, width };
-}
-
-function touched(d: Drawn, i: number): boolean {
-  return d.a[i] !== FILL_A || d.b[i] !== FILL_B;
+  const over = (fill: number): Uint32Array => {
+    const pic = new Uint32Array(layout.width * layout.height).fill(fill);
+    drawSanta(pic, layout.width, layout, turn, timeMs);
+    return pic;
+  };
+  return { a: over(FILL_A), b: over(FILL_B), width: layout.width };
 }
 
 function solid(d: Drawn, i: number): boolean {
@@ -157,36 +134,29 @@ function solid(d: Drawn, i: number): boolean {
 }
 
 function touchedIndexes(d: Drawn): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < d.a.length; i++) if (touched(d, i)) out.push(i);
-  return out;
+  return Array.from(d.a.keys()).filter((i) => d.a[i] !== FILL_A || d.b[i] !== FILL_B);
 }
 
 interface Box { left: number; right: number; top: number; bottom: number }
 
-/** The touched pixels' box, in picture columns and rows (inclusive). */
-function box(d: Drawn): Box {
-  const list = touchedIndexes(d);
+/** The box of the picture indexes in `list`, in picture columns and rows (inclusive). */
+function bounds(list: number[], width: number): Box {
   if (list.length === 0) expect.fail('Santa drew nothing');
-  const xs = list.map((i) => i % d.width);
-  const ys = list.map((i) => Math.floor(i / d.width));
+  const xs = list.map((i) => i % width);
+  const ys = list.map((i) => Math.floor(i / width));
   return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
 }
 
+const box = (d: Drawn): Box => bounds(touchedIndexes(d), d.width);
+
 /** The painted pixels' box on a picture that was filled with FILL_A. */
-function pixelBox(pic: Uint32Array): Box {
-  let left = Infinity;
-  let right = -Infinity;
-  let top = Infinity;
-  let bottom = -Infinity;
-  for (let i = 0; i < pic.length; i++) {
-    if (pic[i] === FILL_A) continue;
-    left = Math.min(left, i % W);
-    right = Math.max(right, i % W);
-    top = Math.min(top, Math.floor(i / W));
-    bottom = Math.max(bottom, Math.floor(i / W));
-  }
-  return { left, right, top, bottom };
+const pixelBox = (pic: Uint32Array): Box => bounds(Array.from(pic.keys()).filter((i) => pic[i] !== FILL_A), W);
+
+/** The largest difference in any colour channel between two pictures. */
+function maxChannelDiff(a: Uint32Array, b: Uint32Array): number {
+  let worst = 0;
+  for (let i = 0; i < a.length; i++) for (const s of [16, 8, 0]) worst = Math.max(worst, Math.abs((((a[i] ?? 0) >> s) & 255) - (((b[i] ?? 0) >> s) & 255)));
+  return worst;
 }
 
 /** A turn that puts Santa at `angle` at timeMs. */
@@ -205,45 +175,22 @@ function onGrid(side: 1 | -1, trot: 0 | 1): { turn: number; time: number } {
 }
 
 /**
- * The picture Santa should paint, worked out here from the spec: a box of
- * round(48 * squeeze) columns by 12 rows, placed at the rounded centre,
- * each column taking the one drawing column under its centre (mirrored when
- * flying the other way), transparent pixels skipped, clipped to the glass.
+ * The picture Santa should paint, worked out here from the spec: squeeze is 1,
+ * so a box of 48 columns by 12 rows at the rounded centre, each column taking
+ * the drawing column under it (mirrored when flying the other way), transparent
+ * pixels skipped, clipped to the glass.
  */
-function reference(turn: number, timeMs: number, layout: SceneLayout = LAYOUT): Map<number, number> {
+function reference(turn: number, timeMs: number): Map<number, number> {
   const p = expected(turn, timeMs);
   const d = TROT[p.trot];
-  const span = Math.max(1, Math.round(d.width * p.squeeze));
-  const left = Math.round(layout.globe.cx + p.x - span / 2);
-  const top = Math.round(layout.globe.cy + p.y - d.height / 2);
+  const { cx, cy, radius } = LAYOUT.globe;
+  const left = Math.round(cx + p.x - d.width / 2);
+  const top = Math.round(cy + p.y - d.height / 2);
   const out = new Map<number, number>();
   for (let y = 0; y < d.height; y++) {
-    for (let x = 0; x < span; x++) {
-      const px = left + x;
-      const py = top + y;
-      const dx = px + 0.5 - layout.globe.cx;
-      const dy = py + 0.5 - layout.globe.cy;
-      if (dx * dx + dy * dy > layout.globe.radius ** 2) continue;
-      // Box rule: the source columns [lo, hi) this picture column covers (at least one);
-      // painted if any is opaque, taking the opaque one nearest the box centre, a tie
-      // going to the smaller column in the unmirrored sprite.
-      const lo = Math.floor((x * d.width) / span);
-      const hi = Math.max(lo + 1, Math.floor(((x + 1) * d.width) / span));
-      let c = -1;
-      let bestDist = Infinity;
-      let bestCol = Infinity;
-      for (let s = lo; s < Math.min(hi, d.width); s++) {
-        const col = p.mirrored ? d.width - 1 - s : s;
-        const v = colourAt(d, col, y);
-        if (v < 0) continue;
-        const dist = Math.abs((s + 0.5) / d.width - (x + 0.5) / span);
-        if (dist < bestDist - 1e-9 || (Math.abs(dist - bestDist) <= 1e-9 && col < bestCol)) {
-          c = v;
-          bestDist = dist;
-          bestCol = col;
-        }
-      }
-      if (c >= 0) out.set(py * layout.width + px, c);
+    for (let x = 0; x < d.width; x++) {
+      const c = colourAt(d, p.mirrored ? d.width - 1 - x : x, y);
+      if (c >= 0 && (left + x + 0.5 - cx) ** 2 + (top + y + 0.5 - cy) ** 2 <= radius ** 2) out.set((top + y) * LAYOUT.width + left + x, c);
     }
   }
   return out;
@@ -265,33 +212,15 @@ function globe(turn: number, time: number, phase: PhaseReading = NIGHT, layout: 
 
 /** The pixels drawSanta touches alone, and those it wholly covers (same colour over two backgrounds). */
 function santaAlone(turn: number, time: number): { touched: number[]; whole: Map<number, number> } {
-  const a = new Uint32Array(W * H).fill(FILL_A);
-  const b = new Uint32Array(W * H).fill(FILL_B);
-  drawSanta(a, W, LAYOUT, turn, time);
-  drawSanta(b, W, LAYOUT, turn, time);
-  const touched: number[] = [];
-  const whole = new Map<number, number>();
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] === FILL_A && b[i] === FILL_B) continue;
-    touched.push(i);
-    if (a[i] === b[i]) whole.set(i, a[i] ?? 0);
-  }
-  return { touched, whole };
+  const d = drawn(turn, time);
+  const list = touchedIndexes(d);
+  return { touched: list, whole: new Map(list.filter((i) => solid(d, i)).map((i) => [i, d.a[i] ?? 0])) };
 }
-
 
 /** The columns the drawing's opaque pixels span, first to last. */
 function opaqueColumns(d: Drawing): number {
-  let lo = d.width;
-  let hi = -1;
-  for (let y = 0; y < d.height; y++) {
-    for (let x = 0; x < d.width; x++) {
-      if (colourAt(d, x, y) < 0) continue;
-      lo = Math.min(lo, x);
-      hi = Math.max(hi, x);
-    }
-  }
-  return hi - lo + 1;
+  const cols = [...Array(d.width).keys()].filter((x) => Array.from({ length: d.height }, (_, y) => colourAt(d, x, y)).some((c) => c >= 0));
+  return Math.max(...cols) - Math.min(...cols) + 1;
 }
 
 function inGlass(l: SceneLayout, i: number, margin: number): boolean {
@@ -300,17 +229,8 @@ function inGlass(l: SceneLayout, i: number, margin: number): boolean {
   return dx * dx + dy * dy <= (l.globe.radius + margin) ** 2;
 }
 
-
 describe('santaPlacement: where Santa flies', () => {
-  const CASES: [number, number][] = [
-    [0, 0],
-    [0, 1_234_567],
-    [1.1, 500],
-    [-2.7, 9_876],
-    [3 * Math.PI, 42_000],
-    [0.5, 60_000],
-    [5.9, 13_961],
-  ];
+  const CASES: [number, number][] = [[0, 0], [0, 1_234_567], [1.1, 500], [-2.7, 9_876], [3 * Math.PI, 42_000], [0.5, 60_000], [5.9, 13_961]];
 
   it.each(CASES)('follows the orbit formula at turn %s, time %s ms', (turn, time) => {
     const p = santaPlacement(turn, time);
@@ -325,7 +245,7 @@ describe('santaPlacement: where Santa flies', () => {
     expect(ORBIT * (2 / Math.PI) * Math.asin(Math.cos(p.angle)), 'the triangle wave of angle carries x').toBeCloseTo(want.x, 9);
   });
 
-  it('starts at time 0 on angle 2 + turn, trot frame 0, with no bob', () => {
+  it('starts at time 0 on angle 2 + turn, trot frame 0, with no bob, and alternates the trot frame seven times a second', () => {
     for (const turn of [0, 0.5, -1, 4]) {
       const p = santaPlacement(turn, 0);
       expect(Math.sin(p.angle)).toBeCloseTo(Math.sin(2 + turn), 12);
@@ -333,6 +253,9 @@ describe('santaPlacement: where Santa flies', () => {
       expect(p.trot).toBe(0);
       expect(p.y).toBeCloseTo(-R * 0.46 + Math.sin(2 + turn) * ORBIT * TILT, 12);
     }
+    const seen: number[] = [];
+    for (let k = 0; k < 21; k++) seen.push(santaPlacement(0.3, (k * 1000) / 7 + 20).trot);
+    expect(seen).toEqual(Array.from({ length: 21 }, (_, k) => k % 2));
   });
 
   it('drops the near side of the orbit down the picture by the same ground tilt projectPoint uses for the shapes', () => {
@@ -349,29 +272,17 @@ describe('santaPlacement: where Santa flies', () => {
 
   it('flies high in the globe: above the middle, inside the glass, at every point of the orbit', () => {
     for (let k = 0; k < 360; k++) {
-      const time = k * 97.3;
-      const p = santaPlacement(k * 0.11, time);
+      const p = santaPlacement(k * 0.11, k * 97.3);
       expect(p.y, `k ${k}`).toBeLessThan(-R * 0.2);
       expect(Math.hypot(p.x, p.y), `k ${k}`).toBeLessThan(LIM);
     }
   });
 
-  it('never squeezes him: squeeze is exactly 1 at every angle, on the placement', () => {
-    for (let k = 0; k <= 720; k++) {
-      const p = santaPlacement((k * FULL) / 720, 1_000);
-      expect(p.squeeze, `k ${k}`).toBe(1);
-    }
-    for (const angle of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0.01]) {
-      expect(santaPlacement(turnFor(angle, 2_000), 2_000).squeeze, `angle ${angle}`).toBe(1);
-    }
-  });
-
-  it('keeps his reach positive and never lets x pass it: |x| <= orbit at every angle', () => {
+  it('never squeezes him and never lets x pass his reach: squeeze is exactly 1 and |x| <= orbit at every angle', () => {
     expect(ORBIT).toBeGreaterThan(5);
-    for (let k = 0; k <= 1440; k++) {
-      const p = santaPlacement((k * FULL) / 1440, 1_000);
-      expect(Math.abs(p.x), `k ${k}`).toBeLessThanOrEqual(ORBIT + 1e-9);
-    }
+    for (let k = 0; k <= 720; k++) expect(santaPlacement((k * FULL) / 720, 1_000).squeeze, `k ${k}`).toBe(1);
+    for (const angle of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0.01]) expect(santaPlacement(turnFor(angle, 2_000), 2_000).squeeze, `angle ${angle}`).toBe(1);
+    for (let k = 0; k <= 1440; k++) expect(Math.abs(santaPlacement((k * FULL) / 1440, 1_000).x), `k ${k}`).toBeLessThanOrEqual(ORBIT + 1e-9);
   });
 
   it('flies at a constant speed across: x is piecewise linear in the angle, the same slope everywhere between the ends', () => {
@@ -386,10 +297,8 @@ describe('santaPlacement: where Santa flies', () => {
       const a1 = (k + 0.75) * delta;
       // An interval over an end (angle 0 or PI) is where he turns round, not a straight run.
       if (Math.floor(a0 / Math.PI) !== Math.floor(a1 / Math.PI)) continue;
-      const x0 = santaPlacement(turnFor(a0, time), time).x;
-      const x1 = santaPlacement(turnFor(a1, time), time).x;
-      const got = Math.abs((x1 - x0) / (a1 - a0));
-      expect(Math.abs(got - slope) / slope, `angle ${a0.toFixed(4)}: speed`).toBeLessThan(1e-9);
+      const [x0, x1] = [a0, a1].map((a) => santaPlacement(turnFor(a, time), time).x) as [number, number];
+      expect(Math.abs(Math.abs((x1 - x0) / (a1 - a0)) - slope) / slope, `angle ${a0.toFixed(4)}: speed`).toBeLessThan(1e-9);
       compared++;
     }
     expect(compared).toBeGreaterThan(N - 4);
@@ -413,7 +322,6 @@ describe('santaPlacement: where Santa flies', () => {
     const before = at(end - frame);
     const after = at(end + frame);
     expect(Math.abs(peak), 'at the end he is at full reach').toBeCloseTo(ORBIT, 9);
-    // Both neighbours are one frame of angle away from the end at full speed, on the same side of it.
     expect(Math.abs(peak) - Math.abs(before), 'one frame before: full speed').toBeCloseTo(slope * frame, 9);
     expect(Math.abs(peak) - Math.abs(after), 'one frame after: full speed').toBeCloseTo(slope * frame, 9);
     expect(Math.sign(before - peak), 'he is coming from the inside').toBe(-Math.sign(peak));
@@ -421,13 +329,11 @@ describe('santaPlacement: where Santa flies', () => {
   });
 
   it('reverses direction within one 1/60 s frame of time at the end, with the speed unchanged', () => {
-    // The page advances time (and the turn) a frame at a time: sample the frames round angle 0.
     const slopeT = ((ORBIT * 2) / Math.PI) * 0.45;
     const t0 = 3_000;
     const turn = turnFor(0.002, t0);
     const xs = [-2, -1, 0, 1, 2].map((k) => santaPlacement(turn, t0 + (k * 1000) / 60).x);
     const dxs = xs.slice(1).map((x, i) => (x - (xs[i] ?? 0)) * 60);
-    // Angle starts at 0.002 and moves 0.0075 a frame: it crosses the end between frames -1/0 ... the speed stays |slopeT| on both sides.
     for (const dx of [dxs[0], dxs[3]]) expect(Math.abs(dx ?? 0), 'speed away from the end').toBeCloseTo(slopeT, 6);
     expect(Math.sign(dxs[0] ?? 0)).toBe(-Math.sign(dxs[3] ?? 0));
     expect(Math.max(...dxs.map(Math.abs)), 'never faster').toBeLessThanOrEqual(slopeT + 1e-6);
@@ -448,31 +354,33 @@ describe('santaPlacement: where Santa flies', () => {
     }
   });
 
-  it('flips the mirroring at the end of the orbit, not before: far from it he does not flip, and he flips between the frames either side of the end', () => {
+  it('mirrors him exactly while he flies on the near side (depth > 0), flipping next to full reach at the ends of the orbit and nowhere else', () => {
+    for (const [angle, want] of [[Math.PI / 2, true], [0.1, true], [-Math.PI / 2, false], [-0.1, false]] as const) {
+      expect(santaPlacement(turnFor(angle, 700), 700).mirrored, `angle ${angle}`).toBe(want);
+    }
+    // angle 2 + turn = π exactly gives sin = 1.2e-16 in floating point; use 0 itself.
+    expect(santaPlacement(-2, 0).mirrored, 'depth 0 counts as behind').toBe(false);
     const step = 0.45 / 60;
     for (const end of [0, Math.PI]) {
       const before = santaPlacement(turnFor(end - step, 500), 500);
       const after = santaPlacement(turnFor(end + step, 500), 500);
-      expect(before.mirrored, `end ${end}: before`).toBe(end === 0 ? false : true);
-      expect(after.mirrored, `end ${end}: after`).toBe(end === 0 ? true : false);
+      expect(before.mirrored, `end ${end}: before`).toBe(end !== 0);
+      expect(after.mirrored, `end ${end}: after`).toBe(end === 0);
       // The flip happens next to full reach, so the sprite does not jump across when it turns.
       expect(Math.abs(before.x), `end ${end}`).toBeGreaterThan(ORBIT - 0.2);
       expect(Math.abs(after.x), `end ${end}`).toBeGreaterThan(ORBIT - 0.2);
     }
     for (const a of [0.3, 1, 1.5, Math.PI - 0.3, Math.PI + 0.3, 5, 6]) {
-      const m = santaPlacement(turnFor(a, 500), 500);
-      const n = santaPlacement(turnFor(a + 0.01, 500), 500);
-      expect(n.mirrored, `angle ${a}`).toBe(m.mirrored);
+      expect(santaPlacement(turnFor(a + 0.01, 500), 500).mirrored, `angle ${a}`).toBe(santaPlacement(turnFor(a, 500), 500).mirrored);
     }
   });
 
   it('keeps every opaque pixel of the sprite at least 2 art pixels inside the glass circle, at every angle and every bob', () => {
     expect(LAYOUT.globe.radius, 'the glass these tests are written on').toBe(R);
     // Times that put the bob at its top, at its bottom, and in between; the turn sweeps the whole orbit independently.
-    const times = [0, 1_208, 3_625, 5_000, 9_777, 20_123, 1e7 + 1_208];
     let worst = 0;
     let where = '';
-    for (const time of times) {
+    for (const time of [0, 1_208, 3_625, 5_000, 9_777, 20_123, 1e7 + 1_208]) {
       for (let k = 0; k < 720; k++) {
         const turn = (k * FULL) / 720 + 0.0007;
         const p = santaPlacement(turn, time);
@@ -483,10 +391,7 @@ describe('santaPlacement: where Santa flies', () => {
           for (let x = 0; x < d.width; x++) {
             if (colourAt(d, p.mirrored ? d.width - 1 - x : x, y) < 0) continue;
             const dist = Math.hypot(left + x + 0.5 - LAYOUT.globe.cx, top + y + 0.5 - LAYOUT.globe.cy);
-            if (dist > worst) {
-              worst = dist;
-              where = `turn ${turn.toFixed(3)} time ${time} pixel ${x},${y}`;
-            }
+            if (dist > worst) [worst, where] = [dist, `turn ${turn.toFixed(3)} time ${time} pixel ${x},${y}`];
           }
         }
       }
@@ -495,38 +400,18 @@ describe('santaPlacement: where Santa flies', () => {
   });
 
   it('uses the room: he flies out to within a few pixels of that margin at the ends, not hugging the middle', () => {
-    let widest = 0;
-    for (let k = 0; k < 720; k++) {
-      const p = santaPlacement((k * FULL) / 720, 0);
-      widest = Math.max(widest, Math.abs(p.x));
-    }
+    const widest = Math.max(...Array.from({ length: 720 }, (_, k) => Math.abs(santaPlacement((k * FULL) / 720, 0).x)));
     // Full width, so his edge at the end is ORBIT + 24 from the middle; it should come close to the glass less its margin.
     expect(widest + 24, 'his outer edge at the ends of the orbit').toBeGreaterThan(R - GLASS_MARGIN - 14);
   });
 
-  it('mirrors him while he flies on the near side (depth > 0) and not on the far side or at depth 0', () => {
-    expect(santaPlacement(turnFor(Math.PI / 2, 700), 700).mirrored).toBe(true);
-    expect(santaPlacement(turnFor(0.1, 700), 700).mirrored).toBe(true);
-    expect(santaPlacement(turnFor(-Math.PI / 2, 700), 700).mirrored).toBe(false);
-    expect(santaPlacement(turnFor(-0.1, 700), 700).mirrored).toBe(false);
-    // angle 2 + turn = π exactly gives sin = 1.2e-16 in floating point; use 0 itself.
-    expect(santaPlacement(-2, 0).mirrored, 'depth 0 counts as behind').toBe(false);
-  });
-
-  it('alternates the trot frame seven times a second', () => {
-    const seen: number[] = [];
-    for (let k = 0; k < 21; k++) seen.push(santaPlacement(0.3, (k * 1000) / 7 + 20).trot);
-    expect(seen).toEqual(Array.from({ length: 21 }, (_, k) => k % 2));
-  });
 
   it('gives the same placement for a turn, the same turn a whole turn on, and whole turns back', () => {
     for (const turn of [0, 0.4, 2.9, -0.4, -7.5, 1e6]) {
       const a = santaPlacement(turn, 4_321);
       for (const other of [turn + FULL, turn - FULL, turn + 5 * FULL]) {
         const b = santaPlacement(other, 4_321);
-        expect(b.x, `turn ${turn} vs ${other}`).toBeCloseTo(a.x, 6);
-        expect(b.y, `turn ${turn} vs ${other}`).toBeCloseTo(a.y, 6);
-        expect(b.depth, `turn ${turn} vs ${other}`).toBeCloseTo(a.depth, 6);
+        for (const key of ['x', 'y', 'depth'] as const) expect(b[key], `turn ${turn} vs ${other}: ${key}`).toBeCloseTo(a[key], 6);
         expect(b.mirrored).toBe(a.mirrored);
         expect(b.trot).toBe(a.trot);
       }
@@ -550,7 +435,6 @@ describe('santaPlacement: where Santa flies', () => {
       expect(() => santaPlacement(turn, time), `turn ${turn} time ${time}`).toThrow(RangeError);
     }
   });
-
 });
 
 describe('the Santa drawings', () => {
@@ -565,13 +449,13 @@ describe('the Santa drawings', () => {
 });
 
 describe('drawSanta: Santa in the picture', () => {
-  it.each([[0, 'santa-trot-1'], [1, 'santa-trot-2']] as const)(
-    'paints trot frame %s on the grid at squeeze 1 on the far side as %s, pixel for pixel, unmirrored',
-    (trot, name) => {
-      const { turn, time } = onGrid(-1, trot);
+  it.each([[0, 'santa-trot-1', -1], [1, 'santa-trot-2', -1], [0, 'santa-trot-1', 1], [1, 'santa-trot-2', 1]] as const)(
+    'paints trot frame %s on the grid at squeeze 1 as %s, pixel for pixel, on side %s (-1 far: as drawn; 1 near: its horizontal mirror)',
+    (trot, name, side) => {
+      const { turn, time } = onGrid(side, trot);
       const p = expected(turn, time);
       expect(p.trot).toBe(trot);
-      expect(p.mirrored).toBe(false);
+      expect(p.mirrored).toBe(side === 1);
       const d = drawing(name);
       const left = Math.round(LAYOUT.globe.cx + p.x - d.width / 2);
       const top = Math.round(LAYOUT.globe.cy + p.y - d.height / 2);
@@ -579,13 +463,13 @@ describe('drawSanta: Santa in the picture', () => {
       const wrong: string[] = [];
       for (let y = 0; y < d.height; y++) {
         for (let x = 0; x < d.width; x++) {
-          const want = colourAt(d, x, y);
+          const want = colourAt(d, p.mirrored ? d.width - 1 - x : x, y);
           const i = (top + y) * W + left + x;
           const [ga, gb] = [pic.a[i], pic.b[i]];
           if (want < 0 ? ga !== FILL_A || gb !== FILL_B : ga !== want || gb !== want) wrong.push(`${x},${y}`);
         }
       }
-      expect(wrong, `${name}: pixels not as drawn (transparent ones must keep the background)`).toEqual([]);
+      expect(wrong, `${name} side ${side}: pixels not as drawn (transparent ones must keep the background)`).toEqual([]);
       const outside = touchedIndexes(pic).filter((i) => {
         const x = i % W;
         const y = Math.floor(i / W);
@@ -595,74 +479,39 @@ describe('drawSanta: Santa in the picture', () => {
     },
   );
 
-  it.each([[0, 'santa-trot-1'], [1, 'santa-trot-2']] as const)(
-    'paints trot frame %s on the grid at squeeze 1 on the near side as the horizontal mirror of %s',
-    (trot, name) => {
-      const { turn, time } = onGrid(1, trot);
-      const p = expected(turn, time);
-      expect(p.trot).toBe(trot);
-      expect(p.mirrored).toBe(true);
-      const d = drawing(name);
-      const left = Math.round(LAYOUT.globe.cx + p.x - d.width / 2);
-      const top = Math.round(LAYOUT.globe.cy + p.y - d.height / 2);
-      const pic = drawn(turn, time, LAYOUT);
-      const wrong: string[] = [];
-      for (let y = 0; y < d.height; y++) {
-        for (let x = 0; x < d.width; x++) {
-          const want = colourAt(d, d.width - 1 - x, y);
-          const i = (top + y) * W + left + x;
-          const [ga, gb] = [pic.a[i], pic.b[i]];
-          if (want < 0 ? ga !== FILL_A || gb !== FILL_B : ga !== want || gb !== want) wrong.push(`${x},${y}`);
-        }
-      }
-      expect(wrong, `${name} mirrored: pixels not the mirror image`).toEqual([]);
-    },
-  );
-
   it('centres him on his placement at every point of the orbit', () => {
     for (let k = 0; k < 48; k++) {
       const time = 250 + k * 291.7;
       const turn = 0.37 * k;
       const p = expected(turn, time);
       const b = box(drawn(turn, time));
-      const midX = (b.left + b.right + 1) / 2;
-      const midY = (b.top + b.bottom + 1) / 2;
-      expect(Math.abs(midX - (LAYOUT.globe.cx + p.x)), `k ${k}: across`).toBeLessThanOrEqual(1);
-      expect(Math.abs(midY - (LAYOUT.globe.cy + p.y)), `k ${k}: down`).toBeLessThanOrEqual(1);
+      expect(Math.abs((b.left + b.right + 1) / 2 - (LAYOUT.globe.cx + p.x)), `k ${k}: across`).toBeLessThanOrEqual(1);
+      expect(Math.abs((b.top + b.bottom + 1) / 2 - (LAYOUT.globe.cy + p.y)), `k ${k}: down`).toBeLessThanOrEqual(1);
     }
   });
 
-  it('draws him at his full width at every angle: exactly the pixels the sampled drawing gives, never thinner', () => {
-    for (const angle of [0, 0.4, 0.9, Math.PI / 2, 2.5, Math.PI, 4, -Math.PI / 2, 5.6]) {
-      const time = 1_700;
-      const turn = turnFor(angle, time);
-      expect(santaPlacement(turn, time).squeeze, `angle ${angle}`).toBe(1);
-      const want = reference(turn, time);
-      expect(want.size, `angle ${angle}: reference draws something`).toBeGreaterThan(0);
-      const pic = drawn(turn, time);
-      const got = new Map(touchedIndexes(pic).map((i) => [i, pic.a[i] ?? 0] as const));
-      expect([...got].sort((x, y) => x[0] - y[0]), `angle ${angle}`).toEqual([...want].sort((x, y) => x[0] - y[0]));
-      const b = box(pic);
-      const trot = expected(turn, time).trot;
-      expect(b.right - b.left + 1, `angle ${angle}: columns`).toBe(opaqueColumns(TROT[trot]));
-      expect(b.bottom - b.top + 1, `angle ${angle}: rows`).toBeLessThanOrEqual(12);
-    }
-  });
-
-  it('never thins at the ends of his orbit: the same pixel count and the same width as in the middle, in his own colours', () => {
-    for (const time of [3_210, 3_210 + 1_000 / 7]) {
-      const trot = expected(0, time).trot;
-      for (const angle of [0, Math.PI, Math.PI / 2, -Math.PI / 2, 1, 4]) {
-        const pic = drawn(turnFor(angle, time), time);
-        expect(touchedIndexes(pic).length, `angle ${angle} time ${time}: every opaque pixel drawn`).toBe(opaqueCount(TROT[trot]));
-        expect(box(pic).right - box(pic).left + 1, `angle ${angle}: wide`).toBe(opaqueColumns(TROT[trot]));
-        expect(touchedIndexes(pic).every((i) => solid(pic, i)), `angle ${angle}: crisp`).toBe(true);
+  it('draws him at his full width at every angle and trot frame: exactly the pixels the sampled drawing gives, never thinner, in his own colours', () => {
+    for (const time of [1_700, 3_210, 3_210 + 1_000 / 7]) {
+      for (const angle of [0, 0.4, 0.9, 1, Math.PI / 2, 2.5, Math.PI, 4, -Math.PI / 2, 5.6]) {
+        const turn = turnFor(angle, time);
+        const at = `angle ${angle} time ${time}`;
+        const trot = TROT[expected(turn, time).trot];
+        expect(santaPlacement(turn, time).squeeze, at).toBe(1);
+        const want = reference(turn, time);
+        expect(want.size, `${at}: reference draws something`).toBeGreaterThan(0);
+        const pic = drawn(turn, time);
+        const list = touchedIndexes(pic);
+        expect(list.map((i) => [i, pic.a[i] ?? 0]), at).toEqual([...want].sort((x, y) => x[0] - y[0]));
+        const b = box(pic);
+        expect(b.right - b.left + 1, `${at}: columns`).toBe(opaqueColumns(trot));
+        expect(b.bottom - b.top + 1, `${at}: rows`).toBeLessThanOrEqual(12);
+        expect(list.length, `${at}: every opaque pixel drawn`).toBe(opaqueCount(trot));
+        expect(list.every((i) => solid(pic, i)), `${at}: crisp`).toBe(true);
       }
     }
     for (let k = 0; k < 120; k++) {
       const time = (k * ORBIT_SECONDS * 1000) / 120;
-      const trot = expected(0.8, time).trot;
-      expect(touchedIndexes(drawn(0.8, time)).length, `k ${k}`).toBe(opaqueCount(TROT[trot]));
+      expect(touchedIndexes(drawn(0.8, time)).length, `k ${k}`).toBe(opaqueCount(TROT[expected(0.8, time).trot]));
     }
   });
 
@@ -681,148 +530,91 @@ describe('drawSanta: Santa in the picture', () => {
     expect(seen).toBeGreaterThan(1_000);
   });
 
-  it('moves in whole pixels: from one 1/60 s step to the next his box edges move by whole pixels, never far, and every pixel is still his colour or the background', () => {
-    const paint = (time: number): Uint32Array => {
-      const pic = new Uint32Array(W * H).fill(FILL_A);
-      drawSanta(pic, W, LAYOUT, 0.25, time);
-      return pic;
-    };
-    let worst = 0;
-    let where = '';
-    let compared = 0;
-    let prevTime = 5_000;
-    let prev = paint(prevTime);
-    for (let k = 1; k * STEP_MS <= ORBIT_SECONDS * 1000 + 1_000; k++) {
-      const time = 5_000 + k * STEP_MS;
-      const next = paint(time);
-      const a = expected(0.25, prevTime);
-      const b = expected(0.25, time);
-      for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
-      // A trot frame change and the flip at the ends of the orbit are meant to change the drawing.
-      if (a.trot === b.trot && a.mirrored === b.mirrored) {
-        compared++;
-        const [pb, nb] = [pixelBox(prev), pixelBox(next)];
-        const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
-        if (changed > worst) {
-          worst = changed;
-          where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
+  it.each([
+    ['at a fixed turn', () => 0.25, 5_000, Math.floor((ORBIT_SECONDS * 1000 + 1_000) / STEP_MS)],
+    ['under the page\'s own turn, time and turn advancing together', (time: number) => 0.5 + (time / 1000) * (FULL / 60), 0, 700],
+  ] as [string, (time: number) => number, number, number][])(
+    'moves in whole pixels %s: from one 1/60 s step to the next his box edges move by a pixel or two, and every pixel is his colour or the background',
+    (_, turnAt, start, steps) => {
+      const paint = (time: number): Uint32Array => {
+        const pic = new Uint32Array(W * H).fill(FILL_A);
+        drawSanta(pic, W, LAYOUT, turnAt(time), time);
+        return pic;
+      };
+      let worst = 0;
+      let where = '';
+      let compared = 0;
+      let prevTime = start;
+      let prev = paint(prevTime);
+      for (let k = 1; k <= steps; k++) {
+        const time = start + k * STEP_MS;
+        const next = paint(time);
+        const a = expected(turnAt(prevTime), prevTime);
+        const b = expected(turnAt(time), time);
+        for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
+        // A trot frame change and the flip at the ends of the orbit are meant to change the drawing.
+        if (a.trot === b.trot && a.mirrored === b.mirrored) {
+          compared++;
+          const [pb, nb] = [pixelBox(prev), pixelBox(next)];
+          const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
+          if (changed > worst) {
+            worst = changed;
+            where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
+          }
         }
+        prev = next;
+        prevTime = time;
       }
-      prev = next;
-      prevTime = time;
-    }
-    expect(compared, 'steps compared').toBeGreaterThan(300);
-    expect(worst, `furthest an edge of his box jumped in one step (${where})`).toBeLessThanOrEqual(WORST_STEP);
-  }, 60_000);
-
-  it('moves in whole pixels under the page\'s own turn too: time and turn advancing together move his box edges by a pixel or two a step', () => {
-    const turnAt = (time: number): number => 0.5 + (time / 1000) * (FULL / 60);
-    const paint = (time: number): Uint32Array => {
-      const pic = new Uint32Array(W * H).fill(FILL_A);
-      drawSanta(pic, W, LAYOUT, turnAt(time), time);
-      return pic;
-    };
-    let worst = 0;
-    let where = '';
-    let prevTime = 0;
-    let prev = paint(0);
-    for (let k = 1; k <= 700; k++) {
-      const time = k * STEP_MS;
-      const next = paint(time);
-      const a = expected(turnAt(prevTime), prevTime);
-      const b = expected(turnAt(time), time);
-      for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
-      if (a.trot === b.trot && a.mirrored === b.mirrored) {
-        const [pb, nb] = [pixelBox(prev), pixelBox(next)];
-        const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
-        if (changed > worst) {
-          worst = changed;
-          where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
-        }
-      }
-      prev = next;
-      prevTime = time;
-    }
-    expect(worst, `furthest an edge of his box jumped in one step (${where})`).toBeLessThanOrEqual(WORST_STEP);
-  }, 60_000);
+      expect(compared, 'steps compared').toBeGreaterThan(300);
+      expect(worst, `furthest an edge of his box jumped in one step (${where})`).toBeLessThanOrEqual(WORST_STEP);
+    },
+    60_000,
+  );
 
   it('draws the two trot frames differently: the legs move between frames at the same place', () => {
-    // Two times either side of the bob's top (sin(1.3 t) = 1 at t0), so the
-    // bob is the same, that straddle the trot change at 8/7 s; the turn keeps
-    // the angle the same, so only the trot frame differs.
+    // Two times either side of the bob's top (sin(1.3 t) = 1 at t0), so the bob is the same, that
+    // straddle the trot change at 8/7 s; the turn keeps the angle the same, so only the trot frame differs.
     const t0 = Math.PI / 2 / 1.3;
-    const ta = t0 - 0.07;
-    const tb = t0 + 0.07;
-    expect(Math.floor(ta * 7) % 2).not.toBe(Math.floor(tb * 7) % 2);
+    const [ta, tb] = [(t0 - 0.07) * 1000, (t0 + 0.07) * 1000];
+    expect(Math.floor((ta / 1000) * 7) % 2).not.toBe(Math.floor((tb / 1000) * 7) % 2);
     const angle = -Math.PI / 2;
-    const a = drawn(turnFor(angle, ta * 1000), ta * 1000);
-    const b = drawn(turnFor(angle, tb * 1000), tb * 1000);
-    expect(expected(turnFor(angle, ta * 1000), ta * 1000).y).toBeCloseTo(expected(turnFor(angle, tb * 1000), tb * 1000).y, 9);
-    const diff = touchedIndexes(a).filter((i) => a.a[i] !== b.a[i]).length + touchedIndexes(b).filter((i) => a.a[i] !== b.a[i]).length;
+    const [a, b] = [drawn(turnFor(angle, ta), ta), drawn(turnFor(angle, tb), tb)];
+    expect(expected(turnFor(angle, ta), ta).y).toBeCloseTo(expected(turnFor(angle, tb), tb).y, 9);
+    const diff = [...touchedIndexes(a), ...touchedIndexes(b)].filter((i) => a.a[i] !== b.a[i]).length;
     expect(diff, 'pixels that differ between the two trot frames').toBeGreaterThan(0);
   });
 
   it('keeps every pixel he paints inside the glass circle, and clips him where the glass is smaller than his orbit', () => {
     for (let k = 0; k < 60; k++) {
-      const time = k * 233.1;
-      const pic = drawn(k * 0.9, time);
-      for (const i of touchedIndexes(pic)) {
-        const dx = (i % W) + 0.5 - LAYOUT.globe.cx;
-        const dy = Math.floor(i / W) + 0.5 - LAYOUT.globe.cy;
-        if (dx * dx + dy * dy > LAYOUT.globe.radius ** 2) expect.fail(`k ${k}: pixel ${i % W},${Math.floor(i / W)} outside the glass`);
-      }
+      expect(touchedIndexes(drawn(k * 0.9, k * 233.1)).filter((i) => !inGlass(LAYOUT, i, 0)), `k ${k}: pixels outside the glass`).toEqual([]);
     }
     // A glass smaller than his orbit: he must be cut at its edge, not drawn past it.
     const small: SceneLayout = { ...LAYOUT, globe: { ...LAYOUT.globe, radius: 22 } };
     const time = 4_000;
     const turn = turnFor(Math.PI / 2, time);
-    const big = drawn(turn, time);
-    const cut = drawn(turn, time, small);
-    const outside = (i: number): boolean => {
-      const dx = (i % W) + 0.5 - small.globe.cx;
-      const dy = Math.floor(i / W) + 0.5 - small.globe.cy;
-      return dx * dx + dy * dy > small.globe.radius ** 2;
-    };
-    expect(touchedIndexes(big).filter(outside).length, 'unclipped Santa reaches past the small glass').toBeGreaterThan(0);
-    expect(touchedIndexes(cut).filter(outside), 'pixels past the small glass').toEqual([]);
-    expect(touchedIndexes(cut).length, 'the part inside the small glass still shows').toBeGreaterThan(0);
+    const outside = (i: number): boolean => !inGlass(small, i, 0);
+    const cut = touchedIndexes(drawn(turn, time, small));
+    expect(touchedIndexes(drawn(turn, time)).filter(outside).length, 'unclipped Santa reaches past the small glass').toBeGreaterThan(0);
+    expect(cut.filter(outside), 'pixels past the small glass').toEqual([]);
+    expect(cut.length, 'the part inside the small glass still shows').toBeGreaterThan(0);
   });
 
   it('is not clipped by the glass: on a glass too big to touch, every pixel he paints is at least 2 art pixels inside the real glass radius', () => {
     const huge: SceneLayout = { ...LAYOUT, globe: { ...LAYOUT.globe, radius: 1_000 } };
     for (let k = 0; k < 360; k++) {
-      const time = k * 211.7;
       const turn = k * 0.173;
-      const pic = drawn(turn, time, huge);
-      const trot = expected(turn, time).trot;
-      const list = touchedIndexes(pic);
-      expect(list.length, `k ${k}: nothing lost to the glass`).toBe(opaqueCount(TROT[trot]));
-      for (const i of list) {
-        const dx = (i % W) + 0.5 - LAYOUT.globe.cx;
-        const dy = Math.floor(i / W) + 0.5 - LAYOUT.globe.cy;
-        if (Math.hypot(dx, dy) > R - GLASS_MARGIN) expect.fail(`k ${k}: pixel ${i % W},${Math.floor(i / W)} is ${Math.hypot(dx, dy).toFixed(2)} from the middle`);
-      }
+      const time = k * 211.7;
+      const list = touchedIndexes(drawn(turn, time, huge));
+      expect(list.length, `k ${k}: nothing lost to the glass`).toBe(opaqueCount(TROT[expected(turn, time).trot]));
+      expect(list.filter((i) => !inGlass(LAYOUT, i, -GLASS_MARGIN)), `k ${k}: pixels closer than ${GLASS_MARGIN} to the glass edge`).toEqual([]);
     }
   });
 
   it('draws the same picture for a turn and the same turn plus or minus whole turns', () => {
     for (const turn of [0.3, -2.2, 40]) {
-      const a = drawn(turn, 6_543);
       for (const other of [turn + FULL, turn - 3 * FULL]) {
-        const b = drawn(other, 6_543);
-        for (let i = 0; i < a.a.length; i++) {
-          const [ar, ag, ab] = rgb(a.a[i] ?? 0);
-          const [br, bg, bb] = rgb(b.a[i] ?? 0);
-          if (Math.max(Math.abs(ar - br), Math.abs(ag - bg), Math.abs(ab - bb)) > 1) expect.fail(`turn ${turn} vs ${other}: pixel ${i % W},${Math.floor(i / W)}`);
-        }
+        expect(maxChannelDiff(drawn(turn, 6_543).a, drawn(other, 6_543).a), `turn ${turn} vs ${other}`).toBeLessThanOrEqual(1);
       }
-    }
-  });
-
-  it('draws at time 0 and at a huge time without failing or vanishing', () => {
-    for (const time of [0, 1e12]) {
-      const pic = drawn(0.5, time);
-      expect(touchedIndexes(pic).length, `time ${time}`).toBeGreaterThan(0);
     }
   });
 
@@ -835,20 +627,15 @@ describe('drawSanta: Santa in the picture', () => {
   });
 });
 
-// XMAS-32d "The globe", slice 4: Santa inside the globe as drawGlobe and
-// sceneFrame draw him. drawGlobe(picture, width, layout, phase, turn, time)
-// gains the time in milliseconds and sceneFrame passes input.time. Order
-// inside drawGlobe: glass, Santa if behind (depth <= 0), the shapes, Santa if
-// in front (depth > 0), then reflections, cast shadow and base. Santa keeps
-// his own colours in every phase (only the glass tints), changes nothing
-// outside the glass, and the same inputs give the same picture.
-//
-// The real shapes never reach as high as Santa flies, so the depth order is
-// pinned by swapping drawShapes for an opaque block over the top of the glass.
+// Santa inside the globe as drawGlobe(picture, width, layout, phase, turn, time)
+// and sceneFrame (which passes input.time) draw him. Order inside drawGlobe:
+// glass, Santa if behind (depth <= 0), the shapes, Santa if in front (depth > 0),
+// then reflections, cast shadow and base. The real shapes never reach as high as
+// Santa flies, so the depth order is pinned by swapping drawShapes for an opaque
+// block over the top of the glass.
 describe('drawGlobe: Santa in the depth order', () => {
-  // One turn, two times half an orbit apart: behind at time BEHIND, in front at
-  // FRONT. The turn is the same, so glass, shapes and reflections are the same
-  // in both pictures and only Santa differs; his two boxes do not overlap.
+  // One turn, two times half an orbit apart: behind at BEHIND, in front at FRONT.
+  // Only Santa differs between the two pictures; his two boxes do not overlap.
   const BEHIND = 2_000;
   const FRONT = BEHIND + (Math.PI / 0.45) * 1000;
   const TURN = turnFor(-Math.PI / 2, BEHIND);
@@ -868,10 +655,8 @@ describe('drawGlobe: Santa in the depth order', () => {
 
   it('draws him over the glass: with the real shapes his box shows him, not the glass', () => {
     const back = santaAlone(TURN, BEHIND);
-    const p = globe(TURN, BEHIND);
-    const q = globe(TURN, FRONT);
-    const changed = back.touched.filter((i) => p[i] !== q[i]);
-    expect(changed.length, 'pixels of his far-side box that show him').toBeGreaterThanOrEqual(0.5 * back.touched.length);
+    const [p, q] = [globe(TURN, BEHIND), globe(TURN, FRONT)];
+    expect(back.touched.filter((i) => p[i] !== q[i]).length, 'pixels of his far-side box that show him').toBeGreaterThanOrEqual(0.5 * back.touched.length);
   });
 
   it('hides him behind an opaque shape while he flies on the far side (depth <= 0)', () => {
@@ -921,30 +706,17 @@ describe('drawGlobe: Santa\'s colours and what he leaves alone', () => {
 
   it('changes nothing outside the glass as he flies: two times at one turn differ only inside the circle', () => {
     for (const layout of [LAYOUT, sceneLayout(161, 172, SEED), sceneLayout(320, 180, SEED)]) {
-      const a = globe(1.7, 3_000, NIGHT, layout);
-      const b = globe(1.7, 8_500, NIGHT, layout);
-      let differ = 0;
-      for (let i = 0; i < a.length; i++) {
-        if (a[i] === b[i]) continue;
-        differ++;
-        if (!inGlass(layout, i, 0)) expect.fail(`${layout.width}x${layout.height}: pixel ${i % layout.width},${Math.floor(i / layout.width)} outside the glass changed with the time`);
-      }
-      expect(differ, `${layout.width}x${layout.height}: Santa moved`).toBeGreaterThan(0);
+      const [a, b] = [globe(1.7, 3_000, NIGHT, layout), globe(1.7, 8_500, NIGHT, layout)];
+      const differ = Array.from(a.keys()).filter((i) => a[i] !== b[i]);
+      expect(differ.filter((i) => !inGlass(layout, i, 0)), `${layout.width}x${layout.height}: pixels outside the glass changed with the time`).toEqual([]);
+      expect(differ.length, `${layout.width}x${layout.height}: Santa moved`).toBeGreaterThan(0);
     }
   });
 
   it('draws the same picture for a turn and the same turn plus or minus whole turns, at the same time', () => {
     for (const turn of [0.4, -3.1, 77]) {
-      const a = globe(turn, 4_444);
       for (const other of [turn + FULL, turn - 2 * FULL]) {
-        const b = globe(other, 4_444);
-        let worst = 0;
-        for (let i = 0; i < a.length; i++) {
-          const x = a[i] ?? 0;
-          const y = b[i] ?? 0;
-          for (const s of [16, 8, 0]) worst = Math.max(worst, Math.abs(((x >> s) & 255) - ((y >> s) & 255)));
-        }
-        expect(worst, `turn ${turn} vs ${other}`).toBeLessThanOrEqual(1);
+        expect(maxChannelDiff(globe(turn, 4_444), globe(other, 4_444)), `turn ${turn} vs ${other}`).toBeLessThanOrEqual(1);
       }
     }
   });
@@ -966,21 +738,15 @@ describe('sceneFrame: Santa at the input time', () => {
       const turn = 1.1;
       const f = sceneFrame({ time, drag: 0, phase: NIGHT, seed: SEED, width: W, height: H, turn });
       const g = globe(turn, time, NIGHT, f.layout);
-      const wrong: string[] = [];
-      for (let i = 0; i < g.length; i++) {
-        if (!inGlass(f.layout, i, -3)) continue;
-        if (f.picture[i] !== g[i] && wrong.length < 8) wrong.push(`${i % W},${Math.floor(i / W)}`);
-      }
-      expect(wrong, `time ${time}: glass pixels unlike drawGlobe at that time`).toEqual([]);
+      const wrong = Array.from(g.keys()).filter((i) => inGlass(f.layout, i, -3) && f.picture[i] !== g[i]).slice(0, 8);
+      expect(wrong.map((i) => `${i % W},${Math.floor(i / W)}`), `time ${time}: glass pixels unlike drawGlobe at that time`).toEqual([]);
     }
   });
 
   it('moves Santa when only the time changes', () => {
     const at = (time: number): Uint32Array => sceneFrame({ time, drag: 0, phase: NIGHT, seed: SEED, width: W, height: H, turn: 0 }).picture;
-    const a = at(1_000);
-    const b = at(4_000);
-    const inside = Array.from(a.keys()).filter((i) => inGlass(LAYOUT, i, -3) && a[i] !== b[i]);
-    expect(inside.length).toBeGreaterThan(0);
+    const [a, b] = [at(1_000), at(4_000)];
+    expect(Array.from(a.keys()).filter((i) => inGlass(LAYOUT, i, -3) && a[i] !== b[i]).length).toBeGreaterThan(0);
   });
 });
 
@@ -1004,17 +770,12 @@ function front(turn: number): [number, number][] {
 }
 
 describe('the drag and the projection agree on which way is right', () => {
-  it.each([0, 1.3, -2.2, 5])('a rightward drag from turn %s moves every front surface point to the right on screen', (start) => {
-    const after = turnAfterDrag(12, start);
-    for (const [x, z] of front(start)) {
-      expect(screenX(x, z, after), `point (${x}, ${z})`).toBeGreaterThan(screenX(x, z, start));
-    }
-  });
-
-  it.each([0, 1.3, -2.2, 5])('a leftward drag from turn %s moves every front surface point to the left on screen', (start) => {
-    const after = turnAfterDrag(-12, start);
-    for (const [x, z] of front(start)) {
-      expect(screenX(x, z, after), `point (${x}, ${z})`).toBeLessThan(screenX(x, z, start));
+  it.each([['right', 12, 1], ['left', -12, -1]] as const)('a drag to the %s moves every front surface point that way on screen, from every start turn', (_, toX, sign) => {
+    for (const start of [0, 1.3, -2.2, 5]) {
+      const after = turnAfterDrag(toX, start);
+      for (const [x, z] of front(start)) {
+        expect(sign * (screenX(x, z, after) - screenX(x, z, start)), `turn ${start} point (${x}, ${z})`).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -1026,20 +787,14 @@ describe('the drag and the projection agree on which way is right', () => {
 });
 
 describe('the drag and Santa agree on which way is right', () => {
-  // Santa is in front (depth > 0) at these turns at time 0; time moves on his own as well, so compare at the same time.
-  it.each([0, 0.2, -0.5])('a rightward drag from turn %s moves Santa to the right while he flies in front', (start) => {
-    const before = santaPlacement(start, 1000);
-    expect(before.depth, 'Santa starts in front').toBeGreaterThan(0.3);
-    const after = santaPlacement(turnAfterDrag(6, start), 1000);
-    expect(after.depth, 'and stays in front').toBeGreaterThan(0);
-    expect(after.x).toBeGreaterThan(before.x);
-  });
-
-  it.each([0, 0.2, -0.5])('a leftward drag from turn %s moves Santa to the left while he flies in front', (start) => {
-    const before = santaPlacement(start, 1000);
-    const after = santaPlacement(turnAfterDrag(-6, start), 1000);
-    expect(after.depth).toBeGreaterThan(0);
-    expect(after.x).toBeLessThan(before.x);
+  it.each([['right', 6, 1], ['left', -6, -1]] as const)('a drag to the %s moves Santa that way while he flies in front', (_, toX, sign) => {
+    for (const start of [0, 0.2, -0.5]) {
+      const before = santaPlacement(start, 1000);
+      expect(before.depth, `turn ${start}: starts in front`).toBeGreaterThan(0.3);
+      const after = santaPlacement(turnAfterDrag(toX, start), 1000);
+      expect(after.depth, `turn ${start}: stays in front`).toBeGreaterThan(0);
+      expect(sign * (after.x - before.x), `turn ${start}: x`).toBeGreaterThan(0);
+    }
   });
 
   it('moves Santa the same way as a front shape for the same drag', () => {
