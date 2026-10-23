@@ -1,10 +1,8 @@
-// XMAS-80: the shapes' bodies as an ordered list of draw steps (per face: its
-// drawing, the map from drawing pixels to globe-centred art units, and a
-// gable's triangle clip; far shapes first, each shape's far faces first) and
-// a CPU renderer that draws the list at any whole zoom. At zoom 1 the picture
-// is today's drawShapes bodies; at a higher zoom the centre pixel of each
-// zoom x zoom block is the zoom 1 picture. sceneFrame can leave the bodies
-// out (shapeBodies: false) while the shadows stay.
+// XMAS-80: the shapes' bodies as an ordered list of draw steps (drawing, map to
+// globe-centred art units, a gable's triangle clip; far first) and a CPU
+// renderer at any whole zoom. At zoom 1 it is today's drawShapes bodies; at a
+// higher zoom each block's centre pixel is the zoom 1 picture. sceneFrame can
+// leave the bodies out (shapeBodies: false) while the shadows stay.
 import { describe, expect, it } from 'vitest';
 import type { Drawing } from '../shared/art.generated.ts';
 import type { PhaseReading } from '../shared/clock.ts';
@@ -38,19 +36,20 @@ function withBodies(flag: boolean | undefined, over: Partial<SceneInput> = {}): 
   return Object.assign(sceneInput(over), flag === undefined ? {} : { shapeBodies: flag });
 }
 
-function filled(layout: SceneLayout, zoom: number, colour: number, width = layout.width): Uint32Array {
-  return new Uint32Array(width * zoom * layout.height * zoom).fill(colour);
+function filled(layout: SceneLayout, zoom: number, colour: number): Uint32Array {
+  return new Uint32Array(layout.width * zoom * layout.height * zoom).fill(colour);
 }
 
-function rendered(turn: number, zoom: number, colour = FILL, layout = LAYOUT, shapes: readonly GlobeShape[] = globeShapes): Uint32Array {
-  const picture = filled(layout, zoom, colour);
-  renderDrawList(picture, layout.width, layout, shapeDrawList(turn, shapes), zoom);
+/** The bodies in depth order on `colour`, with Santa too when `time` is given (sceneInput's is T). */
+function rendered(turn: number, zoom: number, colour = FILL, time?: number): Uint32Array {
+  const picture = filled(LAYOUT, zoom, colour);
+  renderDrawList(picture, W, LAYOUT, time === undefined ? shapeDrawList(turn) : shapeDrawList(turn, globeShapes, time), zoom);
   return picture;
 }
 
-function shadowsOn(turn: number, zoom: number, colour = FILL, layout = LAYOUT, shapes: readonly GlobeShape[] = globeShapes): Uint32Array {
-  const picture = filled(layout, zoom, colour);
-  renderShadowSteps(picture, layout.width, layout, shadowDrawList(turn, shapes), zoom);
+function shadowsOn(turn: number, zoom: number, colour = FILL): Uint32Array {
+  const picture = filled(LAYOUT, zoom, colour);
+  renderShadowSteps(picture, W, LAYOUT, shadowDrawList(turn), zoom);
   return picture;
 }
 
@@ -92,11 +91,6 @@ function expectedStep(face: { drawing: string; corners: readonly (readonly [numb
 }
 
 /**
- * Counts the pixels where the list (bodies and Santa, XMAS-83) laid over a bodiless frame is not today's frame. The bodiless frame
- * holds no Santa, so where the list painted a pixel the whole frame must hold it; where the list painted nothing the two frames
- * must agree. Also reports how many painted pixels matched.
- */
-/**
  * XMAS-68: the base is the page's last layer, over the shapes and Santa, so a bodiless frame has no base body either
  * (shapeBodies false leaves it to the fine layer). Lays it, at one pixel to an art pixel, over `picture` as the frame draws it.
  */
@@ -105,11 +99,15 @@ function withBase(picture: Uint32Array, layout: SceneLayout, turn: number): Uint
   return picture;
 }
 
+/**
+ * Counts the pixels where the list (bodies and Santa, XMAS-83) laid over a bodiless frame is not today's frame: where the list
+ * painted a pixel the whole frame must hold it, elsewhere the two frames must agree. Also reports how many painted pixels matched.
+ */
 function overlayMismatch(turn: number, phase: PhaseReading = NIGHT): { bad: number; matched: number } {
   const whole = sceneFrame(sceneInput({ turn, phase }));
   const bare = sceneFrame(withBodies(false, { turn, phase }));
   // The base goes over the bodies and Santa; the bodiless frame is without it, so it goes on all three.
-  const list = withBase(renderedWithSanta(turn, 1), whole.layout, turn);
+  const list = withBase(rendered(turn, 1, FILL, T), whole.layout, turn);
   // XMAS-82: the bodiless frame has no shadows either; where the shadows go, the whole frame may hold them over the bare one.
   const shaded = Uint32Array.from(bare.picture);
   renderShadowSteps(shaded, W, bare.layout, shadowDrawList(turn), 1);
@@ -127,13 +125,6 @@ function overlayMismatch(turn: number, phase: PhaseReading = NIGHT): { bad: numb
   return { bad, matched };
 }
 
-/** The bodies and Santa (at time T, as sceneInput has it) in depth order, laid on `fill`. */
-function renderedWithSanta(turn: number, zoom: number, colour = FILL): Uint32Array {
-  const picture = filled(LAYOUT, zoom, colour);
-  renderDrawList(picture, LAYOUT.width, LAYOUT, shapeDrawList(turn, globeShapes, T), zoom);
-  return picture;
-}
-
 function plainDrawing(width: number, height: number, pixels: number[]): Drawing {
   return { sheet: 'test', x: 0, y: 0, width, height, pixels: Uint8Array.from(pixels) };
 }
@@ -143,29 +134,56 @@ function layoutAt(width: number, height: number, cx: number, cy: number): SceneL
   return { ...LAYOUT, width, height, globe: { ...LAYOUT.globe, cx, cy } };
 }
 
+/** The centre of every pixel of a picture at `zoom` that is not FILL, in art units from the globe's centre. */
+function paintedAt(picture: Uint32Array, zoom: number, layout = LAYOUT): [number, number][] {
+  const side = layout.width * zoom;
+  const out: [number, number][] = [];
+  picture.forEach((p, i) => {
+    if (p !== FILL) out.push([((i % side) + 0.5) / zoom - layout.globe.cx, (Math.floor(i / side) + 0.5) / zoom - layout.globe.cy]);
+  });
+  return out;
+}
+
+/** A blank small picture (globe centred) with `steps` drawn on it. */
+function drawSmall(steps: readonly DrawStep[], zoom = 1, size = 8): Uint32Array {
+  const layout = layoutAt(size, size, size / 2, size / 2);
+  const picture = filled(layout, zoom, FILL);
+  renderDrawList(picture, size, layout, steps, zoom);
+  return picture;
+}
+
+/** How many art pixels' zoom x zoom block centres in `many` differ from the matching pixel of the zoom 1 picture `one`. */
+function centreMismatches(many: Uint32Array, one: Uint32Array, zoom: number): number {
+  const centre = (zoom - 1) / 2;
+  let mismatches = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) if (many[(y * zoom + centre) * W * zoom + x * zoom + centre] !== one[y * W + x]) mismatches += 1;
+  }
+  return mismatches;
+}
+
+/** The whole frame, the bodiless frame, and the bodies, shadows and base laid on a blank picture, at one turn. */
+function framesAt(turn: number) {
+  return {
+    whole: sceneFrame(sceneInput({ turn })),
+    bare: sceneFrame(withBodies(false, { turn })),
+    bodies: rendered(turn, 1, FILL, T),
+    shadows: shadowsOn(turn, 1, FILL),
+    based: withBase(filled(LAYOUT, 1, FILL), LAYOUT, turn),
+  };
+}
+
 describe('shapeDrawList: the list', () => {
-  it('throws a RangeError for a turn that is not finite', () => {
+  it('throws a RangeError for a turn that is not finite, and is empty for an empty shapes list', () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
       expect(() => shapeDrawList(bad)).toThrow(RangeError);
     }
-  });
-
-  it('is empty for an empty shapes list', () => {
     expect(shapeDrawList(0.4, [])).toEqual([]);
   });
 
-  it('has one step per visible face of every shape, each with its own drawing', () => {
-    for (const turn of SWEEP) {
-      const steps = shapeDrawList(turn);
-      const faces = globeShapes.flatMap((shape) => projectShape(shape, turn));
-      expect(steps).toHaveLength(faces.length);
-      expect(steps.map((s) => s.drawing).sort((x, y) => x.x - y.x || x.y - y.y || x.sheet.localeCompare(y.sheet))).toEqual(
-        faces.map((f) => sheet(f.drawing)).sort((x, y) => x.x - y.x || x.y - y.y || x.sheet.localeCompare(y.sheet)),
-      );
-    }
-  });
-
-  it('puts far shapes first and, inside a shape, its far faces first, at several turns', () => {
+  it('has one step per visible face, far shapes first and inside a shape its far faces first, a, b, d from the corners and a gable\'s triangle as the clip, at several turns', () => {
+    let quads = 0;
+    let gables = 0;
     for (const turn of SWEEP) {
       const expected = farFirst(globeShapes, turn).flatMap((shape) => [...projectShape(shape, turn)].reverse().map(expectedStep));
       const steps = shapeDrawList(turn);
@@ -176,64 +194,32 @@ describe('shapeDrawList: the list', () => {
         expect(near(step.a, want?.a ?? [])).toBe(true);
         expect(near(step.b, want?.b ?? [])).toBe(true);
         expect(near(step.d, want?.d ?? [])).toBe(true);
+        if (want?.clip === undefined) {
+          quads += 1;
+          expect(step.clip).toBeUndefined();
+        } else {
+          gables += 1;
+          expect(step.clip).toHaveLength(3);
+          step.clip?.forEach((c, k) => expect(near(c, want.clip?.[k] ?? [])).toBe(true));
+        }
       });
     }
+    expect(quads).toBeGreaterThan(0);
+    expect(gables).toBeGreaterThan(0);
   });
 
   it('orders shapes by nearness whatever order the caller lists them in', () => {
     const far: GlobeShape = { kind: 'present', x: 0, z: -20, width: 10, depth: 10, height: 10, design: 1 };
     const nearOne: GlobeShape = { kind: 'present', x: 0, z: 20, width: 10, depth: 10, height: 10, design: 2 };
+    const firstDrawings = (steps: readonly { drawing: unknown }[], shape: GlobeShape, turn: number): unknown[] =>
+      steps.slice(0, projectShape(shape, turn).length).map((s) => s.drawing);
+    const farFaces = (shape: GlobeShape, turn: number): unknown[] => [...projectShape(shape, turn)].reverse().map((f) => sheet(f.drawing));
     const one = shapeDrawList(0, [far, nearOne]);
-    const other = shapeDrawList(0, [nearOne, far]);
-    expect(other).toEqual(one);
+    expect(shapeDrawList(0, [nearOne, far])).toEqual(one);
     // Every step of the far present comes before every step of the near one.
-    const farLen = projectShape(far, 0).length;
-    expect(one.slice(0, farLen).map((s) => s.drawing)).toEqual([...projectShape(far, 0)].reverse().map((f) => sheet(f.drawing)));
+    expect(firstDrawings(one, far, 0)).toEqual(farFaces(far, 0));
     // Half a turn later the two swap places.
-    const turned = shapeDrawList(Math.PI, [far, nearOne]);
-    expect(turned.slice(0, projectShape(nearOne, Math.PI).length).map((s) => s.drawing)).toEqual(
-      [...projectShape(nearOne, Math.PI)].reverse().map((f) => sheet(f.drawing)),
-    );
-  });
-
-  it('takes a, b and d from a four-corner face as its top left, top right and bottom left, with no clip', () => {
-    let quads = 0;
-    for (const turn of SWEEP) {
-      const faces = farFirst(globeShapes, turn).flatMap((shape) => [...projectShape(shape, turn)].reverse());
-      shapeDrawList(turn).forEach((step, i) => {
-        const face = faces[i];
-        if (face?.corners.length !== 4) return;
-        quads += 1;
-        expect(step.clip).toBeUndefined();
-        expect(near(step.a, face.corners[0] ?? [])).toBe(true);
-        expect(near(step.b, face.corners[1] ?? [])).toBe(true);
-        expect(near(step.d, face.corners[3] ?? [])).toBe(true);
-      });
-    }
-    expect(quads).toBeGreaterThan(0);
-  });
-
-  it('gives a gable its triangle as the clip, hung from the apex level, and no other face one', () => {
-    let gables = 0;
-    for (const turn of SWEEP) {
-      const faces = farFirst(globeShapes, turn).flatMap((shape) => [...projectShape(shape, turn)].reverse());
-      shapeDrawList(turn).forEach((step, i) => {
-        const face = faces[i];
-        if (face === undefined) return;
-        if (face.corners.length !== 3) {
-          expect(step.clip).toBeUndefined();
-          return;
-        }
-        gables += 1;
-        const want = expectedStep(face);
-        expect(step.clip).toHaveLength(3);
-        step.clip?.forEach((c, k) => expect(near(c, want.clip?.[k] ?? [])).toBe(true));
-        expect(near(step.a, want.a)).toBe(true);
-        expect(near(step.b, want.b)).toBe(true);
-        expect(near(step.d, want.d)).toBe(true);
-      });
-    }
-    expect(gables).toBeGreaterThan(0);
+    expect(firstDrawings(shapeDrawList(Math.PI, [far, nearOne]), nearOne, Math.PI)).toEqual(farFaces(nearOne, Math.PI));
   });
 
   it('keeps a gable drawing\'s proportions: one art unit down per drawing row, its width axis the base edge, the triangle inside the drawing', () => {
@@ -242,27 +228,24 @@ describe('shapeDrawList: the list', () => {
       for (const step of shapeDrawList(turn)) {
         if (step.clip === undefined) continue;
         gables += 1;
-        const [p, , r] = step.clip;
-        // The downward axis is the drawing's whole height, straight down: not squashed or stretched.
-        expect(step.d[0]).toBeCloseTo(step.a[0], 9);
-        expect(step.d[1] - step.a[1]).toBeCloseTo(step.drawing.height, 9);
-        // The width axis is the gable's base edge (p to r), so the drawing spans the gable's width.
-        expect(step.b[0] - step.a[0]).toBeCloseTo((r?.[0] ?? Number.NaN) - (p?.[0] ?? Number.NaN), 9);
-        expect(step.b[1] - step.a[1]).toBeCloseTo((r?.[1] ?? Number.NaN) - (p?.[1] ?? Number.NaN), 9);
-        // Every clip corner has drawing coordinates u, v within 0..1.
+        const [p = [], , r = []] = step.clip;
         const ux = step.b[0] - step.a[0];
         const uy = step.b[1] - step.a[1];
         const vy = step.d[1] - step.a[1];
+        // The downward axis is the drawing's whole height, straight down: not squashed or stretched.
+        expect(step.d[0]).toBeCloseTo(step.a[0], 9);
+        expect(vy).toBeCloseTo(step.drawing.height, 9);
+        // The width axis is the gable's base edge (p to r), so the drawing spans the gable's width.
+        expect(ux).toBeCloseTo((r[0] ?? Number.NaN) - (p[0] ?? Number.NaN), 9);
+        expect(uy).toBeCloseTo((r[1] ?? Number.NaN) - (p[1] ?? Number.NaN), 9);
+        // Every clip corner has drawing coordinates u, v within 0..1 (d is straight down: dy = uy * u + vy * v, dx = ux * u).
         for (const [x, y] of step.clip) {
-          const dx = x - step.a[0];
           const dy = y - step.a[1];
-          const v = dy / vy - 0;
-          // d is straight down, so dy = uy * u + vy * v and dx = ux * u.
-          const u = Math.abs(ux) > 1e-9 ? dx / ux : 0;
+          const u = Math.abs(ux) > 1e-9 ? (x - step.a[0]) / ux : 0;
           const vFull = (dy - uy * u) / vy;
           expect(vFull).toBeGreaterThan(-1e-9);
           expect(vFull).toBeLessThan(1 + 1e-9);
-          expect(v).toBeGreaterThan(-1);
+          expect(dy / vy).toBeGreaterThan(-1);
           if (Math.abs(ux) > 1e-9) {
             expect(u).toBeGreaterThan(-1e-9);
             expect(u).toBeLessThan(1 + 1e-9);
@@ -275,9 +258,7 @@ describe('shapeDrawList: the list', () => {
 
   it('shows the same list at turn 0 and at whole turns, negative or positive', () => {
     const base = shapeDrawList(0);
-    for (const turn of [FULL, -FULL, 2 * FULL, -3 * FULL]) {
-      expect(shapeDrawList(turn)).toEqual(base);
-    }
+    for (const turn of [FULL, -FULL, 2 * FULL, -3 * FULL]) expect(shapeDrawList(turn)).toEqual(base);
   });
 
   it('does not change the shapes it is given', () => {
@@ -289,25 +270,19 @@ describe('shapeDrawList: the list', () => {
 });
 
 describe('renderDrawList: the renderer', () => {
-  it('draws nothing for an empty list and leaves the picture alone', () => {
+  it('draws nothing for an empty list, and rejects a zoom that is not a whole number of at least 1', () => {
     const picture = filled(LAYOUT, 3, FILL);
     renderDrawList(picture, W, LAYOUT, [], 3);
     expect(picture.every((p) => p === FILL)).toBe(true);
-  });
-
-  it('rejects a zoom that is not a whole number of at least 1', () => {
     for (const bad of [0, -2, 1.5, Number.NaN]) {
       expect(() => renderDrawList(filled(LAYOUT, 1, FILL), W, LAYOUT, shapeDrawList(0), bad)).toThrow(RangeError);
     }
   });
 
   it('point-samples each drawing pixel as a whole zoom-sized block about the globe centre', () => {
-    const layout = layoutAt(8, 8, 4, 4);
     const drawing = plainDrawing(2, 2, [1, 2, 3, 4]);
-    const step: DrawStep = { drawing, a: [-2, -2], b: [2, -2], d: [-2, 2] };
     for (const zoom of [1, 2, 3, 5]) {
-      const picture = filled(layout, zoom, FILL);
-      renderDrawList(picture, 8, layout, [step], zoom);
+      const picture = drawSmall([{ drawing, a: [-2, -2], b: [2, -2], d: [-2, 2] }], zoom);
       const side = 8 * zoom;
       for (let y = 0; y < side; y++) {
         for (let x = 0; x < side; x++) {
@@ -322,19 +297,13 @@ describe('renderDrawList: the renderer', () => {
   });
 
   it('draws a mirrored drawing (b left of a) flipped', () => {
-    const layout = layoutAt(8, 8, 4, 4);
-    const drawing = plainDrawing(2, 1, [1, 2]);
-    const picture = filled(layout, 1, FILL);
-    renderDrawList(picture, 8, layout, [{ drawing, a: [2, -1], b: [-2, -1], d: [2, 1] }], 1);
+    const picture = drawSmall([{ drawing: plainDrawing(2, 1, [1, 2]), a: [2, -1], b: [-2, -1], d: [2, 1] }]);
     expect(picture[4 * 8 + 3]).toBe(COLOURS[1]);
-    expect(picture[4 * 8 + 5 - 0]).toBe(COLOURS[0] ?? -1);
+    expect(picture[4 * 8 + 5]).toBe(COLOURS[0] ?? -1);
   });
 
   it('leaves the background where a drawing pixel is transparent', () => {
-    const layout = layoutAt(8, 8, 4, 4);
-    const drawing = plainDrawing(2, 2, [0, 2, 3, 0]);
-    const picture = filled(layout, 2, FILL);
-    renderDrawList(picture, 8, layout, [{ drawing, a: [-2, -2], b: [2, -2], d: [-2, 2] }], 2);
+    const picture = drawSmall([{ drawing: plainDrawing(2, 2, [0, 2, 3, 0]), a: [-2, -2], b: [2, -2], d: [-2, 2] }], 2);
     expect(picture[4 * 16 + 4]).toBe(FILL); // top left block, transparent
     expect(picture[4 * 16 + 10]).toBe(COLOURS[1]); // top right block spans x 8..11
     expect(picture[10 * 16 + 4]).toBe(COLOURS[2]); // bottom left block spans y 8..11
@@ -342,26 +311,19 @@ describe('renderDrawList: the renderer', () => {
   });
 
   it('lets a later step cover an earlier one where they overlap, and only there', () => {
-    const layout = layoutAt(8, 8, 4, 4);
     const first: DrawStep = { drawing: plainDrawing(1, 1, [1]), a: [-3, -3], b: [1, -3], d: [-3, 1] };
     const second: DrawStep = { drawing: plainDrawing(1, 1, [2]), a: [-1, -1], b: [3, -1], d: [-1, 3] };
-    const picture = filled(layout, 1, FILL);
-    renderDrawList(picture, 8, layout, [first, second], 1);
+    const picture = drawSmall([first, second]);
     expect(picture[2 * 8 + 2]).toBe(COLOURS[0]);
     expect(picture[4 * 8 + 4]).toBe(COLOURS[1]);
-    const swapped = filled(layout, 1, FILL);
-    renderDrawList(swapped, 8, layout, [second, first], 1);
-    expect(swapped[4 * 8 + 4]).toBe(COLOURS[0]);
+    expect(drawSmall([second, first])[4 * 8 + 4]).toBe(COLOURS[0]);
   });
 
   it('draws only the clip triangle of a clipped step', () => {
-    const layout = layoutAt(12, 12, 6, 6);
-    const drawing = plainDrawing(1, 1, [1]);
     const clip = [[-4, 4], [0, -4], [4, 4]] as const;
-    const step: DrawStep = { drawing, a: [-4, -4], b: [4, -4], d: [-4, 4], clip };
+    const step: DrawStep = { drawing: plainDrawing(1, 1, [1]), a: [-4, -4], b: [4, -4], d: [-4, 4], clip };
     for (const zoom of [1, 3]) {
-      const picture = filled(layout, zoom, FILL);
-      renderDrawList(picture, 12, layout, [step], zoom);
+      const picture = drawSmall([step], zoom, 12);
       const side = 12 * zoom;
       const at = (ax: number, ay: number): number => picture[Math.floor((ay + 6) * zoom + zoom / 2) * side + Math.floor((ax + 6) * zoom + zoom / 2)] ?? -1;
       expect(at(0, 3)).toBe(COLOURS[0]); // low in the middle: inside
@@ -378,20 +340,14 @@ describe('renderDrawList: the renderer', () => {
         const steps = shapeDrawList(turn);
         const xs = steps.flatMap((s) => [s.a[0], s.b[0], s.d[0], s.b[0] + s.d[0] - s.a[0]]);
         const ys = steps.flatMap((s) => [s.a[1], s.b[1], s.d[1], s.b[1] + s.d[1] - s.a[1]]);
-        const picture = rendered(turn, zoom);
-        const side = W * zoom;
-        let painted = 0;
-        for (let i = 0; i < picture.length; i++) {
-          if (picture[i] === FILL) continue;
-          painted += 1;
-          const x = ((i % side) + 0.5) / zoom - LAYOUT.globe.cx;
-          const y = (Math.floor(i / side) + 0.5) / zoom - LAYOUT.globe.cy;
+        const painted = paintedAt(rendered(turn, zoom), zoom);
+        for (const [x, y] of painted) {
           expect(x).toBeGreaterThanOrEqual(Math.min(...xs) - 1e-9);
           expect(x).toBeLessThanOrEqual(Math.max(...xs) + 1e-9);
           expect(y).toBeGreaterThanOrEqual(Math.min(...ys) - 1e-9);
           expect(y).toBeLessThanOrEqual(Math.max(...ys) + 1e-9);
         }
-        expect(painted).toBeGreaterThan(0);
+        expect(painted.length).toBeGreaterThan(0);
       }
     }
   });
@@ -406,37 +362,28 @@ describe('renderDrawList: the renderer', () => {
     }
   });
 
-  it('clips at the picture edges without wrapping a row onto the next', () => {
-    for (const zoom of [1, 3]) {
-      for (const turn of [0, 2.2]) {
-        // The same shapes with the globe 30 and then 90 pixels from the left edge, and 20 from the top:
-        // the narrow picture must be the wide one cropped, so nothing leaks to the row before or after.
-        const wide = layoutAt(W, 80, 90, 55);
-        const cut = layoutAt(W - 60, 80, 30, 55);
-        const bigPic = filled(wide, zoom, FILL);
-        renderDrawList(bigPic, wide.width, wide, shapeDrawList(turn), zoom);
-        const smallPic = filled(cut, zoom, FILL);
-        renderDrawList(smallPic, cut.width, cut, shapeDrawList(turn), zoom);
-        const sideBig = wide.width * zoom;
-        const sideSmall = cut.width * zoom;
-        for (let y = 0; y < 80 * zoom; y++) {
-          for (let x = 0; x < sideSmall; x++) {
-            expect(smallPic[y * sideSmall + x]).toBe(bigPic[y * sideBig + x + 60 * zoom]);
+  it('clips at the picture edges and the top without wrapping a row onto the next or touching rows below the picture', () => {
+    // Each case: a big picture and a small one cut from it at offset (dx, dy) art pixels; the small must be the big one cropped.
+    const cases = [
+      { big: layoutAt(W, 80, 90, 55), small: layoutAt(W - 60, 80, 30, 55), dx: 60, dy: 0, zooms: [1, 3], turns: [0, 2.2] },
+      { big: layoutAt(W, 120, 100, 80), small: layoutAt(W, 60, 100, 20), dx: 0, dy: 60, zooms: [1], turns: [0.5] },
+    ];
+    for (const { big, small, dx, dy, zooms, turns } of cases) {
+      for (const zoom of zooms) {
+        for (const turn of turns) {
+          const bigPic = filled(big, zoom, FILL);
+          renderDrawList(bigPic, big.width, big, shapeDrawList(turn), zoom);
+          const smallPic = filled(small, zoom, FILL);
+          renderDrawList(smallPic, small.width, small, shapeDrawList(turn), zoom);
+          const sideBig = big.width * zoom;
+          const sideSmall = small.width * zoom;
+          for (let y = 0; y < small.height * zoom; y++) {
+            for (let x = 0; x < sideSmall; x++) {
+              expect(smallPic[y * sideSmall + x]).toBe(bigPic[(y + dy * zoom) * sideBig + x + dx * zoom]);
+            }
           }
         }
       }
-    }
-  });
-
-  it('clips at the top without wrapping and does not touch rows below the picture', () => {
-    const tall = layoutAt(W, 120, 100, 80);
-    const short = layoutAt(W, 60, 100, 20);
-    const bigPic = filled(tall, 1, FILL);
-    renderDrawList(bigPic, W, tall, shapeDrawList(0.5), 1);
-    const smallPic = filled(short, 1, FILL);
-    renderDrawList(smallPic, W, short, shapeDrawList(0.5), 1);
-    for (let y = 0; y < 60; y++) {
-      for (let x = 0; x < W; x++) expect(smallPic[y * W + x]).toBe(bigPic[(y + 60) * W + x]);
     }
   });
 });
@@ -456,26 +403,21 @@ describe('the list at zoom 1 is today\'s drawShapes bodies', () => {
     }
   });
 
-  it('equals sceneFrame\'s whole picture when laid over the frame without bodies (Santa in its depth order), over the whole sweep', () => {
-    for (const turn of SWEEP) {
-      const { bad, matched } = overlayMismatch(turn);
-      expect(bad).toBe(0);
-      expect(matched).toBeGreaterThan(0);
-    }
-  });
-
-  it('holds in every phase', () => {
+  it('equals sceneFrame\'s whole picture when laid over the frame without bodies (Santa in its depth order): over the whole sweep, in every phase and at negative, whole or many turns', () => {
     const phases: PhaseReading[] = [
       { from: 'dawn', to: 'dawn', share: 0 },
       { from: 'sunset', to: 'sunset', share: 0 },
       { from: 'frosty-morning', to: 'sunset', share: 0.25 },
     ];
-    for (const phase of phases) {
-      for (const turn of [0.4, 2.9, -1.3]) {
-        const { bad, matched } = overlayMismatch(turn, phase);
-        expect(bad).toBe(0);
-        expect(matched).toBeGreaterThan(0);
-      }
+    const cases: [number, PhaseReading][] = [
+      ...SWEEP.map((turn): [number, PhaseReading] => [turn, NIGHT]),
+      ...phases.flatMap((phase) => [0.4, 2.9, -1.3].map((turn): [number, PhaseReading] => [turn, phase])),
+      ...[-FULL, FULL, -0.75, 7 * FULL + 0.3].map((turn): [number, PhaseReading] => [turn, NIGHT]),
+    ];
+    for (const [turn, phase] of cases) {
+      const { bad, matched } = overlayMismatch(turn, phase);
+      expect(bad, `turn ${turn}, phase ${phase.from}->${phase.to}`).toBe(0);
+      expect(matched).toBeGreaterThan(0);
     }
   });
 
@@ -498,30 +440,13 @@ describe('the list at zoom 1 is today\'s drawShapes bodies', () => {
       expect(inside).toBeGreaterThan(0);
     }
   });
-
-  it('holds at a turn that is negative, a whole turn or many turns', () => {
-    for (const turn of [-FULL, FULL, -0.75, 7 * FULL + 0.3]) {
-      const { bad, matched } = overlayMismatch(turn);
-      expect(bad).toBe(0);
-      expect(matched).toBeGreaterThan(0);
-    }
-  });
 });
 
 describe('the list at a higher zoom', () => {
   it('has, at the centre of each zoom x zoom block, the zoom 1 picture (zoom 3 and 5)', () => {
     for (const zoom of [3, 5]) {
       for (const turn of SWEEP) {
-        const one = rendered(turn, 1);
-        const many = rendered(turn, zoom);
-        const centre = (zoom - 1) / 2;
-        let mismatches = 0;
-        for (let y = 0; y < H; y++) {
-          for (let x = 0; x < W; x++) {
-            if (many[(y * zoom + centre) * W * zoom + x * zoom + centre] !== one[y * W + x]) mismatches += 1;
-          }
-        }
-        expect(mismatches).toBe(0);
+        expect(centreMismatches(rendered(turn, zoom), rendered(turn, 1), zoom)).toBe(0);
       }
     }
   });
@@ -538,17 +463,8 @@ describe('the list at a higher zoom', () => {
         for (let x = 0; x < W * zoom; x++) many[y * W * zoom + x] = base.picture[Math.floor(y / zoom) * W + Math.floor(x / zoom)] ?? 0;
       }
       renderDrawList(many, W, base.layout, shapeDrawList(turn), zoom);
-      const centre = (zoom - 1) / 2;
-      let bodies = 0;
-      let mismatches = 0;
-      for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-          if (many[(y * zoom + centre) * W * zoom + x * zoom + centre] !== one[y * W + x]) mismatches += 1;
-          if (one[y * W + x] !== base.picture[y * W + x]) bodies += 1;
-        }
-      }
-      expect(mismatches).toBe(0);
-      expect(bodies).toBeGreaterThan(0);
+      expect(centreMismatches(many, one, zoom)).toBe(0);
+      expect(one.filter((p, i) => p !== base.picture[i]).length).toBeGreaterThan(0); // the bodies are there
     }
   });
 
@@ -590,39 +506,21 @@ describe('the list at a higher zoom', () => {
 describe('sceneFrame: the shapeBodies option', () => {
   it('defaults to drawing the bodies: absent and true are the same picture', () => {
     const absent = sceneFrame(withBodies(undefined, { turn: 0.8 }));
-    const yes = sceneFrame(withBodies(true, { turn: 0.8 }));
-    expect(yes.picture).toEqual(absent.picture);
+    expect(sceneFrame(withBodies(true, { turn: 0.8 })).picture).toEqual(absent.picture);
   });
 
-  it('draws no shape bodies when false: the frame differs from the default only where the bodies and shadows are', () => {
-    for (const turn of [0, 1.1, 4.0]) {
-      const whole = sceneFrame(sceneInput({ turn }));
-      const bare = sceneFrame(withBodies(false, { turn }));
-      const covered = renderedWithSanta(turn, 1);
-      const shadowed = shadowsOn(turn, 1, FILL);
-      const based = withBase(filled(LAYOUT, 1, FILL), LAYOUT, turn);
+  it('draws no shape bodies when false: the frame differs from the default only where the bodies, shadows and base are, no other pixel moves, and the shadows go too', () => {
+    for (const turn of [0, 1.1, 4.0, 2.4, 0.2, 5.1]) {
+      const { whole, bare, bodies, shadows, based } = framesAt(turn);
       let differing = 0;
-      for (let i = 0; i < whole.picture.length; i++) {
-        if (whole.picture[i] !== bare.picture[i]) {
-          differing += 1;
-          expect(covered[i] !== FILL || shadowed[i] !== FILL || based[i] !== FILL).toBe(true); // a body, Santa, a shadow or a base pixel
-        }
-      }
-      expect(differing).toBeGreaterThan(0);
-    }
-  });
-
-  it('leaves the rest of the picture unchanged: no pixel outside the shapes and their shadows moves, and the shadows go too', () => {
-    for (const turn of [2.4, 0.2, 5.1]) {
-      const whole = sceneFrame(sceneInput({ turn }));
-      const bare = sceneFrame(withBodies(false, { turn }));
-      const bodies = renderedWithSanta(turn, 1);
-      const shadows = shadowsOn(turn, 1, FILL);
-      const based = withBase(filled(LAYOUT, 1, FILL), LAYOUT, turn);
       let shadowOnly = 0;
       let shadowOnlyGone = 0;
       for (let i = 0; i < whole.picture.length; i++) {
-        const covered = bodies[i] !== FILL || shadows[i] !== FILL || based[i] !== FILL;
+        const covered = bodies[i] !== FILL || shadows[i] !== FILL || based[i] !== FILL; // a body, Santa, a shadow or a base pixel
+        if (whole.picture[i] !== bare.picture[i]) {
+          differing += 1;
+          expect(covered).toBe(true);
+        }
         if (!covered) expect(bare.picture[i]).toBe(whole.picture[i]);
         if (bodies[i] === FILL && shadows[i] !== FILL && based[i] === FILL) {
           shadowOnly += 1;
@@ -630,6 +528,7 @@ describe('sceneFrame: the shapeBodies option', () => {
           if (whole.picture[i] !== bare.picture[i]) shadowOnlyGone += 1;
         }
       }
+      expect(differing).toBeGreaterThan(0);
       expect(shadowOnly).toBeGreaterThan(0);
       expect(shadowOnlyGone).toBeGreaterThan(shadowOnly / 2);
       expect(bodies.some((p) => p !== FILL)).toBe(true);
@@ -638,9 +537,7 @@ describe('sceneFrame: the shapeBodies option', () => {
 
   it('with the shadows laid back and then the bodies, restores the whole frame (Santa included)', () => {
     const turn = 2.4;
-    const whole = sceneFrame(sceneInput({ turn }));
-    const bare = sceneFrame(withBodies(false, { turn }));
-    const bodies = renderedWithSanta(turn, 1);
+    const { whole, bare, bodies } = framesAt(turn);
     // Laying the shadows back over the bare frame and then the bodies and Santa restores today's picture exactly.
     const back = Uint32Array.from(bare.picture);
     renderShadowSteps(back, W, bare.layout, shadowDrawList(turn), 1);
@@ -653,16 +550,13 @@ describe('sceneFrame: the shapeBodies option', () => {
     expect(matched).toBeGreaterThan(0);
   });
 
-  it('works with a handed-in target and layout, and does not change the layout', () => {
+  it('works with a handed-in target and layout, and does not change the layout; still throws for a non-finite turn', () => {
     const layout = sceneLayout(W, H, SEED);
     const target = new Uint32Array(W * H).fill(0xffffffff);
     const frame = sceneFrame(withBodies(false, { turn: 0.5 }), target, layout);
     expect(frame.picture).toBe(target);
     expect(frame.layout).toBe(layout);
     expect(frame.picture).not.toEqual(sceneFrame(sceneInput({ turn: 0.5 })).picture);
-  });
-
-  it('still throws for a non-finite turn when false', () => {
     expect(() => sceneFrame(withBodies(false, { turn: Number.NaN }))).toThrow(RangeError);
   });
 });
@@ -677,33 +571,20 @@ function wideStep(layout: SceneLayout): ShadowStep {
 }
 
 describe('shadowDrawList: the list', () => {
-  it('throws a RangeError for a turn that is not finite', () => {
+  it('throws a RangeError for a turn that is not finite, and is empty for no shapes', () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) expect(() => shadowDrawList(bad)).toThrow(RangeError);
-  });
-
-  it('has one step per shape, each a flat polygon of at least three finite vertices', () => {
-    for (const turn of SWEEP) {
-      const steps = shadowDrawList(turn);
-      expect(steps).toHaveLength(globeShapes.length);
-      for (const step of steps) {
-        expect(step.polygon.length).toBeGreaterThanOrEqual(3);
-        for (const [x, y] of step.polygon) {
-          expect(Number.isFinite(x)).toBe(true);
-          expect(Number.isFinite(y)).toBe(true);
-        }
-      }
-    }
-  });
-
-  it('is empty for no shapes', () => {
     expect(shadowDrawList(0.3, [])).toEqual([]);
   });
 
-  it('is far shapes first: each shape\'s step sits at its far-first place', () => {
-    for (const turn of [0, 0.4, 1.7, 3.0, 5.9]) {
-      const order = farFirst(globeShapes, turn);
+  it('has one step per shape, each a flat polygon of at least three finite vertices, far shapes first: each shape\'s step sits at its far-first place', () => {
+    for (const turn of [...SWEEP, 0.4]) {
       const all = shadowDrawList(turn);
-      order.forEach((shape, n) => {
+      expect(all).toHaveLength(globeShapes.length);
+      for (const step of all) {
+        expect(step.polygon.length).toBeGreaterThanOrEqual(3);
+        for (const [x, y] of step.polygon) expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
+      }
+      farFirst(globeShapes, turn).forEach((shape, n) => {
         const alone = shadowDrawList(turn, [shape])[0];
         expect(alone).toBeDefined();
         const mine = all[n]?.polygon ?? [];
@@ -732,17 +613,16 @@ describe('shadowDrawList: the list', () => {
 
   it('is smooth: a small turn moves each corner less than an art unit off the next shadow\'s outline, and the corners are not on whole art units', () => {
     // The distance from (x, y) to the nearest edge of `ring`.
-    const outlineDistance = (ring: readonly (readonly [number, number])[], x: number, y: number): number => {
-      let best = Number.POSITIVE_INFINITY;
-      ring.forEach(([ax = 0, ay = 0], i) => {
-        const [bx = 0, by = 0] = ring[(i + 1) % ring.length] ?? [];
-        const dx = bx - ax;
-        const dy = by - ay;
-        const t = Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
-        best = Math.min(best, Math.hypot(ax + t * dx - x, ay + t * dy - y));
-      });
-      return best;
-    };
+    const outlineDistance = (ring: readonly (readonly [number, number])[], x: number, y: number): number =>
+      Math.min(
+        ...ring.map(([ax = 0, ay = 0], i) => {
+          const [bx = 0, by = 0] = ring[(i + 1) % ring.length] ?? [];
+          const dx = bx - ax;
+          const dy = by - ay;
+          const t = Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+          return Math.hypot(ax + t * dx - x, ay + t * dy - y);
+        }),
+      );
     let fractional = 0;
     for (const turn of [0.123, 1.7, 3.0, 5.9]) {
       const a = shadowDrawList(turn);
@@ -809,29 +689,15 @@ describe('renderShadowSteps: at zoom 1 it is today\'s drawShapes shadows', () =>
     expect(new Set(painted).size).toBeLessThanOrEqual(2);
   });
 
-  it('an empty list leaves the picture alone', () => {
-    const picture = filled(LAYOUT, 1, FILL);
-    renderShadowSteps(picture, W, LAYOUT, [], 1);
-    expect(picture).toEqual(filled(LAYOUT, 1, FILL));
-  });
 });
 
 describe('renderShadowSteps: the floor disc', () => {
   it('paints no pixel whose centre is off the floor disc, at zoom 1, 2 and 5, at every turn', () => {
-    const { cx, cy } = LAYOUT.globe;
     for (const zoom of [1, 2, 5]) {
       for (const turn of [0, 0.5, 1.5, 2.5, 4, 5.9]) {
-        const picture = shadowsOn(turn, zoom);
-        const side = W * zoom;
-        let painted = 0;
-        picture.forEach((p, i) => {
-          if (p === FILL) return;
-          painted += 1;
-          const dx = ((i % side) + 0.5) / zoom - cx;
-          const dy = (Math.floor(i / side) + 0.5) / zoom - cy;
-          expect(onFloor(dx, dy), `pixel ${i % side},${Math.floor(i / side)} at zoom ${zoom}`).toBe(true);
-        });
-        expect(painted).toBeGreaterThan(0);
+        const painted = paintedAt(shadowsOn(turn, zoom), zoom);
+        for (const [dx, dy] of painted) expect(onFloor(dx, dy), `pixel ${dx},${dy} at zoom ${zoom}`).toBe(true);
+        expect(painted.length).toBeGreaterThan(0);
       }
     }
   });
@@ -844,51 +710,43 @@ describe('renderShadowSteps: the floor disc', () => {
       const side = W * zoom;
       let inside = 0;
       let mismatches = 0;
-      for (let i = 0; i < picture.length; i++) {
-        const dx = ((i % side) + 0.5) / zoom - cx;
-        const dy = (Math.floor(i / side) + 0.5) / zoom - cy;
-        const want = onFloor(dx, dy);
+      picture.forEach((p, i) => {
+        const want = onFloor(((i % side) + 0.5) / zoom - cx, (Math.floor(i / side) + 0.5) / zoom - cy);
         if (want) inside += 1;
-        if ((picture[i] !== FILL) !== want) mismatches += 1;
-      }
+        if ((p !== FILL) !== want) mismatches += 1;
+      });
       expect(inside).toBeGreaterThan(100);
       expect(mismatches).toBe(0);
     }
   });
 
-  it('a step wholly off the disc paints nothing, and one far outside the picture is harmless', () => {
-    const picture = filled(LAYOUT, 1, FILL);
+  it('paints nothing for an empty list, a step wholly off the disc or far outside the picture, or a degenerate polygon (a line, a point), and does not throw', () => {
     const far: ShadowStep = { polygon: [[900, 900], [950, 900], [950, 950], [900, 950]] };
     const negative: ShadowStep = { polygon: [[-900, -900], [-850, -900], [-850, -850]] };
-    renderShadowSteps(picture, W, LAYOUT, [far, negative], 1);
-    expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+    const line: ShadowStep = { polygon: [[0, 0], [10, 0], [20, 0]] };
+    const point: ShadowStep = { polygon: [[3, 3], [3, 3], [3, 3]] };
+    for (const steps of [[], [far, negative], [line, point]]) {
+      const picture = filled(LAYOUT, 1, FILL);
+      expect(() => renderShadowSteps(picture, W, LAYOUT, steps, 1)).not.toThrow();
+      expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+    }
   });
 
   it('a step half off the picture\'s edge paints its on-disc part without wrapping to the other side', () => {
-    const { cx, cy } = LAYOUT.globe;
+    const { cx } = LAYOUT.globe;
     const picture = filled(LAYOUT, 1, FILL);
     // A box that starts left of the picture and ends at the globe's centre.
     renderShadowSteps(picture, W, LAYOUT, [{ polygon: [[-cx - 40, -10], [0, -10], [0, 10], [-cx - 40, 10]] }], 1);
-    let painted = 0;
-    picture.forEach((p, i) => {
-      if (p === FILL) return;
-      painted += 1;
-      expect((i % W) + 0.5 - cx).toBeLessThanOrEqual(0);
-      expect(Math.abs(Math.floor(i / W) + 0.5 - cy)).toBeLessThanOrEqual(10);
-    });
-    expect(painted).toBeGreaterThan(0);
-  });
-
-  it('a polygon with a degenerate shape (a line, a point) paints nothing and does not throw', () => {
-    const picture = filled(LAYOUT, 1, FILL);
-    const line: ShadowStep = { polygon: [[0, 0], [10, 0], [20, 0]] };
-    const point: ShadowStep = { polygon: [[3, 3], [3, 3], [3, 3]] };
-    expect(() => renderShadowSteps(picture, W, LAYOUT, [line, point], 1)).not.toThrow();
-    expect(picture).toEqual(filled(LAYOUT, 1, FILL));
+    const painted = paintedAt(picture, 1);
+    for (const [dx, dy] of painted) {
+      expect(dx).toBeLessThanOrEqual(0);
+      expect(Math.abs(dy)).toBeLessThanOrEqual(10);
+    }
+    expect(painted.length).toBeGreaterThan(0);
   });
 });
 
-describe('renderShadowSteps: overlapping shadows', () => {
+describe('renderShadowSteps: overlap, zoom and size', () => {
   it('takes the shade once where shadows overlap: every shadow laid twice paints the same picture as once', () => {
     for (const turn of [0.7, 2.2]) {
       const steps = shadowDrawList(turn);
@@ -898,33 +756,21 @@ describe('renderShadowSteps: overlapping shadows', () => {
       expect(twice, `turn ${turn}`).toEqual(once);
     }
   });
-});
 
-describe('renderShadowSteps: zoom and size', () => {
   it('has, at the centre of each zoom x zoom block, the zoom 1 picture (zoom 3 and 5)', () => {
     for (const zoom of [3, 5]) {
       for (const turn of AWKWARD) {
-        const one = shadowsOn(turn, 1);
-        const many = shadowsOn(turn, zoom);
-        const centre = (zoom - 1) / 2;
-        let mismatches = 0;
-        for (let y = 0; y < H; y++) {
-          for (let x = 0; x < W; x++) if (many[(y * zoom + centre) * W * zoom + x * zoom + centre] !== one[y * W + x]) mismatches += 1;
-        }
-        expect(mismatches).toBe(0);
+        expect(centreMismatches(shadowsOn(turn, zoom), shadowsOn(turn, 1), zoom)).toBe(0);
       }
     }
   });
 
-  it('throws a RangeError for a zoom that is not a whole number of at least 1, leaving the picture alone', () => {
+  it('throws a RangeError for a zoom that is not a whole number of at least 1, leaving the picture alone, and for a picture of the wrong size', () => {
     for (const zoom of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       const picture = filled(LAYOUT, 1, FILL);
       expect(() => renderShadowSteps(picture, W, LAYOUT, shadowDrawList(0.5), zoom)).toThrow(RangeError);
       expect(picture).toEqual(filled(LAYOUT, 1, FILL));
     }
-  });
-
-  it('throws a RangeError for a picture of the wrong size', () => {
     expect(() => renderShadowSteps(new Uint32Array(W * H - 1), W, LAYOUT, shadowDrawList(0.5), 1)).toThrow(RangeError);
     expect(() => renderShadowSteps(new Uint32Array(W * H), W, LAYOUT, shadowDrawList(0.5), 2)).toThrow(RangeError);
   });
