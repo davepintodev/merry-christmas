@@ -1,17 +1,15 @@
-// XMAS-32d "The globe", slice 4, changed by XMAS-41b2: the automatic turn is
-// gone (the visitor's drag turns it), so with no
-// drag the globe stays at its starting turn. The page file runs
-// on import; here the browser bits it touches are stand-ins, the loop is
-// captured instead of run, and the frame source records what it is asked for.
+// XMAS-32d "The globe", changed by XMAS-41b2, 84, 45a and 92b: page wiring of
+// src/page/scene.ts. The page file runs on import; here the browser bits it
+// touches are stand-ins (a fake canvas that holds its listeners and a test-driven
+// clock), the loop is captured instead of run, the snow runtime records each step
+// and the frame source records what it is asked for.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { leanBox } from '../scene/lean.ts';
-import { rowShift } from '../scene/lean.ts';
+import { leanBox, rowShift } from '../scene/lean.ts';
 import { sceneLayout, type SceneInput } from '../scene/frame.ts';
 import { snowDrawList, type SnowStep as DrawnFlake } from '../scene/snow-draw-list.ts';
-import type { GlobeSnow } from '../scene/snow.ts';
+import { GLOBE_SNOW, type GlobeSnow } from '../scene/snow.ts';
 import type { FineFrame } from './fine-layer.ts';
 import { glassLayer } from '../scene/glass-layer.ts';
-import { GLOBE_SNOW } from '../scene/snow.ts';
 import { DRAG_SETTINGS } from './drag.ts';
 import type { LoopScene } from './loop.ts';
 import { STEP_MS } from './steps.ts';
@@ -77,21 +75,17 @@ vi.mock('./frames.ts', async (importOriginal) => {
     makeFrameSource: () => {
       const real = actual.makeFrameSource();
       return (input: SceneInput, target?: Uint32Array) => {
-      captured.inputs.push({ ...input });
-      if (captured.realFrames) return real(input, target);
-      const picture = target ?? new Uint32Array(input.width * input.height);
-      return { width: input.width, height: input.height, picture, layout: undefined as never };
+        captured.inputs.push({ ...input });
+        if (captured.realFrames) return real(input, target);
+        const picture = target ?? new Uint32Array(input.width * input.height);
+        return { width: input.width, height: input.height, picture, layout: undefined as never };
       };
     },
   };
 });
 
 class FakeImageData {
-  constructor(
-    public data: Uint8ClampedArray,
-    public width: number,
-    public height: number,
-  ) {}
+  constructor(public data: Uint8ClampedArray, public width: number, public height: number) {}
 }
 
 /** Client pixels are three times art pixels, with the canvas's corner at (10, 20). */
@@ -119,9 +113,7 @@ class FakeCanvas {
     return { left: LEFT, top: TOP, width: this.width * SCALE, height: this.height * SCALE };
   }
   listenerCount(): number {
-    let n = 0;
-    for (const set of this.listeners.values()) n += set.size;
-    return n;
+    return [...this.listeners.values()].reduce((n, set) => n + set.size, 0);
   }
   fire(type: string, init: { id?: number; artX: number; artY: number; button?: number }): void {
     const event = {
@@ -140,26 +132,12 @@ let canvas: FakeCanvas;
 let nowMs = 0;
 
 beforeEach(() => {
-  captured.scene = null;
-  captured.inputs = [];
+  Object.assign(captured, { scene: null, inputs: [], snowSteps: [], realFrames: false, fineResult: true, fineFrames: [], puts: [], listenersAtLoopStart: -1, loopStarts: 0 });
   vi.resetModules();
-  captured.snowSteps = [];
-  captured.realFrames = false;
-  captured.fineResult = true;
-  captured.fineFrames = [];
-  captured.puts = [];
-  captured.listenersAtLoopStart = -1;
-  captured.loopStarts = 0;
   nowMs = 0;
   canvas = new FakeCanvas();
   canvasRef.current = canvas;
-  vi.stubGlobal('window', {
-    devicePixelRatio: 1,
-    innerWidth: 800,
-    innerHeight: 600,
-    requestAnimationFrame: () => 1,
-    cancelAnimationFrame: () => undefined,
-  });
+  vi.stubGlobal('window', { devicePixelRatio: 1, innerWidth: 800, innerHeight: 600, requestAnimationFrame: () => 1, cancelAnimationFrame: () => undefined });
   // The page's markup here is the scene canvas alone: no pause button, so the scene runs without one (XMAS-45b).
   vi.stubGlobal('document', { querySelector: (selector: string) => (selector === 'canvas#scene' ? canvas : null), hidden: false, addEventListener: () => undefined });
   vi.stubGlobal('ImageData', FakeImageData);
@@ -168,8 +146,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   canvasRef.current = null;
 });
+
 
 async function loadScene(search = ''): Promise<LoopScene> {
   vi.stubGlobal('location', { search });
@@ -179,158 +159,44 @@ async function loadScene(search = ''): Promise<LoopScene> {
   return scene;
 }
 
+/** Pins Date (before the scene module reads Date.now); the clock is real otherwise. */
+function fakeDate(at: Date): void {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(at);
+}
+
 function last(): SceneInput {
   const input = captured.inputs[captured.inputs.length - 1];
   if (input === undefined) expect.fail('no frame was drawn');
   return input;
 }
 
-/** The globe's starting turn, in radians (the old automatic turn's start). */
-const START_TURN = 0.5;
-
-describe('the scene page no longer turns the globe by itself', () => {
-  it('asks for the first frame at the starting turn', async () => {
-    const scene = await loadScene();
-    scene.draw();
-    const input = last();
-    expect(input.time).toBe(0);
-    expect(input.turn, 'a turn is passed').toBeDefined();
-    expect(input.turn).toBeCloseTo(START_TURN, 12);
-  });
-
-  it('passes the same turn on every frame however many steps go by', async () => {
-    const scene = await loadScene();
-    for (const steps of [1, 59, 60, 600, 3600]) {
-      for (let k = 0; k < steps; k++) scene.step();
-      scene.draw();
-      const input = last();
-      expect(input.turn ?? Number.NaN, `time ${input.time}`).toBeCloseTo(START_TURN, 12);
-    }
-    expect(last().time).toBeCloseTo(4320 * STEP_MS, 9);
-  });
-});
-
-describe('the scene page wires the snow', () => {
-  const snowKey = (i: SceneInput): string => JSON.stringify([i.snow?.flakes ?? null, i.outsideSnow?.flakes ?? null]);
-
-  it('passes both snows to the frame source once a step has run', async () => {
-    const scene = await loadScene();
-    scene.step();
-    scene.draw();
-    const input = last();
-    expect(input.snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
-    expect(input.outsideSnow?.flakes.length).toBeGreaterThan(0);
-    expect(input.outsideSnow?.flakes.length).toBe(Math.round(((input.width * input.height) / 700) * 2.5));
-  });
-
-  it('steps the snow once per step, not per draw', async () => {
-    const scene = await loadScene();
-    scene.step();
-    scene.draw();
-    const afterOne = snowKey(last());
-    scene.draw();
-    scene.draw();
-    expect(snowKey(last()), 'drawing does not move the snow').toBe(afterOne);
-    scene.step();
-    scene.draw();
-    const afterTwo = snowKey(last());
-    expect(afterTwo).not.toBe(afterOne);
-    scene.step();
-    scene.step();
-    scene.draw();
-    expect(snowKey(last())).not.toBe(afterTwo);
-  });
-
-  it('is the same snow on every frame, moved on in place', async () => {
-    const scene = await loadScene();
-    scene.step();
-    scene.draw();
-    const first = last();
-    for (let k = 0; k < 30; k++) scene.step();
-    scene.draw();
-    expect(first.snow, 'a snow is passed').toBeDefined();
-    expect(last().snow).toBe(first.snow);
-  });
-
-  it('draws the same snow after the same steps on a fresh page (fixed seed)', async () => {
-    const run = async (): Promise<string> => {
-      captured.inputs = [];
-      vi.resetModules();
-      const scene = await loadScene();
-      for (let k = 0; k < 100; k++) scene.step();
-      scene.draw();
-      return snowKey(last());
-    };
-    const [a, b] = [await run(), await run()];
-    expect(a).not.toBe('[null,null]');
-    expect(a).toBe(b);
-  });
-
-  it('uses the Christmas Day amounts on Christmas Day', async () => {
-    const scene = await loadScene('?now=2026-12-25T10:00:00');
-    scene.step();
-    scene.draw();
-    expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
-  });
-
-  it('uses the ordinary amounts the day before and the day after', async () => {
-    for (const now of ['2026-12-24T23:59:59', '2026-12-26T00:00:00']) {
-      captured.inputs = [];
-      vi.resetModules();
-      const scene = await loadScene(`?now=${now}`);
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length, now).toBe(GLOBE_SNOW.ordinary.flakes);
-    }
-  });
-
-  it('changes the amounts live when the clock crosses midnight into Christmas Day and out of it', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(new Date(2026, 11, 24, 23, 59, 58));
-      const scene = await loadScene('?now=2026-12-24T23:59:58');
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length).toBe(340);
-      vi.setSystemTime(new Date(2026, 11, 25, 0, 0, 1));
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length).toBe(500);
-      vi.setSystemTime(new Date(2026, 11, 26, 0, 0, 1));
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length).toBe(340);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-// XMAS-41b2 "Drag input", page wiring: src/page/scene.ts makes one drag, hands
-// the pointer to it, steps it once per scene step and feeds turn and lean to
-// the frame and raise and push to the snow. The page file runs on import; here
-// the canvas is a fake that holds its listeners, the loop is captured instead
-// of run (noting what was attached by the time it started), the snow runtime
-// records each step, and the frame source records what it is asked for.
+/** A loaded scene, drawn once so the canvas is sized and client pixels convert to art pixels. */
 async function loadDragScene(): Promise<LoopScene> {
   const scene = await loadScene();
-  scene.draw(); // sizes the canvas, so client pixels convert to art pixels
+  scene.draw();
   captured.inputs = [];
   return scene;
 }
 
 function drawn(scene: LoopScene): SceneInput {
   scene.draw();
-  const input = captured.inputs[captured.inputs.length - 1];
-  if (input === undefined) expect.fail('no frame was drawn');
-  return input;
+  return last();
 }
+
+const turnOf = (scene: LoopScene): number => drawn(scene).turn ?? Number.NaN;
 
 function lastSnow(): SnowStep {
   const step = captured.snowSteps[captured.snowSteps.length - 1];
   if (step === undefined) expect.fail('the snow was not stepped');
   return step;
 }
+
+const stepN = (scene: LoopScene, n: number): void => {
+  for (let k = 0; k < n; k++) scene.step();
+};
+
+const snowKey = (i: SceneInput): string => JSON.stringify([i.snow?.flakes ?? null, i.outsideSnow?.flakes ?? null]);
 
 /** A drag of (dx, dy) art pixels over `seconds`, in `moves` equal moves, released at the end. */
 function dragBy(dx: number, dy: number, seconds: number, moves = 10, release = true): void {
@@ -343,29 +209,127 @@ function dragBy(dx: number, dy: number, seconds: number, moves = 10, release = t
   if (release) canvas.fire('pointerup', { artX: 100 + dx, artY: 100 + dy });
 }
 
-describe('the pointer is attached by the page', () => {
-  it('listens on the scene canvas for the five pointer events', async () => {
-    await loadDragScene();
-    expect([...canvas.listeners.keys()].sort()).toEqual(['lostpointercapture', 'pointercancel', 'pointerdown', 'pointermove', 'pointerup']);
+/** A held sideways drag, then six steps, so the globe leans (left for a negative dx). */
+function leanBy(scene: LoopScene, dx = -40): void {
+  dragBy(dx, 0, 0.3, 10, false);
+  stepN(scene, 6);
+}
+
+/** The globe's starting turn, in radians (the old automatic turn's start). */
+const START_TURN = 0.5;
+
+describe('the scene page no longer turns the globe by itself', () => {
+  it('asks for the first frame at the starting turn, and passes the same turn however many steps go by', async () => {
+    const scene = await loadScene();
+    scene.draw();
+    expect(last().time).toBe(0);
+    expect(last().turn, 'a turn is passed').toBeDefined();
+    expect(last().turn).toBeCloseTo(START_TURN, 12);
+    for (const steps of [1, 59, 60, 600, 3600]) {
+      stepN(scene, steps);
+      scene.draw();
+      const input = last();
+      expect(input.turn ?? Number.NaN, `time ${input.time}`).toBeCloseTo(START_TURN, 12);
+    }
+    expect(last().time).toBeCloseTo(4320 * STEP_MS, 9);
+  });
+});
+
+describe('the scene page wires the snow', () => {
+  it('passes both snows to the frame source once a step has run', async () => {
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const input = last();
+    expect(input.snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
+    expect(input.outsideSnow?.flakes.length).toBeGreaterThan(0);
+    expect(input.outsideSnow?.flakes.length).toBe(Math.round(((input.width * input.height) / 700) * 2.5));
   });
 
-  it('attaches before the loop starts, so before the first frame and before globe-ready can be marked', async () => {
-    vi.stubGlobal('location', { search: '' });
-    await import('./scene.ts');
+  it('steps the snow once per step, not per draw, and moves the same snow on in place', async () => {
+    const scene = await loadScene();
+    scene.step();
+    scene.draw();
+    const first = last();
+    const afterOne = snowKey(first);
+    scene.draw();
+    scene.draw();
+    expect(snowKey(last()), 'drawing does not move the snow').toBe(afterOne);
+    scene.step();
+    scene.draw();
+    const afterTwo = snowKey(last());
+    expect(afterTwo).not.toBe(afterOne);
+    scene.step();
+    scene.step();
+    scene.draw();
+    expect(snowKey(last())).not.toBe(afterTwo);
+    stepN(scene, 30);
+    scene.draw();
+    expect(first.snow, 'a snow is passed').toBeDefined();
+    expect(last().snow).toBe(first.snow);
+  });
+
+  it('draws the same snow after the same steps on a fresh page (fixed seed)', async () => {
+    const run = async (): Promise<string> => {
+      captured.inputs = [];
+      vi.resetModules();
+      const scene = await loadScene();
+      stepN(scene, 100);
+      scene.draw();
+      return snowKey(last());
+    };
+    const [a, b] = [await run(), await run()];
+    expect(a).not.toBe('[null,null]');
+    expect(a).toBe(b);
+  });
+
+  it.each([
+    ['Christmas Day', '2026-12-25T10:00:00', GLOBE_SNOW.christmasDay.flakes],
+    ['the day before', '2026-12-24T23:59:59', GLOBE_SNOW.ordinary.flakes],
+    ['the day after', '2026-12-26T00:00:00', GLOBE_SNOW.ordinary.flakes],
+  ])('uses the amounts for %s (%s)', async (_day, now, flakes) => {
+    const scene = await loadScene(`?now=${now}`);
+    scene.step();
+    scene.draw();
+    expect(last().snow?.flakes.length).toBe(flakes);
+  });
+
+  it('changes the amounts live when the clock crosses midnight into Christmas Day and out of it', async () => {
+    fakeDate(new Date(2026, 11, 24, 23, 59, 58));
+    const scene = await loadScene('?now=2026-12-24T23:59:58');
+    for (const [at, flakes] of [
+      [new Date(2026, 11, 24, 23, 59, 58), 340],
+      [new Date(2026, 11, 25, 0, 0, 1), 500],
+      [new Date(2026, 11, 26, 0, 0, 1), 340],
+    ] as const) {
+      vi.setSystemTime(at);
+      scene.step();
+      scene.draw();
+      expect(last().snow?.flakes.length, at.toISOString()).toBe(flakes);
+    }
+  });
+});
+
+// XMAS-41b2 "Drag input": the page makes one drag, hands the pointer to it, steps it once per
+// scene step and feeds turn and lean to the frame and raise and push to the snow.
+describe('the pointer is attached by the page', () => {
+  it('listens on the scene canvas for the five pointer events, attached before the loop starts (so before the first frame and before globe-ready can be marked)', async () => {
+    await loadScene();
     expect(captured.loopStarts).toBe(1);
     expect(captured.listenersAtLoopStart).toBe(5);
+    expect([...canvas.listeners.keys()].sort()).toEqual(['lostpointercapture', 'pointercancel', 'pointerdown', 'pointermove', 'pointerup']);
   });
 });
 
 describe('a change of art scale mid-drag', () => {
   it('ends the old drag without a jump, attaches the listeners once, and a fresh drag works', async () => {
     const scene = await loadDragScene();
-    const start = drawn(scene).turn ?? Number.NaN;
+    const start = turnOf(scene);
     canvas.fire('pointerdown', { artX: 100, artY: 100 });
     nowMs = 100;
     canvas.fire('pointermove', { artX: 120, artY: 100 });
     scene.step();
-    const held = drawn(scene).turn ?? Number.NaN;
+    const held = turnOf(scene);
     expect(held).toBeCloseTo(start - 20 * DRAG_SETTINGS.turnPerPixel, 9);
 
     vi.stubGlobal('window', { ...window, innerWidth: 3200, innerHeight: 2400 });
@@ -378,89 +342,67 @@ describe('a change of art scale mid-drag', () => {
     canvas.fire('pointerup', { artX: 300, artY: 140 });
     captured.snowSteps = [];
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(held, 9);
+    expect(turnOf(scene)).toBeCloseTo(held, 9);
     expect(lastSnow().raise ?? 0).toBe(0);
     expect(lastSnow().push ?? { x: 0, y: 0, z: 0 }).toEqual({ x: 0, y: 0, z: 0 });
 
     dragBy(10, 0, 0.5);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeLessThan(held);
+    expect(turnOf(scene)).toBeLessThan(held);
   });
 });
 
 describe('a drag turns the globe', () => {
-  it('turns it by the turn per art pixel for each art pixel moved sideways, converting client to art pixels', async () => {
+  it.each([
+    ['sideways', 40],
+    ['the other way', -25],
+  ])('turns it by the turn per art pixel for each art pixel moved %s (client to art pixels), feeds the snow that turn, and keeps it after the finger lifts', async (_way, dx) => {
     const scene = await loadDragScene();
-    const before = drawn(scene).turn ?? Number.NaN;
-    dragBy(40, 0, 0.5);
+    const before = turnOf(scene);
+    dragBy(dx, 0, 0.5);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before - 40 * DRAG_SETTINGS.turnPerPixel, 9);
-  });
-
-  it('a drag the other way turns it back', async () => {
-    const scene = await loadDragScene();
-    const before = drawn(scene).turn ?? Number.NaN;
-    dragBy(-25, 0, 0.5);
-    scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before + 25 * DRAG_SETTINGS.turnPerPixel, 9);
-  });
-
-  it('the turn is kept after the finger lifts, however many steps go by (no auto turn, no spring-back)', async () => {
-    const scene = await loadDragScene();
-    dragBy(40, 0, 0.5);
-    scene.step();
-    const after = drawn(scene).turn ?? Number.NaN;
-    for (let k = 0; k < 1200; k++) scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(after, 12);
+    const after = turnOf(scene);
+    expect(after).toBeCloseTo(before - dx * DRAG_SETTINGS.turnPerPixel, 9);
+    expect(lastSnow().turn).toBeCloseTo(after, 12);
+    stepN(scene, 1200);
+    expect(turnOf(scene), 'no auto turn, no spring-back').toBeCloseTo(after, 12);
   });
 
   it('the turn moves only when the scene steps, not when it draws', async () => {
     const scene = await loadDragScene();
-    const before = drawn(scene).turn ?? Number.NaN;
+    const before = turnOf(scene);
     dragBy(40, 0, 0.5, 10, false);
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before, 12);
+    expect(turnOf(scene)).toBeCloseTo(before, 12);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeLessThan(before);
-  });
-
-  it('feeds the snow the same turn the frame is drawn with', async () => {
-    const scene = await loadDragScene();
-    dragBy(40, 0, 0.5);
-    scene.step();
-    expect(lastSnow().turn).toBeCloseTo(drawn(scene).turn ?? Number.NaN, 12);
+    expect(turnOf(scene)).toBeLessThan(before);
   });
 
   it('a second finger does not move the globe', async () => {
     const scene = await loadDragScene();
-    const before = drawn(scene).turn ?? Number.NaN;
+    const before = turnOf(scene);
     canvas.fire('pointerdown', { id: 1, artX: 100, artY: 100 });
     canvas.fire('pointerdown', { id: 2, artX: 300, artY: 100 });
     nowMs = 100;
     canvas.fire('pointermove', { id: 2, artX: 380, artY: 100 });
     canvas.fire('pointermove', { id: 1, artX: 110, artY: 100 });
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before - 10 * DRAG_SETTINGS.turnPerPixel, 9);
+    expect(turnOf(scene)).toBeCloseTo(before - 10 * DRAG_SETTINGS.turnPerPixel, 9);
   });
 });
 
 describe('the globe leans into a drag and springs back', () => {
-  it('leans while dragging sideways, and the lean returns to upright', async () => {
+  it.each([
+    ['sideways', 40],
+    ['the other way', -40],
+  ])('leans with a drag %s, and the lean returns to upright', async (_way, dx) => {
     const scene = await loadDragScene();
     expect(drawn(scene).lean ?? 0).toBe(0);
-    dragBy(40, 0, 0.3, 10, false);
-    for (let k = 0; k < 6; k++) scene.step();
-    const leaning = drawn(scene).lean ?? 0;
-    expect(leaning).toBeGreaterThan(0.01);
-    canvas.fire('pointerup', { artX: 140, artY: 100 });
-    for (let k = 0; k < 600; k++) scene.step();
+    leanBy(scene, dx);
+    expect(Math.sign(drawn(scene).lean ?? 0) * (drawn(scene).lean ?? 0)).toBeGreaterThan(0.01);
+    expect(Math.sign(drawn(scene).lean ?? 0)).toBe(Math.sign(dx));
+    canvas.fire('pointerup', { artX: 100 + dx, artY: 100 });
+    stepN(scene, 600);
     expect(Math.abs(drawn(scene).lean ?? 1)).toBeLessThan(0.005);
-  });
-
-  it('leans the other way for a drag the other way', async () => {
-    const scene = await loadDragScene();
-    dragBy(-40, 0, 0.3, 10, false);
-    for (let k = 0; k < 6; k++) scene.step();
-    expect(drawn(scene).lean ?? 0).toBeLessThan(-0.01);
   });
 
   it('never leans past the largest lean', async () => {
@@ -476,7 +418,7 @@ describe('the globe leans into a drag and springs back', () => {
 describe('the snow gets the stir and the push, once per step', () => {
   it('steps the snow once per scene step, with no stir or push when nothing is dragged', async () => {
     const scene = await loadDragScene();
-    for (let k = 0; k < 5; k++) scene.step();
+    stepN(scene, 5);
     expect(captured.snowSteps).toHaveLength(5);
     for (const step of captured.snowSteps) {
       expect(step.raise ?? 0).toBe(0);
@@ -488,10 +430,17 @@ describe('the snow gets the stir and the push, once per step', () => {
   it('raises the stir in proportion to the path length, with no threshold, on the first step after the move only', async () => {
     const scene = await loadDragScene();
     dragBy(3, 4, 5, 3, false); // 5 art px of path, slowly
-    scene.step();
-    expect(lastSnow().raise ?? 0).toBeCloseTo(5 * DRAG_SETTINGS.stirPerPixel, 9);
-    scene.step();
-    expect(lastSnow().raise ?? 0).toBe(0);
+    scene.draw();
+    scene.draw();
+    scene.draw();
+    expect(captured.snowSteps, 'frames do not step the snow or the drag').toHaveLength(0);
+    stepN(scene, 3);
+    expect(captured.snowSteps).toHaveLength(3);
+    expect(captured.snowSteps[0]?.raise ?? 0).toBeCloseTo(5 * DRAG_SETTINGS.stirPerPixel, 9);
+    expect(captured.snowSteps.slice(1).map((s) => s.raise ?? 0), 'several steps in one frame spend the stir once').toEqual([0, 0]);
+    scene.draw();
+    scene.draw();
+    expect(captured.snowSteps).toHaveLength(3);
   });
 
   it('stirs for a one-pixel drag too', async () => {
@@ -510,32 +459,6 @@ describe('the snow gets the stir and the push, once per step', () => {
     scene.step();
     expect(lastSnow().push?.x ?? 0).toBe(0);
     expect(lastSnow().push?.y ?? 0).toBe(0);
-  });
-
-  it('several frames between steps (or none) do not step the snow or the drag again', async () => {
-    const scene = await loadDragScene();
-    dragBy(3, 4, 5, 3, false);
-    scene.draw();
-    scene.draw();
-    scene.draw();
-    expect(captured.snowSteps).toHaveLength(0);
-    scene.step();
-    expect(captured.snowSteps).toHaveLength(1);
-    expect(lastSnow().raise ?? 0).toBeCloseTo(5 * DRAG_SETTINGS.stirPerPixel, 9);
-    scene.draw();
-    scene.draw();
-    expect(captured.snowSteps).toHaveLength(1);
-  });
-
-  it('several steps in one frame spend the stir once, on the first of them', async () => {
-    const scene = await loadDragScene();
-    dragBy(3, 4, 5, 3, false);
-    scene.step();
-    scene.step();
-    scene.step();
-    const raises = captured.snowSteps.map((s) => s.raise ?? 0);
-    expect(raises[0]).toBeGreaterThan(0);
-    expect(raises.slice(1)).toEqual([0, 0]);
   });
 
   it('a fast flick on release raises the stir more than a slow drag of the same distance', async () => {
@@ -565,9 +488,9 @@ describe('the snow gets the stir and the push, once per step', () => {
   });
 });
 
-// XMAS-84 "Snow inside the glass on the fine layer", page wiring: the flakes go to the
-// fine layer as draw steps blended between the last two steps, and when the fine layer
-// has no 2d context they go on the scene canvas in the right order and with the lean.
+// XMAS-84 "Snow inside the glass on the fine layer": the flakes go to the fine layer as draw
+// steps blended between the last two steps, and when the fine layer has no 2d context they go
+// on the scene canvas in the right order and with the lean.
 describe('the scene page draws the globe snow (XMAS-84)', () => {
   const copy = (snow: GlobeSnow | undefined): GlobeSnow => JSON.parse(JSON.stringify(snow)) as GlobeSnow;
   const xy = (steps: readonly DrawnFlake[]): number[][] => steps.map((s) => [s.x, s.y]);
@@ -595,38 +518,24 @@ describe('the scene page draws the globe snow (XMAS-84)', () => {
       // The blend is not the current place: the flakes did move between the steps.
       expect(xy(got ?? [])).not.toEqual(xy(snowDrawList(now, undefined, 0.5, side)));
     }
+    // The step before the last at fraction 0 and the last at fraction 1.
+    for (const fraction of [0, 1]) {
+      scene.draw(fraction);
+      expect(xy(lastFine().snowFront ?? []), `fraction ${fraction}`).toEqual(xy(snowDrawList(now, before, fraction, 'front')));
+    }
   });
 
-  it('draws the step before the last at fraction 0 and the last at fraction 1', async () => {
-    captured.realFrames = true;
-    const scene = await loadScene();
-    scene.step();
-    scene.draw();
-    const before = copy(last().snow);
-    scene.step();
-    scene.draw(0);
-    const now = copy(last().snow);
-    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, before, 0, 'front')));
-    scene.draw(1);
-    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, before, 1, 'front')));
-  });
-
-  it('with only one step of snow draws the flakes at the current position, whatever the fraction', async () => {
-    captured.realFrames = true;
-    const scene = await loadScene();
-    scene.step();
-    scene.draw(0.5);
-    const now = copy(last().snow);
-    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, undefined, 0.5, 'front')));
-    expect(xy(lastFine().snowBehind ?? [])).toEqual(xy(snowDrawList(now, undefined, 0.5, 'behind')));
-  });
-
-  it('with no step yet draws no flakes', async () => {
+  it('with no step yet draws no flakes; with only one step of snow draws them at the current position, whatever the fraction', async () => {
     captured.realFrames = true;
     const scene = await loadScene();
     scene.draw();
     expect(lastFine().snowBehind ?? []).toEqual([]);
     expect(lastFine().snowFront ?? []).toEqual([]);
+    scene.step();
+    scene.draw(0.5);
+    const now = copy(last().snow);
+    expect(xy(lastFine().snowFront ?? [])).toEqual(xy(snowDrawList(now, undefined, 0.5, 'front')));
+    expect(xy(lastFine().snowBehind ?? [])).toEqual(xy(snowDrawList(now, undefined, 0.5, 'behind')));
   });
 
   describe('with no 2d context on the fine layer', () => {
@@ -640,10 +549,8 @@ describe('the scene page draws the globe snow (XMAS-84)', () => {
       captured.realFrames = true;
       captured.fineResult = false;
       const scene = await loadDragScene();
-      if (lean) {
-        dragBy(-40, 0, 0.3, 10, false);
-        for (let n = 0; n < 6; n++) scene.step();
-      } else scene.step();
+      if (lean) leanBy(scene);
+      else scene.step();
       scene.draw();
       const flakes = last().snow?.flakes ?? expect.fail('no snow');
       flakes.forEach((f, i) => {
@@ -673,9 +580,8 @@ describe('the scene page draws the globe snow (XMAS-84)', () => {
     it('shifts a flake with the rows of the leaning glass, as the glass moves', async () => {
       const { input, rgba } = await drawWith({ x: 10, y: -5, z: 10 }, true);
       const layout = sceneLayout(input.width, input.height, 1);
-      const lean = input.lean ?? 0;
       const row = Math.floor(layout.globe.cy - 5);
-      const shift = rowShift(lean, leanBox(input.width, layout).bottom, row);
+      const shift = rowShift(input.lean ?? 0, leanBox(input.width, layout).bottom, row);
       expect(Math.abs(shift), 'the lean moves this row').toBeGreaterThanOrEqual(1);
       const x = Math.floor(layout.globe.cx + 10);
       expect(pixel(rgba, input.width, x + shift, row)).toBe(WHITE);
@@ -690,7 +596,6 @@ type Pausable = LoopScene & { setPaused(paused: boolean): void; readonly paused:
 
 describe('pausing the scene (XMAS-45a)', () => {
   const pausable = async (search = ''): Promise<Pausable> => (await loadScene(search)) as Pausable;
-  const snowKey = (i: SceneInput): string => JSON.stringify([i.snow?.flakes ?? null, i.outsideSnow?.flakes ?? null]);
   const santaAt = (): number => (captured.fineFrames[captured.fineFrames.length - 1] as { santaTimeMs: number }).santaTimeMs;
 
   it('freezes snow, time (stars, reflections) and Santa on one still frame, and resumes from the same frame', async () => {
@@ -705,7 +610,7 @@ describe('pausing the scene (XMAS-45a)', () => {
     const stepsBefore = captured.snowSteps.length;
     scene.draw(0.2);
     const still = { time: last().time, snow: snowKey(last()), santa: santaAt() };
-    for (let k = 0; k < 30; k++) scene.step();
+    stepN(scene, 30);
     for (const fraction of [0, 0.5, 1]) {
       scene.draw(fraction);
       expect({ time: last().time, snow: snowKey(last()), santa: santaAt() }).toEqual(still);
@@ -721,7 +626,7 @@ describe('pausing the scene (XMAS-45a)', () => {
   it('ignores a drag, one in progress at the pause, and keeps a pause that is set twice', async () => {
     const scene = await pausable();
     scene.draw();
-    const before = drawn(scene).turn ?? Number.NaN;
+    const before = turnOf(scene);
     canvas.fire('pointerdown', { artX: 100, artY: 100 });
     scene.setPaused(true);
     scene.setPaused(true);
@@ -730,78 +635,67 @@ describe('pausing the scene (XMAS-45a)', () => {
     canvas.fire('pointerup', { artX: 140, artY: 100 });
     dragBy(40, 0, 0.5);
     scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before, 12);
+    expect(turnOf(scene)).toBeCloseTo(before, 12);
     expect(captured.snowSteps).toHaveLength(0);
     scene.setPaused(false);
     scene.step();
     expect(lastSnow().raise ?? 0).toBe(0);
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before, 12);
+    expect(turnOf(scene)).toBeCloseTo(before, 12);
   });
 
   it('cancels a press held across a pause, so moving the same pointer after the resume does not turn or stir', async () => {
     const scene = await pausable();
     scene.step();
     scene.draw();
-    const before = drawn(scene).turn ?? Number.NaN;
+    const before = turnOf(scene);
     canvas.fire('pointerdown', { artX: 100, artY: 100 });
     scene.setPaused(true);
     scene.setPaused(false);
     nowMs = 100;
     canvas.fire('pointermove', { artX: 160, artY: 60 });
-    scene.step();
-    scene.step();
-    expect(drawn(scene).turn ?? Number.NaN).toBeCloseTo(before, 12);
+    stepN(scene, 2);
+    expect(turnOf(scene)).toBeCloseTo(before, 12);
     expect(lastSnow().raise ?? 0).toBe(0);
   });
 
   it('keeps the sky following the phases while paused', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(new Date(2026, 11, 20, 7, 0, 0));
-      const scene = await pausable('?now=2026-12-20T07:00:00');
-      scene.setPaused(true);
-      scene.draw();
-      const morning = last().phase;
-      expect(morning).toEqual(phaseAt(new Date(2026, 11, 20, 7, 0, 0)));
-      vi.setSystemTime(new Date(2026, 11, 20, 23, 0, 0));
-      scene.draw();
-      expect(last().phase).toEqual(phaseAt(new Date(2026, 11, 20, 23, 0, 0)));
-      expect(last().phase).not.toEqual(morning);
-    } finally {
-      vi.useRealTimers();
-    }
+    fakeDate(new Date(2026, 11, 20, 7, 0, 0));
+    const scene = await pausable('?now=2026-12-20T07:00:00');
+    scene.setPaused(true);
+    scene.draw();
+    const morning = last().phase;
+    expect(morning).toEqual(phaseAt(new Date(2026, 11, 20, 7, 0, 0)));
+    vi.setSystemTime(new Date(2026, 11, 20, 23, 0, 0));
+    scene.draw();
+    expect(last().phase).toEqual(phaseAt(new Date(2026, 11, 20, 23, 0, 0)));
+    expect(last().phase).not.toEqual(morning);
   });
 
   it('paused across midnight keeps the frame still and shows the heavier snow only on resume; the next midnight too', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(new Date(2026, 11, 24, 23, 59, 58));
-      const scene = await pausable('?now=2026-12-24T23:59:58');
-      scene.step();
-      scene.draw();
-      scene.setPaused(true);
-      const still = snowKey(last());
-      vi.setSystemTime(new Date(2026, 11, 25, 0, 0, 1));
-      scene.step();
-      scene.draw();
-      expect(snowKey(last())).toBe(still);
-      expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
-      scene.setPaused(false);
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
-      scene.setPaused(true);
-      vi.setSystemTime(new Date(2026, 11, 26, 0, 0, 1));
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
-      scene.setPaused(false);
-      scene.step();
-      scene.draw();
-      expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
-    } finally {
-      vi.useRealTimers();
-    }
+    fakeDate(new Date(2026, 11, 24, 23, 59, 58));
+    const scene = await pausable('?now=2026-12-24T23:59:58');
+    scene.step();
+    scene.draw();
+    scene.setPaused(true);
+    const still = snowKey(last());
+    vi.setSystemTime(new Date(2026, 11, 25, 0, 0, 1));
+    scene.step();
+    scene.draw();
+    expect(snowKey(last())).toBe(still);
+    expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
+    scene.setPaused(false);
+    scene.step();
+    scene.draw();
+    expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
+    scene.setPaused(true);
+    vi.setSystemTime(new Date(2026, 11, 26, 0, 0, 1));
+    scene.step();
+    scene.draw();
+    expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.christmasDay.flakes);
+    scene.setPaused(false);
+    scene.step();
+    scene.draw();
+    expect(last().snow?.flakes.length).toBe(GLOBE_SNOW.ordinary.flakes);
   });
 
   it('exposes paused, starting unpaused on every visit, and remembers nothing', async () => {
@@ -836,18 +730,17 @@ describe('pausing the scene (XMAS-45a)', () => {
   });
 });
 
-// XMAS-92b "The glass as one smooth shear on its own layer", page wiring: with the fine layer on the
-// frame leaves the glass out (glassApart) and the fine layer gets the glass for the frame's turn; with
-// no fine layer the glass stays in the picture as before. The real frame source runs, as the glass
-// layer is built from the frame's layout.
+// XMAS-92b "The glass as one smooth shear on its own layer": with the fine layer on the frame
+// leaves the glass out (glassApart) and the fine layer gets the glass for the frame's turn; with
+// no fine layer the glass stays in the picture. The real frame source runs, as the glass layer
+// is built from the frame's layout.
 describe('the scene page gives the glass to the fine layer (XMAS-92b)', () => {
   const glassOfFrame = (): FineFrame['glass'] => (captured.fineFrames[captured.fineFrames.length - 1] as FineFrame | undefined)?.glass;
 
   it('with the fine layer on asks for the frame with glassApart true and hands the fine layer that turn\'s glass', async () => {
     captured.realFrames = true;
     const scene = await loadDragScene();
-    dragBy(-40, 0, 0.3, 10, false);
-    for (let n = 0; n < 6; n++) scene.step();
+    leanBy(scene);
     scene.draw();
     const input = last();
     expect(input.glassApart).toBe(true);
@@ -858,39 +751,28 @@ describe('the scene page gives the glass to the fine layer (XMAS-92b)', () => {
     expect(got?.pixels.some((c) => c !== 0)).toBe(true);
   });
 
-  // The clock is the real wall clock, so pin Date (before the scene module reads Date.now) to keep the phase reading steady.
   const drawTwiceAt = async (at: Date, advanceMs: number): Promise<[FineFrame['glass'], FineFrame['glass']]> => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(at);
-      captured.realFrames = true;
-      const scene = await loadDragScene();
-      dragBy(-40, 0, 0.3, 10, false);
-      for (let n = 0; n < 6; n++) scene.step();
-      scene.draw();
-      const first = glassOfFrame();
-      vi.setSystemTime(at.getTime() + advanceMs);
-      scene.draw();
-      expect(captured.fineFrames.length).toBeGreaterThanOrEqual(2);
-      return [first, glassOfFrame()];
-    } finally {
-      vi.useRealTimers();
-    }
+    fakeDate(at);
+    captured.realFrames = true;
+    const scene = await loadDragScene();
+    leanBy(scene);
+    scene.draw();
+    const first = glassOfFrame();
+    vi.setSystemTime(at.getTime() + advanceMs);
+    scene.draw();
+    expect(captured.fineFrames.length).toBeGreaterThanOrEqual(2);
+    return [first, glassOfFrame()];
   };
 
-  it('two draws at the same turn and phase reading hand the fine layer the same glass object (it is kept, not rebuilt)', async () => {
-    const [first, second] = await drawTwiceAt(new Date(2026, 11, 20, 7, 0, 0), 0);
+  it.each([
+    ['at the same turn and phase reading hand it the same glass object (kept, not rebuilt)', new Date(2026, 11, 20, 7, 0, 0), 0, true],
+    ['inside a sky blend, a later one gets a rebuilt glass (the phase share moves)', new Date(2026, 11, 20, 6, 30, 0), 5000, false],
+    ['inside a sky blend, one at the same instant keeps the glass', new Date(2026, 11, 20, 6, 30, 0), 0, true],
+  ])('two draws %s', async (_title, at, advanceMs, kept) => {
+    const [first, second] = await drawTwiceAt(at, advanceMs);
     expect(first).toBeDefined();
-    expect(second).toBe(first);
-  });
-
-  it('inside a sky blend the phase share moves, so a later draw gets a rebuilt glass; a draw at the same instant keeps it', async () => {
-    const blend = new Date(2026, 11, 20, 6, 30, 0); // the middle of the dawn blend
-    const [first, later] = await drawTwiceAt(blend, 5000);
-    expect(first).toBeDefined();
-    expect(later).not.toBe(first);
-    const [again, same] = await drawTwiceAt(blend, 0);
-    expect(same).toBe(again);
+    if (kept) expect(second).toBe(first);
+    else expect(second).not.toBe(first);
   });
 
   it('a different turn hands a different glass (it is built for the frame, not once)', async () => {
@@ -898,8 +780,7 @@ describe('the scene page gives the glass to the fine layer (XMAS-92b)', () => {
     const scene = await loadDragScene();
     scene.draw();
     const before = glassOfFrame();
-    dragBy(-120, 0, 0.3, 10, false);
-    for (let n = 0; n < 6; n++) scene.step();
+    leanBy(scene, -120);
     scene.draw();
     expect(glassOfFrame()?.pixels).not.toEqual(before?.pixels);
   });
