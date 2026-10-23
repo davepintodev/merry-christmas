@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Christmas Countdown</title>
+    <meta name="description" content="How long until Christmas? Shake the snow globe while you wait." />
+    <meta property="og:title" content="Christmas Countdown" />
+    <meta property="og:description" content="How long until Christmas? Shake the snow globe while you wait." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Favicon: Christmas tree icons created by Smashicons - Flaticon, https://www.flaticon.com/free-icons/christmas-tree -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      /* Both canvases hold their place whether or not the scene file loads:
+         the scene covers the window, the countdown sits over its top strip. */
+      canvas {
+        position: fixed;
+        top: 0;
+        image-rendering: pixelated;
+      }
+      canvas#scene {
+        /* The picture may overhang a very narrow window by a part-pixel; it
+           stays centred so the countdown is centred on its strip. */
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 0;
+        /* A drag on the globe turns it: it must not scroll, zoom or select. */
+        touch-action: none;
+        user-select: none;
+      }
+      canvas#countdown {
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1;
+      }
+      /* The sound button (XMAS-46c) takes the bottom-left corner slot, the pause button (XMAS-45b) sits one tap
+         slot in, and the shake button (XMAS-43b) is in the bottom-right corner; the page sets their size and
+         place, and each drawing's canvas inside. They stay hidden until the scene has drawn. */
+      button#sound,
+      button#pause,
+      button#shake {
+        position: fixed;
+        bottom: 0;
+        z-index: 2;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        touch-action: manipulation;
+      }
+      button#sound,
+      button#pause {
+        left: 0;
+      }
+      button#shake {
+        right: 0;
+      }
+      button#sound canvas,
+      button#pause canvas,
+      button#shake canvas {
+        position: absolute;
+      }
+      /* The globe's keyboard target (XMAS-44b) covers the globe's square, over the scene and under the buttons.
+         It takes no pointer: the drag is on the scene canvas. The page sets its place and size. */
+      #globe {
+        position: fixed;
+        z-index: 1;
+        margin: 0;
+        pointer-events: none;
+      }
+      /* The focus ring, shared by the globe and the buttons (and any later button that takes it): it shows for
+         keyboard focus only, one art pixel of light inside the element and one of midnight outside it, square-cornered.
+         --art is one art pixel in CSS pixels, set by the page on each element. */
+      .focus-ring:focus {
+        outline: none;
+      }
+      .focus-ring:focus-visible {
+        outline: var(--art) solid #0b1026;
+        box-shadow: inset 0 0 0 var(--art) #ffffff;
+      }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <canvas id="countdown" aria-hidden="true" hidden></canvas>
+    <p id="countdown-text" class="visually-hidden"></p>
+    <div id="countdown-announce" class="visually-hidden" aria-live="polite"></div>
+    <div id="globe" class="focus-ring" tabindex="0" role="application" aria-label="Snow globe. Arrow keys turn it, Space shakes the snow." hidden></div>
+    <button id="sound" class="focus-ring" type="button" aria-label="Sound is off. Turn sound on" hidden><canvas aria-hidden="true"></canvas></button>
+    <button id="pause" class="focus-ring" type="button" aria-label="Pause the movement" hidden><canvas aria-hidden="true"></canvas></button>
+    <button id="shake" class="focus-ring" type="button" aria-label="TAP TO TURN ON SHAKE" hidden><canvas aria-hidden="true"></canvas></button>
+    <noscript><span>Christmas is on 25 December</span></noscript>
+    <!-- countdown-script -->
+  </body>
+</html>

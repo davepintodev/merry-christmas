@@ -1,0 +1,30 @@
+{
+  "name": "merry-christmas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "dev": "vite",
+    "build:art": "node tools/build-art.ts",
+    "build": "pnpm run build:art && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "check:caps": "node tools/check-caps.ts",
+    "frames:update": "node tools/frames-update.ts",
+    "frames": "node tools/frames-serve.ts",
+    "frames:turn": "node tools/turn-sequence.ts",
+    "test:e2e": "playwright test",
+    "check": "pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run check:caps && pnpm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.148.0",
+    "yaml": "^2.9.1"
+  }
+}
