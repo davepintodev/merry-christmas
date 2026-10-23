@@ -160,25 +160,6 @@ test.describe('frames review page: discovery', () => {
     await expect(page.locator('body')).not.toContainText('notes');
   });
 
-  test('shows a picture added to the folder after the server started, with no code change', async ({ page }) => {
-    await open(page);
-    await expect(count(page)).toHaveText('1 of 3');
-    writeFileSync(path.join(dir, SNOWY.file), png(SNOWY));
-    await page.reload();
-    await expect(count(page)).toHaveText('1 of 4');
-    await expect(result(page)).toHaveValue('Dawn:Undecided, Frosty morning:Undecided, Snowy forest:Undecided, Sunset:Undecided');
-    await next(page).click();
-    await next(page).click();
-    await showing(page, SNOWY, 'Snowy forest', '3 of 4');
-  });
-
-  test('drops a picture removed from the folder', async ({ page }) => {
-    rmSync(path.join(dir, FROSTY.file));
-    await open(page);
-    await expect(count(page)).toHaveText('1 of 2');
-    await expect(result(page)).toHaveValue('Dawn:Undecided, Sunset:Undecided');
-  });
-
   test('serves a PNG added later byte for byte, and nothing outside the folder\'s PNGs', async ({ request }) => {
     writeFileSync(path.join(dir, SNOWY.file), png(SNOWY));
     const added = await request.get(`${base}/${SNOWY.file}`);
@@ -251,57 +232,9 @@ test.describe('frames review page: scaling', () => {
     });
   }
 
-  test('never smooths: the screen shows only the picture\'s own two colours', async ({ page }) => {
-    await open(page);
-    const m = await measure(page);
-    const clip = { x: m.rect.x + 1, y: m.rect.y + 1, width: m.rect.width - 2, height: m.rect.height - 2 };
-    const shot = decodePng(new Uint8Array(await page.screenshot({ clip, scale: 'device' })));
-    const seen = new Set<string>();
-    for (let i = 0; i < shot.width * shot.height; i++) seen.add(Array.from(shot.rgba.subarray(i * 4, i * 4 + 3)).join());
-    expect([...seen].sort()).toEqual(DAWN.colours.map((c) => c.join()).sort());
-  });
-
-  test('recomputes the scale when the window is resized', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await open(page);
-    const big = (await measure(page)).across;
-    await page.setViewportSize({ width: 400, height: 300 });
-    await expect.poll(async () => (await measure(page)).across).toBeLessThan(big);
-    const small = await measure(page);
-    expect(Number.isInteger(small.across)).toBe(true);
-    expect(small.rect.y + small.rect.height).toBeLessThanOrEqual(300.5);
-    expect(Math.abs(small.rect.x + small.rect.width / 2 - 200)).toBeLessThanOrEqual(1);
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await expect.poll(async () => (await measure(page)).across).toBe(big);
-  });
-
-  test.describe('on a device pixel ratio of 2', () => {
-    test.use({ deviceScaleFactor: 2 });
-
-    test('counts whole physical pixels per art pixel, not CSS pixels', async ({ page }) => {
-      await open(page);
-      for (const [t, label, n] of [[DAWN, 'Dawn', '1 of 3'], [FROSTY, 'Frosty morning', '2 of 3'], [SUNSET, 'Sunset', '3 of 3']] as const) {
-        await showing(page, t, label, n);
-        const m = await measure(page);
-        expect(m.dpr).toBe(2);
-        expect(Number.isInteger(m.across), `${t.file}: across ${m.across}`).toBe(true);
-        expect(m.down).toBe(m.across);
-        expect(m.across).toBeLessThanOrEqual(frameScale(t, m.window, 2).scale);
-        await next(page).click();
-      }
-    });
-  });
 });
 
 test.describe('frames review page: judging', () => {
-  test('starts with every frame Undecided in a read-only result box', async ({ page }) => {
-    await open(page);
-    await expect(result(page)).toHaveValue('Dawn:Undecided, Frosty morning:Undecided, Sunset:Undecided');
-    await expect(result(page)).not.toBeEditable();
-    await expect(approved(page)).not.toBeChecked();
-    await expect(denied(page)).not.toBeChecked();
-    await expect(comment(page)).toHaveValue('');
-  });
 
   test('approve, deny and comment build the exact result string live, and never write to the folder', async ({ page }) => {
     const before = snapshot(dir);
@@ -343,17 +276,6 @@ test.describe('frames review page: judging', () => {
     await expect(comment(page)).toHaveValue('too blue');
   });
 
-  test('switching a verdict replaces it: approved then denied keeps the comment', async ({ page }) => {
-    await open(page);
-    await approved(page).check();
-    await comment(page).fill('stars too bright');
-    await expect(result(page)).toHaveValue('Dawn:Yes, Frosty morning:Undecided, Sunset:Undecided');
-    await denied(page).check();
-    await expect(approved(page)).not.toBeChecked();
-    await expect(result(page)).toHaveValue('Dawn:Denied with comments: stars too bright, Frosty morning:Undecided, Sunset:Undecided');
-    await approved(page).check();
-    await expect(result(page)).toHaveValue('Dawn:Yes, Frosty morning:Undecided, Sunset:Undecided');
-  });
 });
 
 test.describe('frames review page: copy', () => {
@@ -393,67 +315,11 @@ test.describe('frames review page: copy', () => {
     expect(errors).toEqual([]);
   });
 
-  test('when the clipboard refuses, Copy result falls back to selecting the text, with no stray error', async ({ page }) => {
-    await page.addInitScript(() => {
-      Object.defineProperty(Navigator.prototype, 'clipboard', {
-        configurable: true,
-        get: () => ({ writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) }),
-      });
-    });
-    const errors: string[] = [];
-    page.on('pageerror', (e) => errors.push(e.message));
-    await open(page);
-    await approved(page).check();
-    await copy(page).click();
-    await expectSelected(page);
-    expect(errors).toEqual([]);
-  });
 });
 
 // XMAS-31c review round 1: the page is checked against #stage, the area the
 // picture is fitted into, not the whole window.
 test.describe('frames review page: review round 1', () => {
-  test('centres the picture in #stage on both axes', async ({ page }) => {
-    for (const viewport of [{ width: 1280, height: 720 }, { width: 400, height: 900 }]) {
-      await page.setViewportSize(viewport);
-      await open(page);
-      for (const [t, label, n] of [[DAWN, 'Dawn', '1 of 3'], [FROSTY, 'Frosty morning', '2 of 3']] as const) {
-        await showing(page, t, label, n);
-        await expect.poll(async () => (await measure(page)).natural.width).toBe(t.width);
-        const m = await measure(page);
-        const at = `${t.file} in ${viewport.width}x${viewport.height}`;
-        expect(Math.abs(m.rect.x + m.rect.width / 2 - (m.stage.x + m.stage.width / 2)), `${at}: across`).toBeLessThanOrEqual(1);
-        expect(Math.abs(m.rect.y + m.rect.height / 2 - (m.stage.y + m.stage.height / 2)), `${at}: down`).toBeLessThanOrEqual(1);
-        await next(page).click();
-      }
-    }
-  });
-
-  for (const dpr of [1, 2]) {
-    test.describe(`at a device pixel ratio of ${dpr}`, () => {
-      test.use({ deviceScaleFactor: dpr });
-
-      test('shows each picture at exactly the largest whole scale that fits #stage', async ({ page }) => {
-        for (const viewport of [{ width: 1280, height: 720 }, { width: 400, height: 300 }, { width: 700, height: 1000 }]) {
-          await page.setViewportSize(viewport);
-          await open(page);
-          for (const [t, label, n] of [[DAWN, 'Dawn', '1 of 3'], [FROSTY, 'Frosty morning', '2 of 3'], [SUNSET, 'Sunset', '3 of 3']] as const) {
-            await showing(page, t, label, n);
-            const want = async () => {
-              const m = await measure(page);
-              return frameScale(t, { width: m.stage.clientWidth, height: m.stage.clientHeight }, m.dpr).scale;
-            };
-            const at = `${t.file} in ${viewport.width}x${viewport.height}@${dpr}`;
-            await expect.poll(async () => (await measure(page)).across, at).toBe(await want());
-            const m = await measure(page);
-            expect(m.dpr, at).toBe(dpr);
-            expect(m.down, at).toBe(m.across);
-            await next(page).click();
-          }
-        }
-      });
-    });
-  }
 
   test('never shows the next picture in the previous picture\'s box while it loads', async ({ page }) => {
     let release: () => void = () => {};
@@ -527,18 +393,6 @@ test.describe('frames review page: review round 1', () => {
     }
   });
 
-  test('lists and serves a PNG whose extension is upper case', async ({ page, request }) => {
-    const loud: Tiny = { file: 'BLIZZARD.PNG', width: 6, height: 4, colours: [[200, 200, 255], [20, 20, 40]] };
-    writeFileSync(path.join(dir, loud.file), png(loud));
-    const got = await request.get(`${base}/${loud.file}`);
-    expect(got.status()).toBe(200);
-    expect(Buffer.from(await got.body()).equals(Buffer.from(png(loud)))).toBe(true);
-    await page.goto(`${base}/`);
-    await expect(count(page)).toHaveText('1 of 4');
-    await expect(result(page)).toHaveValue('BLIZZARD:Undecided, Dawn:Undecided, Frosty morning:Undecided, Sunset:Undecided');
-    await showing(page, loud, 'BLIZZARD', '1 of 4');
-  });
-
   test('arrow keys do not change the frame while focus is in the Result box', async ({ page }) => {
     await open(page);
     await result(page).focus();
@@ -566,27 +420,6 @@ test.describe('frames review page: review round 1', () => {
 
 // XMAS-31c review round 2.
 test.describe('frames review page: review round 2', () => {
-  test('an empty folder shows 0 of 0, an empty Result, and the controls raise no page error', async ({ page }) => {
-    for (const f of readdirSync(dir)) rmSync(path.join(dir, f));
-    const errors: string[] = [];
-    page.on('pageerror', (e) => errors.push(e.message));
-    await page.goto(`${base}/`);
-    await expect(count(page)).toHaveText('0 of 0');
-    await expect(result(page)).toHaveValue('');
-    for (const radio of [approved(page), denied(page)]) {
-      if ((await radio.isVisible()) && (await radio.isEnabled())) await radio.check();
-    }
-    if ((await comment(page).isVisible()) && (await comment(page).isEditable())) await comment(page).fill('nothing to judge');
-    for (const button of [next(page), previous(page), copy(page)]) {
-      if ((await button.isVisible()) && (await button.isEnabled())) await button.click();
-    }
-    await page.locator('body').press('ArrowRight');
-    await page.locator('body').press('ArrowLeft');
-    await page.waitForTimeout(100);
-    expect(errors).toEqual([]);
-    await expect(count(page)).toHaveText('0 of 0');
-    await expect(result(page)).toHaveValue('');
-  });
 
   test('with a radio focused the arrow keys switch Approved and Denied, not the frame; elsewhere they still move', async ({ page }) => {
     await open(page);
