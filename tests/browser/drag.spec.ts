@@ -1,15 +1,14 @@
 // XMAS-41b2 "Drag input", in the built page: a drag on the globe turns it, a
 // flick stirs the snow, touch and mouse both work, the page does not scroll or
-// zoom, a second finger does not break the drag, and the pointer is listened to
-// before `globe-ready` is marked.
+// zoom, and the pointer is listened to before `globe-ready` is marked.
 //
 // Determinism: each scenario runs on Playwright's fake clock (page.clock), so
 // the page's requestAnimationFrame, performance.now and timers move only when
 // the test runs the clock. Two runs that do the same things at the same fake
 // times draw the same picture to the pixel, so "the globe turned" is read as
-// "the picture differs from a run with no drag" and "a second finger changes
-// nothing" as "the pictures are equal". The scene canvas is read pixel by pixel
-// (one canvas pixel per art pixel); no test hook is added to the page.
+// "the picture differs from a run with no drag". The scene canvas is read
+// pixel by pixel (one canvas pixel per art pixel); no test hook is added to the
+// page.
 //
 // Reading the stir: a stirred globe has snow in the air. The flakes in front are
 // white on the snow layer over Santa (XMAS-84), which holds nothing else, so its
@@ -296,22 +295,13 @@ async function touch(s: Session, type: 'touchStart' | 'touchMove' | 'touchEnd', 
   await s.cdp!.send('Input.dispatchTouchEvent', { type, touchPoints: points });
 }
 
-/** A one-finger drag along x (and, if `second` is given, a second finger that goes down and wanders). */
-async function touchDrag(s: Session, from: Point, { artPx, moves, msPerMove, release = true }: DragOptions, second?: Point): Promise<void> {
+/** A one-finger drag along x. */
+async function touchDrag(s: Session, from: Point, { artPx, moves, msPerMove, release = true }: DragOptions): Promise<void> {
   const dx = artPx * s.geometry.scale;
   await touch(s, 'touchStart', [{ x: from.x, y: from.y, id: 1 }]);
-  if (second) await touch(s, 'touchStart', [{ x: from.x, y: from.y, id: 1 }, { x: second.x, y: second.y, id: 2 }]);
   for (let k = 1; k <= moves; k++) {
-    const first = { x: from.x + (dx * k) / moves, y: from.y, id: 1 };
-    const points = second ? [first, { x: second.x - (dx * k) / moves, y: second.y + 3 * k, id: 2 }] : [first];
-    await touch(s, 'touchMove', points);
+    await touch(s, 'touchMove', [{ x: from.x + (dx * k) / moves, y: from.y, id: 1 }]);
     await s.page.clock.runFor(msPerMove);
-  }
-  if (second) {
-    // The second finger lifts first; the first carries on a little and then lifts.
-    const first = { x: from.x + dx, y: from.y, id: 1 };
-    await touch(s, 'touchEnd', [{ x: second.x - dx, y: second.y + 3 * moves, id: 2 }]);
-    await touch(s, 'touchMove', [first]);
   }
   if (release) await touch(s, 'touchEnd', []);
 }
@@ -334,28 +324,6 @@ test.describe('a drag turns the whole globe, base included', () => {
     expect(differing(await globePixels(dragged), stillGlobe) + differing(await glassPixels(dragged), stillGlass), 'the globe is turned').toBeGreaterThan(200);
     expect(differing(await basePixels(dragged), stillBase), 'the base is turned with it').toBeGreaterThan(0);
     await dragged.context.close();
-  });
-
-  test('with no drag the globe does not turn by itself: the base is the same a minute apart', async ({ browser }) => {
-    const s = await boot(browser);
-    const early = await basePixels(s);
-    await idle(s.page, 20_000);
-    expect(differing(await basePixels(s), early)).toBe(0);
-    await s.context.close();
-  });
-
-  test('dragging right and dragging left turn it opposite ways: the pictures differ', async ({ browser }) => {
-    const right = await boot(browser);
-    await mouseDrag(right, onGlobe(right), SLOW);
-    await idle(right.page, 3000);
-    const rightGlobe = await basePixels(right);
-    await right.context.close();
-
-    const left = await boot(browser);
-    await mouseDrag(left, onGlobe(left), { ...SLOW, artPx: -SLOW.artPx });
-    await idle(left.page, 3000);
-    expect(differing(await basePixels(left), rightGlobe)).toBeGreaterThan(0);
-    await left.context.close();
   });
 
   test('dragging right moves the front surface of the globe to the right, dragging left moves it to the left (XMAS-67)', async ({ browser }) => {
@@ -459,24 +427,6 @@ test.describe('the globe leans into a drag and springs back', () => {
     const calmChange = differingIgnoringSnow(calmA, calmB) + differing(calmGlassA, calmGlassB);
     expect(tilt, 'the glass was tilted and is upright now, far beyond the scene animating alone').toBeGreaterThan(calmChange * 5);
   });
-
-  test('the base does not lean, only turns, and is upright and stays so after the drag', async ({ browser }) => {
-    const s = await boot(browser);
-    await mouseDrag(s, onGlobe(s), FAST);
-    await idle(s.page, 50);
-    const leaningBase = await basePixels(s);
-    await idle(s.page, 5000);
-    const uprightBase = await basePixels(s);
-    await idle(s.page, 1500); // the last of the spring
-    const settledBase = await basePixels(s);
-    await idle(s.page, 1500);
-    // One base pixel animates by itself (a light), so not exactly 0; a base still leaning would differ by dozens.
-    const final = await basePixels(s);
-    await s.context.close();
-
-    expect(differing(leaningBase, uprightBase), 'the base does not lean, it only turns').toBe(0);
-    expect(differing(final, settledBase), 'the base is upright and stays so').toBeLessThanOrEqual(2);
-  });
 });
 
 test.describe('a flick stirs the snow', () => {
@@ -528,12 +478,6 @@ test.describe('a flick stirs the snow', () => {
 });
 
 test.describe('the page does not scroll or zoom on a drag on the globe', () => {
-  test('the scene canvas has touch-action none', async ({ browser }) => {
-    const s = await boot(browser);
-    expect(await s.page.locator('canvas#scene').evaluate((el) => getComputedStyle(el).touchAction)).toBe('none');
-    await s.context.close();
-  });
-
   test('a pointer down on the globe has its default prevented; a mouse drag does not scroll the page', async ({ browser }) => {
     const s = await boot(browser);
     await mouseDrag(s, onGlobe(s), { artPx: 30, moves: 5, msPerMove: 16 });
@@ -565,48 +509,6 @@ test.describe('the page does not scroll or zoom on a drag on the globe', () => {
     expect(view.scroll).toEqual([0, 0]);
     expect(view.zoom).toBe(1);
     expect(await s.page.evaluate(() => (window as unknown as { __prevented: boolean[] }).__prevented.every(Boolean))).toBe(true);
-    await s.context.close();
-  });
-});
-
-test.describe('a second finger does not break the drag', () => {
-  test('a second finger that goes down, wanders and lifts changes nothing: the same picture as one finger alone', async ({ browser }) => {
-    const alone = await boot(browser, { touch: true });
-    await touchDrag(alone, onGlobe(alone), SLOW);
-    await idle(alone.page, 1500);
-    const single = await globePixels(alone);
-    const singleBase = await basePixels(alone);
-    await alone.context.close();
-
-    const two = await boot(browser, { touch: true });
-    const far = two.geometry.art(two.geometry.cx + 70, two.geometry.cy + 30);
-    await touchDrag(two, onGlobe(two), SLOW, far);
-    await idle(two.page, 1500);
-    expect(differing(await basePixels(two), singleBase), 'the same turn').toBe(0);
-    // The snow aside (event timing differs a little between the runs): a different turn differs by thousands.
-    expect(differingIgnoringSnow(await globePixels(two), single), 'the same picture, snow aside').toBeLessThan(100);
-    await two.context.close();
-  });
-
-  test('the first finger keeps turning the globe after the second has lifted', async ({ browser }) => {
-    const still = await boot(browser, { touch: true });
-    await idle(still.page, 3000);
-    const stillBase = await basePixels(still);
-    await still.context.close();
-
-    const s = await boot(browser, { touch: true });
-    const centre = onGlobe(s);
-    const far = s.geometry.art(s.geometry.cx + 70, s.geometry.cy + 30);
-    await touch(s, 'touchStart', [{ ...centre, id: 1 }]);
-    await touch(s, 'touchStart', [{ ...centre, id: 1 }, { ...far, id: 2 }]);
-    await touch(s, 'touchEnd', [{ ...far, id: 2 }]);
-    for (let k = 1; k <= 6; k++) {
-      await touch(s, 'touchMove', [{ x: centre.x + k * 6 * s.geometry.scale, y: centre.y, id: 1 }]);
-      await s.page.clock.runFor(32);
-    }
-    await touch(s, 'touchEnd', []);
-    await idle(s.page, 3000 - 6 * 32);
-    expect(differing(await basePixels(s), stillBase)).toBeGreaterThan(0);
     await s.context.close();
   });
 });

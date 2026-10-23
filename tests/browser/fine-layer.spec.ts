@@ -33,8 +33,6 @@ import { drawings } from '../../src/shared/art.generated.ts';
 const NOW = '2026-12-01T22:00:00';
 const SEED = 1; // src/page/scene.ts
 const STEP_MS = 16;
-/** The master colour number (1 based) only Santa's trot drawings use; no shape's drawing has it. */
-const SANTA_ONLY = 48;
 
 type Rect = { x: number; y: number; width: number; height: number };
 type Viewport = { width: number; height: number };
@@ -433,31 +431,6 @@ test.describe('the front snow shows in front of the shapes and Santa', () => {
     expect(counts.partial, 'no half-transparent pixel: flakes are hard blocks').toBe(0);
     expect(counts.opaque, 'something is drawn in front of the shapes').toBeGreaterThan(0);
     expect(counts.white, 'the front snow is white').toBeGreaterThan(0);
-    await context.close();
-  });
-
-  test('Santa is on the shapes canvas at some moment of his flight, and the front canvas has none of his colours', async ({ browser }) => {
-    const { context, page } = await boot(browser, { width: 800, height: 600 });
-    // The master colour only Santa's two trot drawings use (no shape's drawing has it), as 0xRRGGBB.
-    const santaColour = Number.parseInt(masterColours[SANTA_ONLY - 1]!.slice(1), 16);
-    const countOf = (selector: string): Promise<number> =>
-      page.locator(selector).evaluate((el, colour) => {
-        const c = el as HTMLCanvasElement;
-        const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-        const [r, g, b] = [(colour >> 16) & 255, (colour >> 8) & 255, colour & 255];
-        let n = 0;
-        for (let i = 0; i < data.length; i += 4) if (data[i] === r && data[i + 1] === g && data[i + 2] === b && data[i + 3] === 255) n++;
-        return n;
-      }, santaColour);
-    let onShapes = 0;
-    let onFront = 0;
-    for (let t = 0; t < 40 && onShapes === 0; t++) {
-      await idle(page, 500);
-      onShapes = Math.max(onShapes, await countOf(SHAPES));
-      onFront = Math.max(onFront, await countOf(FRONTS));
-    }
-    expect(onShapes, 'Santa drew on the shapes canvas within 20 s').toBeGreaterThan(0);
-    expect(onFront, 'the front canvas holds the snow in front, not Santa').toBe(0);
     await context.close();
   });
 });

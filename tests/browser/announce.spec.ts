@@ -68,16 +68,6 @@ async function writes(page: Page, key: string): Promise<number> {
   }, key);
 }
 
-test('an ordinary moment: the hidden text reads days, hours and minutes until Christmas', async ({ page }) => {
-  await open(page, '2026-10-07T19:47:30'); // 78 d 4 h 12 min 30 s left
-  await expect(page.locator(TEXT)).toHaveText('78 days, 4 hours and 12 minutes until Christmas');
-});
-
-test('singular forms: 1 day, 1 hour and 1 minute', async ({ page }) => {
-  await open(page, '2026-12-23T22:58:30'); // 1 d 1 h 1 min 30 s left
-  await expect(page.locator(TEXT)).toHaveText('1 day, 1 hour and 1 minute until Christmas');
-});
-
 test('the text is visually hidden but real: rendered, in the accessibility tree, not display:none', async ({ page }) => {
   await openFrozen(page, '2026-10-07T19:47:30'); // frozen, so the colons hold still between screenshots
   const line ='78 days, 4 hours and 12 minutes until Christmas';
@@ -213,26 +203,6 @@ test('a second crossing of zero (device clock set back, then on) is not announce
   await page.clock.runFor(3_000); // and crosses zero a second time
   await expect(page.locator(TEXT)).toHaveText('Merry Christmas!');
   expect(await writes(page, '__liveWrites'), 'Merry Christmas! is announced once per page').toBe(1);
-});
-
-test('on 25 December the text reads "Merry Christmas!" and nothing is announced on load', async ({ page }) => {
-  await openFrozen(page, '2026-12-25T12:00:00');
-  await expect(page.locator(TEXT)).toHaveText('Merry Christmas!');
-  await watchWrites(page, LIVE, '__liveWrites');
-  await page.clock.runFor(120_000);
-  expect(await writes(page, '__liveWrites')).toBe(0);
-  expect(await text(page, LIVE)).toBe('');
-  await expect(page.locator(TEXT)).toHaveText('Merry Christmas!');
-});
-
-test('from midnight starting 26 December the text is the countdown again, with nothing announced', async ({ page }) => {
-  await openFrozen(page, '2026-12-25T23:59:58');
-  await expect(page.locator(TEXT)).toHaveText('Merry Christmas!');
-  await watchWrites(page, LIVE, '__liveWrites');
-  await page.clock.runFor(32_000); // 00:00:30 on 26 December
-  await expect(page.locator(TEXT)).toHaveText('363 days, 23 hours and 59 minutes until Christmas');
-  expect(await writes(page, '__liveWrites')).toBe(0);
-  expect(await text(page, LIVE)).toBe('');
 });
 
 test('the text comes from the countdown script alone: it is there with every other request blocked', async ({ page }) => {

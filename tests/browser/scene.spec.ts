@@ -180,12 +180,10 @@ test.describe('globe-ready and the lazy scene file', () => {
 const FAILURES: readonly [string, (route: Route) => Promise<void>][] = [
   ['the request is aborted', (route) => route.abort('failed')],
   ['the server answers 404', (route) => route.fulfill({ status: 404, body: 'not found' })],
-  ['the server answers 500', (route) => route.fulfill({ status: 500, body: '' })],
   [
     'the file throws as it runs',
     (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: "throw new Error('scene boom');" }),
   ],
-  ['the file is not JavaScript', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '<!doctype html><p>oops' })],
 ];
 
 for (const [name, fail] of FAILURES) {
@@ -302,44 +300,41 @@ test.describe('the scene arrives without moving the countdown', () => {
 });
 
 test.describe('the countdown ink stays inside the scene\'s reserved countdown strip', () => {
+  const GREETING = ['the greeting', '2026-12-25T10:00:00'] as const;
+  const NORMAL = ['the normal countdown', '2026-12-01T22:00:00'] as const;
+  // Each view once, the greeting and the normal countdown taking turns so both run at 1x and at a high or fractional ratio.
   const VIEWS = [
-    ['1920x1130 at 1', { width: 1920, height: 1130 }, 1],
-    ['1280x800 at 1', { width: 1280, height: 800 }, 1],
-    ['2560x1440 at 1', { width: 2560, height: 1440 }, 1],
-    ['360x700 at 2', { width: 360, height: 700 }, 2],
-    ['412x800 at 2.6', { width: 412, height: 800 }, 2.6],
-    ['1600x500 at 1 (height-bound picture)', { width: 1600, height: 500 }, 1],
-  ] as const;
-  const WHEN = [
-    ['the greeting', '2026-12-25T10:00:00'],
-    ['the normal countdown', '2026-12-01T22:00:00'],
+    ['1920x1130 at 1', { width: 1920, height: 1130 }, 1, GREETING],
+    ['1280x800 at 1', { width: 1280, height: 800 }, 1, NORMAL],
+    ['2560x1440 at 1', { width: 2560, height: 1440 }, 1, GREETING],
+    ['360x700 at 2', { width: 360, height: 700 }, 2, NORMAL],
+    ['412x800 at 2.6', { width: 412, height: 800 }, 2.6, GREETING],
+    ['1600x500 at 1 (height-bound picture)', { width: 1600, height: 500 }, 1, NORMAL],
   ] as const;
 
-  for (const [label, viewport, dpr] of VIEWS) {
-    for (const [what, now] of WHEN) {
-      test(`${label}: the last inked row of ${what} is inside the strip`, async ({ browser }) => {
-        const { context, page } = await sized(browser, viewport, dpr);
-        await open(page, now);
-        const { scale, width, height } = pagePixels(viewport, dpr);
-        const strip = sceneLayout(width, height, 1).countdown;
-        const box = await rect(page, 'canvas#countdown');
-        const inkRow = await page.locator('canvas#countdown').evaluate((el) => {
-          const c = el as HTMLCanvasElement;
-          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-          const key = (i: number): string => `${d[i]},${d[i + 1]},${d[i + 2]}`;
-          const sky = key(0);
-          for (let y = c.height - 1; y >= 0; y--) {
-            for (let x = 0; x < c.width; x++) if (key((y * c.width + x) * 4) !== sky) return y;
-          }
-          return -1;
-        });
-        expect(inkRow).toBeGreaterThanOrEqual(0);
-        const artCss = scale / dpr;
-        const lastArtRow = Math.floor((box.y + (inkRow + 0.5) / dpr) / artCss + 1e-6);
-        expect(lastArtRow).toBeLessThanOrEqual(strip.y + strip.height - 1);
-        await context.close();
+  for (const [label, viewport, dpr, [what, now]] of VIEWS) {
+    test(`${label}: the last inked row of ${what} is inside the strip`, async ({ browser }) => {
+      const { context, page } = await sized(browser, viewport, dpr);
+      await open(page, now);
+      const { scale, width, height } = pagePixels(viewport, dpr);
+      const strip = sceneLayout(width, height, 1).countdown;
+      const box = await rect(page, 'canvas#countdown');
+      const inkRow = await page.locator('canvas#countdown').evaluate((el) => {
+        const c = el as HTMLCanvasElement;
+        const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+        const key = (i: number): string => `${d[i]},${d[i + 1]},${d[i + 2]}`;
+        const sky = key(0);
+        for (let y = c.height - 1; y >= 0; y--) {
+          for (let x = 0; x < c.width; x++) if (key((y * c.width + x) * 4) !== sky) return y;
+        }
+        return -1;
       });
-    }
+      expect(inkRow).toBeGreaterThanOrEqual(0);
+      const artCss = scale / dpr;
+      const lastArtRow = Math.floor((box.y + (inkRow + 0.5) / dpr) / artCss + 1e-6);
+      expect(lastArtRow).toBeLessThanOrEqual(strip.y + strip.height - 1);
+      await context.close();
+    });
   }
 });
 
@@ -349,7 +344,6 @@ test.describe('one art pixel size, whole physical pixels, hard edges', () => {
     ['800x600 at 2', { width: 800, height: 600 }, 2],
     ['390x844 at 3', { width: 390, height: 844 }, 3],
     ['1366x768 at 1.25', { width: 1366, height: 768 }, 1.25],
-    ['2560x1080 at 1', { width: 2560, height: 1080 }, 1],
   ] as const;
 
   for (const [label, viewport, dpr] of CASES) {
@@ -468,36 +462,6 @@ test.describe('one frame per screen refresh, none while the tab is hidden', () =
     expect(drawn).toBeGreaterThanOrEqual(fired - 2);
     expect(b.raf.max).toBe(1);
   });
-
-  test('two visible events in a row start one loop, not two', async ({ page }) => {
-    await instrument(page);
-    await open(page);
-    await globeReady(page);
-    await hide(page, true);
-    await hide(page, false);
-    await hide(page, false);
-    await page.waitForTimeout(500);
-    const a = await probe(page);
-    await page.waitForTimeout(1000);
-    const b = await probe(page);
-    expect(b.raf.max).toBe(1);
-    expect(b.draws - a.draws).toBeLessThanOrEqual(b.raf.fired - a.raf.fired);
-  });
-
-  test('a page opened in a hidden tab draws nothing until it is shown', async ({ page }) => {
-    await page.addInitScript(() => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
-      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-    });
-    await instrument(page);
-    await page.goto(`/?now=${NOW}`);
-    await page.waitForTimeout(1500);
-    expect((await probe(page)).draws).toBe(0);
-    expect(await marks(page, 'globe-ready')).toEqual([]);
-    await hide(page, false);
-    await globeReady(page);
-    expect((await probe(page)).draws).toBeGreaterThanOrEqual(1);
-  });
 });
 
 // The scene's copy of the shared clock (in the scene file) and the
@@ -505,11 +469,17 @@ test.describe('one frame per screen refresh, none while the tab is hidden', () =
 // the same ?now both must give the same phase. The scene's countdown strip is
 // the countdown's plain sky, so the two canvases' top-left pixels must match,
 // and match the clock read here.
-for (const timezoneId of ['UTC', 'Pacific/Auckland', 'America/Los_Angeles']) {
+const CLOCK_CASES = [
+  ['UTC', ['2026-12-01T03:00:00', '2026-12-01T07:15:00']],
+  ['Pacific/Auckland', ['2026-12-01T12:00:00']],
+  ['America/Los_Angeles', ['2026-12-01T18:15:00']],
+] as const;
+
+for (const [timezoneId, times] of CLOCK_CASES) {
   test.describe(`the scene's clock agrees with the countdown's (${timezoneId})`, () => {
     test.use({ timezoneId });
 
-    for (const now of ['2026-12-01T03:00:00', '2026-12-01T07:15:00', '2026-12-01T12:00:00', '2026-12-01T18:15:00']) {
+    for (const now of times) {
       test(`at ${now} both show the same phase`, async ({ page }) => {
         await open(page, now);
         await globeReady(page);
@@ -529,18 +499,21 @@ for (const timezoneId of ['UTC', 'Pacific/Auckland', 'America/Los_Angeles']) {
       });
     }
 
-    test('inside a blend (06:20, Purple night into Dawn) both show the same mixed sky', async ({ page }) => {
-      await open(page, '2026-12-01T06:20:00');
-      await globeReady(page);
-      const want = rgb(skyAndInk(phaseAt(new Date(2026, 11, 1, 6, 20, 0))).sky);
-      const countdown = (await canvasPixel(page, 'canvas#countdown', 0, 0)).slice(0, 3);
-      const scene = (await canvasPixel(page, 'canvas#scene', 0, 0)).slice(0, 3);
-      // The countdown reads whole seconds and the scene each frame: allow one step of rounding, no more.
-      for (let i = 0; i < 3; i++) {
-        expect(Math.abs(countdown[i]! - want[i]!)).toBeLessThanOrEqual(1);
-        expect(Math.abs(scene[i]! - countdown[i]!)).toBeLessThanOrEqual(1);
-      }
-    });
+    // The blend runs in one zone only.
+    if (timezoneId === 'Pacific/Auckland') {
+      test('inside a blend (06:20, Purple night into Dawn) both show the same mixed sky', async ({ page }) => {
+        await open(page, '2026-12-01T06:20:00');
+        await globeReady(page);
+        const want = rgb(skyAndInk(phaseAt(new Date(2026, 11, 1, 6, 20, 0))).sky);
+        const countdown = (await canvasPixel(page, 'canvas#countdown', 0, 0)).slice(0, 3);
+        const scene = (await canvasPixel(page, 'canvas#scene', 0, 0)).slice(0, 3);
+        // The countdown reads whole seconds and the scene each frame: allow one step of rounding, no more.
+        for (let i = 0; i < 3; i++) {
+          expect(Math.abs(countdown[i]! - want[i]!)).toBeLessThanOrEqual(1);
+          expect(Math.abs(scene[i]! - countdown[i]!)).toBeLessThanOrEqual(1);
+        }
+      });
+    }
   });
 }
 

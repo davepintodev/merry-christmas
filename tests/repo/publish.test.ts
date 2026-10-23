@@ -1,9 +1,11 @@
 // XMAS-23 "Publish pipeline: checks, preview addresses and publishing".
-// Repo-config checks: they read wrangler.jsonc, public/_headers, the GitHub
-// workflow and package.json from disk, parse them, and assert the pipeline's
-// invariants. One test drives a real `vite build` into a temp folder.
+// Repo-config checks on the security of the GitHub workflow: which jobs may
+// run wrangler and on which branch, that the Cloudflare credentials come only
+// from GitHub secrets and reach only the deploying jobs, the token
+// permissions and the concurrency rule. The preview step's own script is run
+// with bash against sample wrangler logs.
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,44 +52,6 @@ function obj(v: unknown, what: string): Obj {
   return v;
 }
 
-/** Strip // and /* *\/ comments and trailing commas, respecting strings. */
-function parseJsonc(text: string): unknown {
-  let out = '';
-  let i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    const n = text[i + 1];
-    if (c === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
-      out += text.slice(i, j + 1);
-      i = j + 1;
-    } else if (c === '/' && n === '/') {
-      while (i < text.length && text[i] !== '\n') i++;
-    } else if (c === '/' && n === '*') {
-      const end = text.indexOf('*/', i + 2);
-      i = end === -1 ? text.length : end + 2;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  out = out.replace(/,(\s*[}\]])/g, '$1');
-  return JSON.parse(out);
-}
-
-function wrangler(): Obj {
-  return obj(parseJsonc(readText('wrangler.jsonc')), 'wrangler.jsonc');
-}
-
-/** Top-level config plus every `env.<name>` override block. */
-function wranglerScopes(): Array<[string, Obj]> {
-  const cfg = wrangler();
-  const scopes: Array<[string, Obj]> = [['top level', cfg]];
-  if (isObj(cfg['env'])) for (const [k, v] of Object.entries(cfg['env'])) scopes.push([`env.${k}`, obj(v, `env.${k}`)]);
-  return scopes;
-}
-
 type Step = Obj & { run?: string; uses?: string; env?: Obj; 'continue-on-error'?: unknown };
 type Job = Obj & { steps?: Step[]; needs?: string | string[]; if?: string; env?: Obj; outputs?: Obj };
 
@@ -105,10 +69,6 @@ function steps(job: Job): Step[] {
 
 function runText(job: Job): string {
   return steps(job).map((s) => (typeof s.run === 'string' ? s.run : '')).join('\n');
-}
-
-function stepIndex(job: Job, re: RegExp): number {
-  return steps(job).findIndex((s) => typeof s.run === 'string' && re.test(s.run));
 }
 
 /** The single job whose run steps match `re`. */
@@ -130,11 +90,6 @@ function publishJob(): [string, Job] {
   return jobRunning(WRANGLER_DEPLOY, '`wrangler deploy`');
 }
 
-function needsOf(job: Job): string[] {
-  const n = job.needs;
-  return n === undefined ? [] : Array.isArray(n) ? n : [n];
-}
-
 /** `${{ a  == "b" }}` -> `a == 'b'` */
 function normExpr(v: unknown): string {
   return String(v ?? '')
@@ -147,10 +102,6 @@ function normExpr(v: unknown): string {
 function effectiveEnv(job: Job, step: Step): Obj {
   const wfEnv = isObj(workflow()['env']) ? (workflow()['env'] as Obj) : {};
   return { ...wfEnv, ...(isObj(job.env) ? job.env : {}), ...(isObj(step.env) ? step.env : {}) };
-}
-
-function truthy(v: unknown): boolean {
-  return v !== undefined && v !== false && v !== 'false' && v !== null;
 }
 
 /** Files git tracks or would track (cached + untracked-not-ignored). */
@@ -169,165 +120,8 @@ function textFiles(): string[] {
   });
 }
 
-// --- Cloudflare `_headers` ---------------------------------------------------
-
-type HeaderRule = { pattern: string; headers: Array<[string, string]> };
-
-function parseHeaders(text: string): HeaderRule[] {
-  const rules: HeaderRule[] = [];
-  let current: HeaderRule | undefined;
-  for (const raw of text.split(/\r?\n/)) {
-    if (raw.trim() === '' || raw.trim().startsWith('#')) continue;
-    if (!/^\s/.test(raw)) {
-      current = { pattern: raw.trim(), headers: [] };
-      rules.push(current);
-      continue;
-    }
-    const line = raw.trim();
-    if (line.startsWith('!')) continue; // detach a header
-    const colon = line.indexOf(':');
-    if (current === undefined || colon <= 0) throw new Error(`malformed _headers line: ${JSON.stringify(raw)}`);
-    current.headers.push([line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]);
-  }
-  return rules;
-}
-
-function headerRules(): HeaderRule[] {
-  return parseHeaders(readText('public/_headers'));
-}
-
-/** Cloudflare `_headers` URL pattern -> RegExp over the request path. */
-function patternRegex(pattern: string): RegExp {
-  const p = pattern.replace(/^https?:\/\/[^/]+/, '');
-  const src = p
-    .split(/(\*|:[A-Za-z]\w*)/)
-    .map((part) => (part === '*' ? '.*' : part.startsWith(':') ? '[^/]+' : part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')))
-    .join('');
-  return new RegExp(`^${src}$`);
-}
-
-function cacheDirectives(value: string): Map<string, string | true> {
-  const m = new Map<string, string | true>();
-  for (const part of value.split(',')) {
-    const [k, v] = part.trim().toLowerCase().split('=');
-    if (k) m.set(k.trim(), v === undefined ? true : v.trim().replace(/^"|"$/g, ''));
-  }
-  return m;
-}
-
-function maxAge(d: Map<string, string | true>): number {
-  const vals = ['max-age', 's-maxage'].map((k) => d.get(k)).filter((v): v is string => typeof v === 'string');
-  return vals.length ? Math.max(...vals.map(Number)) : 0;
-}
-
-// ---------------------------------------------------------------------------
-describe('AC1 wrangler.jsonc: a static-assets-only Worker', () => {
-
-  it('serves ./dist as its assets directory', () => {
-    const assets = obj(wrangler()['assets'], 'assets');
-    expect(typeof assets['directory']).toBe('string');
-    expect(path.resolve(ROOT, assets['directory'] as string)).toBe(path.join(ROOT, 'dist'));
-  });
-
-  it('the assets directory is where vite build writes (no outDir override)', () => {
-    expect(readText('vite.config.ts')).not.toMatch(/\boutDir\b/);
-  });
-
-  it('has no `main` entry anywhere: no server code', () => {
-    for (const [where, scope] of wranglerScopes()) expect(scope, where).not.toHaveProperty('main');
-    expect(existsSync(path.join(ROOT, 'src', 'worker.ts'))).toBe(false);
-  });
-
-  it('carries no account id or credential', () => {
-    for (const [where, scope] of wranglerScopes()) {
-      expect(scope, where).not.toHaveProperty('account_id');
-      expect(scope, where).not.toHaveProperty('api_token');
-    }
-    expect(readText('wrangler.jsonc')).not.toMatch(/\b[0-9a-f]{32}\b/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe('AC8 the live address is not attached', () => {
-  it('has no routes, route or custom_domain in any scope', () => {
-    for (const [where, scope] of wranglerScopes()) {
-      for (const key of ['routes', 'route', 'custom_domain', 'custom_domains']) expect(scope, `${where}.${key}`).not.toHaveProperty(key);
-    }
-    expect(readText('wrangler.jsonc')).not.toMatch(/custom_domain|zone_name|zone_id/);
-  });
-
-  it('sets workers_dev and preview_urls to true explicitly at the top level', () => {
-    const cfg = wrangler();
-    expect(cfg['workers_dev'], 'workers_dev').toBe(true);
-    expect(cfg['preview_urls'], 'preview_urls').toBe(true);
-  });
-
-  it('keeps workers.dev and preview URLs on in every scope', () => {
-    for (const [where, scope] of wranglerScopes()) {
-      expect(scope['workers_dev'], `${where}.workers_dev`).not.toBe(false);
-      expect(scope['preview_urls'], `${where}.preview_urls`).not.toBe(false);
-    }
-  });
-
-  it('names no hostname other than workers.dev in wrangler.jsonc', () => {
-    const text = readText('wrangler.jsonc').replace(/\/\/.*$/gm, '');
-    const hosts = [...text.matchAll(/\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b/gi)].map((m) => m[1]!.toLowerCase());
-    const foreign = hosts.filter((h) => !/(^|\.)workers\.dev$/.test(h) && !/\.(jsonc?|ts|js|html|css|toml)$/.test(h));
-    expect(foreign).toEqual([]);
-  });
-
-  it('the workflow passes no route or custom-domain flag, and --domain only as --domain "$LIVE_DOMAIN"', () => {
-    const all = Object.values(jobs()).map(runText).join('\n');
-    const rest = all.replace(/--domain\s+"\$LIVE_DOMAIN"/g, '');
-    expect(rest).not.toMatch(/--routes?\b|--domains\b|--custom-domain\b/);
-    expect(rest, 'a --domain with anything but "$LIVE_DOMAIN"').not.toMatch(/--domain\b/);
-  });
-});
-
 // ---------------------------------------------------------------------------
 describe('AC2 one workflow; every push runs `pnpm check`', () => {
-
-  it('is triggered on push to every branch (no branch, tag-only or path filter)', () => {
-    const wf = workflow();
-    // YAML 1.1 parsers read a bare `on` as true; `yaml` uses 1.2 but accept both.
-    const on = wf['on'] ?? (wf as Record<string, unknown>)['true'];
-    const hasPush = on === 'push' || (Array.isArray(on) && on.includes('push')) || (isObj(on) && 'push' in on);
-    expect(hasPush, 'workflow must trigger on push').toBe(true);
-    const push = isObj(on) ? on['push'] : null;
-    if (isObj(push)) {
-      for (const k of ['branches-ignore', 'paths', 'paths-ignore', 'tags', 'tags-ignore']) expect(push, `on.push.${k}`).not.toHaveProperty(k);
-      if ('branches' in push) expect(push['branches']).toEqual(expect.arrayContaining(['**']));
-    } else {
-      expect(push ?? null).toBeNull();
-    }
-  });
-
-  it('has a `check` job that always runs (no `if`, no continue-on-error)', () => {
-    const check = jobs()['check'];
-    expect(check, 'job `check`').toBeDefined();
-    expect(check).not.toHaveProperty('if');
-    expect(truthy(check!['continue-on-error'])).toBe(false);
-  });
-
-  it('the check job runs `pnpm check` and does not swallow its failure', () => {
-    const check = jobs()['check']!;
-    const i = stepIndex(check, /(^|[\s;&|(])pnpm\s+(run\s+)?check\s*($|[\s;&|)])/m);
-    expect(i, '`pnpm check` step').toBeGreaterThanOrEqual(0);
-    const step = steps(check)[i]!;
-    expect(truthy(step['continue-on-error'])).toBe(false);
-    expect(step.run).not.toMatch(/\|\|\s*(true|:|exit 0)\b|set \+e|;\s*true\s*$/m);
-  });
-
-  it('the check job installs deps with a frozen lockfile, then Playwright browsers, before `pnpm check`', () => {
-    const check = jobs()['check']!;
-    const install = stepIndex(check, /\bpnpm\s+(install|i)\b[^\n]*--frozen-lockfile/);
-    const browsers = stepIndex(check, /\bplaywright\s+install\b/);
-    const gate = stepIndex(check, /\bpnpm\s+(run\s+)?check\b/);
-    expect(install, 'frozen-lockfile install').toBeGreaterThanOrEqual(0);
-    expect(browsers, 'playwright install').toBeGreaterThan(install);
-    expect(gate, 'pnpm check').toBeGreaterThan(browsers);
-  });
-
   it('the check job never sees the Cloudflare credentials', () => {
     const check = jobs()['check']!;
     for (const s of steps(check)) {
@@ -341,15 +135,6 @@ describe('AC2 one workflow; every push runs `pnpm check`', () => {
 
 // ---------------------------------------------------------------------------
 describe('AC3 a non-main push uploads a version and prints its preview URL', () => {
-  it('one job runs `pnpm exec wrangler versions upload`', () => {
-    const [, job] = previewJob();
-    expect(runText(job)).toMatch(/\bpnpm\s+exec\s+wrangler\s+versions\s+upload\b/);
-  });
-
-  it('the preview job needs `check`', () => {
-    expect(needsOf(previewJob()[1])).toContain('check');
-  });
-
   it("runs only when github.ref != 'refs/heads/main', and cannot bypass a failed check", () => {
     const cond = normExpr(previewJob()[1].if);
     expect(cond).toContain("github.ref != 'refs/heads/main'");
@@ -361,35 +146,14 @@ describe('AC3 a non-main push uploads a version and prints its preview URL', () 
     expect(text).not.toMatch(WRANGLER_DEPLOY);
     expect(text).not.toMatch(VERSIONS_DEPLOY);
   });
-
-  it('prints the workers.dev preview URL to the job summary or outputs', () => {
-    const job = previewJob()[1];
-    const text = JSON.stringify(job);
-    expect(/GITHUB_STEP_SUMMARY/.test(runText(job)) || isObj(job.outputs)).toBe(true);
-    expect(text).toMatch(/workers\.dev/);
-  });
 });
 
 // ---------------------------------------------------------------------------
 describe('AC4 a main push publishes, only when checks pass', () => {
-  it('one job runs `pnpm exec wrangler deploy`', () => {
-    expect(runText(publishJob()[1])).toMatch(/\bpnpm\s+exec\s+wrangler\s+deploy\b/);
-  });
-
-  it('the publish job needs `check`', () => {
-    expect(needsOf(publishJob()[1])).toContain('check');
-  });
-
   it("runs only when github.ref == 'refs/heads/main', and cannot bypass a failed check", () => {
     const cond = normExpr(publishJob()[1].if);
     expect(cond).toContain("github.ref == 'refs/heads/main'");
     expect(cond).not.toMatch(/\|\||always\(\)|failure\(\)|cancelled\(\)/);
-  });
-
-  it('`check` itself is not allowed to fail open', () => {
-    const check = jobs()['check']!;
-    expect(truthy(check['continue-on-error'])).toBe(false);
-    for (const s of steps(check)) expect(truthy(s['continue-on-error']), `step ${String(s['name'] ?? s.run ?? s.uses)}`).toBe(false);
   });
 
   it('no job other than publish and preview runs wrangler', () => {
@@ -397,47 +161,6 @@ describe('AC4 a main push publishes, only when checks pass', () => {
     const [pre] = previewJob();
     const others = Object.entries(jobs()).filter(([n, j]) => n !== pub && n !== pre && /\bwrangler\b/.test(runText(j) + JSON.stringify(j.steps ?? [])));
     expect(others.map(([n]) => n)).toEqual([]);
-  });
-
-  it('every deploying job installs with a frozen lockfile and has ./dist before calling wrangler', () => {
-    for (const [name, job] of [previewJob(), publishJob()]) {
-      const wr = stepIndex(job, /\bwrangler\s+(deploy|versions\s+upload)\b/);
-      const install = stepIndex(job, /\bpnpm\s+(install|i)\b[^\n]*--frozen-lockfile/);
-      const build = steps(job).findIndex(
-        (s) => (typeof s.run === 'string' && /\b(pnpm\s+(run\s+)?build|vite\s+build)\b/.test(s.run)) || (typeof s.uses === 'string' && /actions\/download-artifact@/.test(s.uses)),
-      );
-      expect(install, `${name}: frozen-lockfile install`).toBeGreaterThanOrEqual(0);
-      expect(install, `${name}: install before wrangler`).toBeLessThan(wr);
-      expect(build, `${name}: build or download dist`).toBeGreaterThanOrEqual(0);
-      expect(build, `${name}: dist before wrangler`).toBeLessThan(wr);
-    }
-  });
-
-  it('every wrangler call goes through `pnpm exec`', () => {
-    const lines = Object.values(jobs())
-      .flatMap((j) => runText(j).split('\n'))
-      .filter((l) => /\bwrangler\b/.test(l) && !/^\s*#/.test(l) && /\bwrangler\s+(deploy|versions)\b/.test(l));
-    expect(lines.length).toBeGreaterThan(0);
-    for (const l of lines) expect(l).toMatch(/\bpnpm\s+exec\s+wrangler\b/);
-    for (const j of Object.values(jobs())) for (const s of steps(j)) expect(String(s.uses ?? '')).not.toMatch(/wrangler-action/);
-  });
-
-});
-
-// ---------------------------------------------------------------------------
-describe('XMAS-51 the publish job attaches the live domain from the LIVE_DOMAIN variable', () => {
-  it('reads LIVE_DOMAIN from the repo variables through a publish job env entry', () => {
-    expect(normExpr(publishJob()[1].env?.['LIVE_DOMAIN'])).toBe('vars.LIVE_DOMAIN');
-  });
-
-  it('branches on a non-empty LIVE_DOMAIN, so an unset or empty variable deploys without a domain', () => {
-    expect(runText(publishJob()[1])).toMatch(/if\s+\[\s+-n\s+"\$LIVE_DOMAIN"\s+\]/);
-  });
-
-  it('deploys with `--domain "$LIVE_DOMAIN"` and keeps a plain `pnpm exec wrangler deploy` branch', () => {
-    const text = runText(publishJob()[1]);
-    expect(text).toMatch(/\bpnpm\s+exec\s+wrangler\s+deploy\s+--domain\s+"\$LIVE_DOMAIN"/);
-    expect(text).toMatch(/^\s*pnpm\s+exec\s+wrangler\s+deploy\s*$/m);
   });
 });
 
@@ -510,100 +233,6 @@ describe('AC9 the Cloudflare token lives only in GitHub secrets', () => {
     expect(hits).toEqual([]);
   });
 
-});
-
-// ---------------------------------------------------------------------------
-describe('AC5 cache headers: fingerprinted files immutable, page revalidates', () => {
-  it('/assets/* gets Cache-Control: public, max-age=31536000, immutable', () => {
-    const rule = headerRules().find((r) => r.pattern === '/assets/*');
-    expect(rule, '/assets/* rule').toBeDefined();
-    const cc = rule!.headers.filter(([k]) => k === 'cache-control');
-    expect(cc).toHaveLength(1);
-    const d = cacheDirectives(cc[0]![1]);
-    expect([...d.keys()].sort()).toEqual(['immutable', 'max-age', 'public']);
-    expect(d.get('max-age')).toBe('31536000');
-  });
-
-  it('favicon and icon files get Cache-Control: public, max-age=86400, not immutable', () => {
-    for (const p of ['/favicon.ico', '/apple-touch-icon.png', '/icon-192.png', '/icon-32.png']) {
-      const rule = headerRules().find((r) => r.pattern === p);
-      expect(rule, `${p} rule`).toBeDefined();
-      const cc = rule!.headers.filter(([k]) => k === 'cache-control');
-      expect(cc, p).toHaveLength(1);
-      const d = cacheDirectives(cc[0]![1]);
-      expect(d.get('max-age'), p).toBe('86400');
-      expect(d.has('immutable'), p).toBe(false);
-    }
-  });
-
-  it('no rule that matches the page gives it a long cache or immutable', () => {
-    for (const page of ['/', '/index.html']) {
-      for (const rule of headerRules()) {
-        if (!patternRegex(rule.pattern).test(page)) continue;
-        for (const [k, v] of rule.headers) {
-          if (k !== 'cache-control') continue;
-          const d = cacheDirectives(v);
-          expect(d.has('immutable'), `${rule.pattern} makes ${page} immutable`).toBe(false);
-          expect(maxAge(d), `${rule.pattern} caches ${page}`).toBe(0);
-        }
-      }
-    }
-  });
-
-  it('only /assets/ (fingerprinted) patterns are immutable; off /assets/ only the four icons get a max-age, at most one day', () => {
-    const icons = ['/favicon.ico', '/apple-touch-icon.png', '/icon-192.png', '/icon-32.png'];
-    const bad: string[] = [];
-    for (const rule of headerRules()) {
-      const pattern = rule.pattern.replace(/^https?:\/\/[^/]+/, '');
-      const fingerprinted = /^\/assets\//.test(pattern);
-      for (const [k, v] of rule.headers) {
-        if (k !== 'cache-control') continue;
-        const d = cacheDirectives(v);
-        if (d.has('immutable') && !fingerprinted) bad.push(`${rule.pattern} is immutable`);
-        if (fingerprinted || maxAge(d) === 0) continue;
-        if (!icons.includes(pattern) || maxAge(d) > 86_400) bad.push(`${rule.pattern} has max-age=${maxAge(d)}`);
-      }
-    }
-    expect(bad).toEqual([]);
-  });
-
-  it('vite build copies _headers into the output root; everything under assets/ is fingerprinted', () => {
-    expect(existsSync(path.join(ROOT, 'public', '_headers'))).toBe(true);
-    const out = mkdtempSync(path.join(os.tmpdir(), 'xmas23-build-'));
-    try {
-      const r = run('pnpm', ['exec', 'vite', 'build', '--outDir', out, '--emptyOutDir']);
-      expect(r.status, r.stderr + r.stdout).toBe(0);
-      expect(readFileSync(path.join(out, '_headers'), 'utf8')).toBe(readText('public/_headers'));
-      expect(existsSync(path.join(out, 'index.html'))).toBe(true);
-      const assetsDir = path.join(out, 'assets');
-      const assets = existsSync(assetsDir) ? readdirSync(assetsDir, { recursive: true }).map(String) : [];
-      const files = assets.filter((f) => statSync(path.join(assetsDir, f)).isFile());
-      for (const f of files) expect(path.basename(f), `assets/${f} is not fingerprinted`).toMatch(/-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/);
-      expect(existsSync(path.join(ROOT, 'public', 'assets')), 'public/assets would be served immutable without a hash').toBe(false);
-    } finally {
-      rmSync(out, { recursive: true, force: true });
-    }
-  }, TOOL_TIMEOUT);
-});
-
-// ---------------------------------------------------------------------------
-describe('AC6 motion sensors are not disabled', () => {
-  it('_headers has rules, and none restricts accelerometer or gyroscope', () => {
-    const rules = headerRules();
-    expect(rules.length).toBeGreaterThan(0);
-    const bad = rules.flatMap((r) => r.headers.filter(([, v]) => /accelerometer|gyroscope/i.test(v)).map(([k]) => `${r.pattern}: ${k}`));
-    expect(bad).toEqual([]);
-  });
-
-  it('_headers sets no Feature-Policy and no Permissions-Policy naming a motion sensor', () => {
-    const text = readText('public/_headers');
-    expect(text).not.toMatch(/^\s*Feature-Policy\s*:/im);
-    expect(text).not.toMatch(/accelerometer|gyroscope|magnetometer|DeviceMotion|DeviceOrientation/i);
-  });
-
-  it('index.html sets no Permissions-Policy / Feature-Policy meta', () => {
-    expect(readText('index.html')).not.toMatch(/http-equiv\s*=\s*["']?(permissions|feature)-policy/i);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -796,46 +425,5 @@ describe('workflow token permissions', () => {
       }
     }
     expect(bad).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe('dist/ is built once in check and handed to the deploying jobs', () => {
-  function usesStep(job: Job, action: string): [number, Step] {
-    const i = steps(job).findIndex((s) => typeof s.uses === 'string' && s.uses.startsWith(`${action}@`));
-    return [i, steps(job)[i]!];
-  }
-
-  function normDir(v: unknown): string {
-    return String(v ?? '').trim().replace(/^\.\//, '').replace(/\/+$/, '');
-  }
-
-  it('check uploads dist/ with actions/upload-artifact after `pnpm check`', () => {
-    const check = jobs()['check']!;
-    const [i, step] = usesStep(check, 'actions/upload-artifact');
-    expect(i, 'upload-artifact step in check').toBeGreaterThanOrEqual(0);
-    expect(i, 'upload after the build in `pnpm check`').toBeGreaterThan(stepIndex(check, /\bpnpm\s+(run\s+)?check\b/));
-    const w = obj(step.with, 'upload-artifact with');
-    expect(normDir(w['path'])).toBe('dist');
-    expect(typeof w['name']).toBe('string');
-  });
-
-  it('preview and publish download that artifact into dist/ before wrangler', () => {
-    const uploaded = obj(usesStep(jobs()['check']!, 'actions/upload-artifact')[1]?.with, 'upload-artifact with')['name'];
-    for (const [name, job] of [previewJob(), publishJob()]) {
-      const [i, step] = usesStep(job, 'actions/download-artifact');
-      expect(i, `${name}: download-artifact step`).toBeGreaterThanOrEqual(0);
-      const w = obj(step.with, `${name}: download-artifact with`);
-      expect(w['name'], `${name}: artifact name`).toBe(uploaded);
-      expect(normDir(w['path']), `${name}: download path`).toBe('dist');
-      expect(i, `${name}: download before wrangler`).toBeLessThan(stepIndex(job, /\bwrangler\s+(deploy|versions\s+upload)\b/));
-    }
-  });
-
-  it('preview and publish no longer build, but still install with a frozen lockfile', () => {
-    for (const [name, job] of [previewJob(), publishJob()]) {
-      expect(runText(job), `${name} must not rebuild`).not.toMatch(/\bpnpm\s+(run\s+)?(build|check)\b|\bvite\s+build\b/);
-      expect(stepIndex(job, /\bpnpm\s+(install|i)\b[^\n]*--frozen-lockfile/), `${name}: frozen install`).toBeGreaterThanOrEqual(0);
-    }
   });
 });

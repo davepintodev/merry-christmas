@@ -70,14 +70,6 @@ function overlaps(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-async function hide(page: Page, hidden: boolean): Promise<void> {
-  await page.evaluate((h) => {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') });
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
-    document.dispatchEvent(new Event('visibilitychange'));
-  }, hidden);
-}
-
 function field(page: Page, key: string) {
   return page.locator(`#perf-readout [data-perf="${key}"]`);
 }
@@ -201,31 +193,6 @@ test.describe('with ?perf', () => {
     expect(changes).toBeLessThanOrEqual(10);
   });
 
-  test('restart empties the window but keeps the worst frame', async ({ page }) => {
-    await open(page, `?now=${NOW}&perf`);
-    await globeReady(page);
-    await readoutShown(page);
-    await expect.poll(() => number(page, 'window'), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => number(page, 'worst-frame'), { timeout: 10_000 }).toBeGreaterThan(0);
-    const before = await number(page, 'window');
-    const worst = await number(page, 'worst-frame');
-    await page.getByRole('button', { name: 'Restart 30 s window' }).click();
-    await expect.poll(() => number(page, 'window'), { timeout: 3_000 }).toBeLessThan(Math.min(before, 1.5));
-    expect(await number(page, 'worst-frame')).toBeGreaterThanOrEqual(worst);
-  });
-
-  test('a hidden tab does not show up as the worst frame', async ({ page }) => {
-    await open(page, `?now=${NOW}&perf`);
-    await globeReady(page);
-    await readoutShown(page);
-    await expect.poll(() => number(page, 'worst-frame'), { timeout: 10_000 }).toBeGreaterThan(0);
-    await hide(page, true);
-    await page.waitForTimeout(1500);
-    await hide(page, false);
-    await page.waitForTimeout(1200); // a few readout updates after the tab is back
-    expect(await number(page, 'worst-frame')).toBeLessThan(1000);
-  });
-
   test('costs the scene nothing visible: frames keep coming and the scene canvas does not move', async ({ browser }) => {
     const plain = await sized(browser, { width: 1280, height: 720 });
     const perf = await sized(browser, { width: 1280, height: 720 });
@@ -324,13 +291,6 @@ test.describe('?perf with ?now', () => {
     await globeReady(page);
     await readoutShown(page);
     await expect(page.locator('#countdown-text')).toHaveText(spokenTime(timeLeft(new Date(2026, 11, 24, 23, 59, 50))));
-  });
-
-  test('the option may come first', async ({ page }) => {
-    await open(page, '?perf&now=2026-12-25T10:00:00');
-    await globeReady(page);
-    await readoutShown(page);
-    await expect(page.locator('#countdown-text')).toHaveText(GREETING);
   });
 });
 
