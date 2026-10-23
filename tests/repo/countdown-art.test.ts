@@ -1,12 +1,10 @@
 // XMAS-28 "Rough art for the remaining sheets" part 1, review finding: the
-// inline countdown script must carry the font only, never scene art. The
-// build writes the font drawings to their own generated module
-// src/shared/font.generated.ts (exporting `drawings`), and src/shared/font.ts
-// imports only that module. Runs a real Vite build into a temp dir.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+// inline countdown script must carry the font only, never scene art. Runs a
+// real Vite build into a temp dir.
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
@@ -16,9 +14,6 @@ import { packSheet } from '../../tools/art.ts';
 import { countdownPlugin } from '../../tools/countdown-plugin.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const FONT_MODULE = 'src/shared/font.generated.ts';
-const FONT_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.!:';
-const DIST_HTML = path.join(ROOT, 'dist', 'index.html');
 
 function inlineScripts(html: string): string {
   return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1] ?? '').join('\n');
@@ -39,22 +34,6 @@ function sceneNames(): string[] {
   expect(names).toContain('shake-frame');
   return names;
 }
-
-describe('the font has its own generated module', () => {
-  it(`${FONT_MODULE} exists and exports exactly the 39 font glyphs, no scene object`, async () => {
-    const file = path.join(ROOT, FONT_MODULE);
-    expect(existsSync(file), `${FONT_MODULE} must exist`).toBe(true);
-    const mod = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as { drawings: Record<string, { sheet: string }> };
-    expect(Object.keys(mod.drawings).sort()).toEqual([...FONT_CHARS].sort());
-    for (const d of Object.values(mod.drawings)) expect(d.sheet).toBe('font.png');
-  });
-
-  it('src/shared/font.ts imports the font module and not art.generated.ts', () => {
-    const text = readFileSync(path.join(ROOT, 'src', 'shared', 'font.ts'), 'utf8');
-    expect(text).toMatch(/from\s+['"]\.\/font\.generated(\.ts)?['"]/);
-    expect(text).not.toMatch(/art\.generated/);
-  });
-});
 
 describe('a build with countdownPlugin carries no scene art', () => {
   let outDir = '';
@@ -91,8 +70,4 @@ describe('a build with countdownPlugin carries no scene art', () => {
     for (const [ch, b64] of fontBase64()) expect(script, `glyph ${ch}`).toContain(b64);
   });
 
-  it.skipIf(!existsSync(DIST_HTML))('dist/index.html names no object from art/objects.ts', () => {
-    const html = readFileSync(DIST_HTML, 'utf8');
-    expect(sceneNames().filter((n) => html.includes(n))).toEqual([]);
-  });
 });

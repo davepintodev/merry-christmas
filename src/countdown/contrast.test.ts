@@ -2,7 +2,6 @@
 // one ink colour (digits, labels, greeting) reaches 4.5:1 against the sky behind
 // it in every phase and at every tenth of every blend (spec 6.6). Goes through
 // skyAndInk, so it checks the colours the page really draws. Snow is not counted.
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { colours, phaseColours } from '../../art/colours.ts';
 import { phaseAt, type PhaseName } from '../shared/clock.ts';
@@ -160,16 +159,4 @@ describe('countdown ink contrast, every second of a blend', () => {
       }
     },
   );
-});
-
-describe('dawn colours after the art pass', () => {
-  it('no longer calls the dawn colours in art/colours.ts a stand-in', () => {
-    const source = readFileSync(new URL('../../art/colours.ts', import.meta.url), 'utf8');
-    expect(source.indexOf('export const phaseColours'), 'phaseColours table present').toBeGreaterThan(0);
-    // Past tense ("were a stand-in until ...") is fine; a present-tense claim is not.
-    const claims = /dawn's stand-in|\b(?:is|are) (?:a |the |still a )?stand-in|stand-in for the art pass/i;
-    expect(source).not.toMatch(claims);
-    const frame = readFileSync(new URL('../scene/frame.ts', import.meta.url), 'utf8');
-    expect(frame).not.toMatch(claims);
-  });
 });

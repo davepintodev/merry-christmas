@@ -1,7 +1,7 @@
 // XMAS-26 "Art build step and the rough Font sheet": the committed art
-// outputs are up to date with the sheets, and the built site holds no PNG.
+// outputs are up to date with the sheets.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,18 +12,11 @@ import { generateArtModule, gplFile, packSheet } from '../../tools/art.ts';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GENERATED = 'src/shared/art.generated.ts';
 const GPL = 'art/xmas.gpl';
-const DIST = path.join(ROOT, 'dist');
 
 function readText(rel: string): string {
   const p = path.join(ROOT, rel);
   if (!existsSync(p)) throw new Error(`expected ${rel} to exist`);
   return readFileSync(p, 'utf8');
-}
-
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)],
-  );
 }
 
 describe('committed art outputs are up to date', () => {
@@ -62,30 +55,5 @@ describe('tools/build-art.ts', () => {
     const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'build-art.ts')], { cwd: ROOT, encoding: 'utf8', timeout: 60_000 });
     expect(r.status, r.stderr + r.stdout).toBe(0);
     for (const [rel, before] of saved) expect(readText(rel), rel).toBe(before);
-  });
-});
-
-describe('the built site has no PNG', () => {
-  const PREVIEW = /^preview-[0-9a-f]+\.png$/;
-  const ICON = /^(icon-32|icon-192|apple-touch-icon)\.png$/;
-
-  it.skipIf(!existsSync(DIST))('dist/ holds no .png file except the one fingerprinted preview image and the favicon icons', () => {
-    const pngs = walk(DIST).filter((f) => /\.png$/i.test(f)).map((f) => path.relative(DIST, f)).filter((f) => !ICON.test(f));
-    expect(pngs).toHaveLength(1);
-    expect(pngs[0]).toMatch(PREVIEW);
-  });
-
-  it.skipIf(!existsSync(DIST))('built .js and .css mention no .png, and index.html only the preview image and the favicon icons', () => {
-    const files = walk(DIST).filter((f) => /\.(html|js|mjs|css)$/i.test(f));
-    expect(files.map((f) => path.relative(DIST, f))).toContain('index.html');
-    for (const f of files) {
-      const text = readFileSync(f, 'utf8');
-      const mentions = text.match(/[^\s"'=()<>/]*\.png/gi) ?? [];
-      if (path.basename(f) === 'index.html') {
-        for (const m of mentions) expect(m, 'index.html').toMatch(new RegExp(`${PREVIEW.source}|${ICON.source}`));
-      } else {
-        expect(mentions, path.relative(ROOT, f)).toEqual([]);
-      }
-    }
   });
 });

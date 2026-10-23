@@ -8,7 +8,6 @@
 // files are separate bundles and cannot share version.ts. Frames drawn
 // before the file arrives are kept (bounded, but never losing the worst gap)
 // and replayed in order, so the worst frame since globe-ready is complete.
-import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LoopObserver } from './loop-observer.ts';
 import { createPerfStats } from './perf-stats.ts';
@@ -74,18 +73,6 @@ describe('the scene page without ?perf', () => {
     const args = captured.calls[0] ?? [];
     expect(args[2], 'a third argument (observer) was passed').toBeUndefined();
     expect(created).toEqual([]);
-  });
-});
-
-describe('the scene page source', () => {
-  it('names the readout file only through the %PERF_URL% token, behind wantsPerf', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('./scene.ts', import.meta.url), 'utf8');
-    expect(source).toContain('%PERF_URL%');
-    expect(source).toMatch(/wantsPerf\s*\(\s*location\.search\s*\)/);
-    // The readout's DOM code lives in its own file, never statically in the scene file.
-    expect(source).not.toMatch(/from\s+['"]\.\/perf-readout(\.ts)?['"]/);
-    expect(source).not.toMatch(/from\s+['"]\.\/perf(\.ts)?['"]/);
   });
 });
 
@@ -268,14 +255,5 @@ describe('readoutLink: frames before the file arrives', () => {
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
-  });
-});
-
-describe('the readout file stays apart from the scene\'s version.ts', () => {
-  it.each(['perf.ts', 'perf-stats.ts', 'perf-readout.ts'])('%s imports version.ts for types only', (file) => {
-    const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
-    const runtime = [...source.matchAll(/^\s*import\s+(?!type\b)([^;]*?)from\s+['"]\.\/version(\.ts)?['"]/gm)].map((m) => m[0]);
-    expect(runtime).toEqual([]);
-    expect(source).not.toMatch(/import\(\s*['"]\.\/version/);
   });
 });

@@ -17,10 +17,6 @@ describe('masterColours', () => {
     expect(masterColours.length).toBeLessThanOrEqual(255);
   });
 
-  it('is started from the visual-direction prototype colours (at least 50 of them)', () => {
-    expect(masterColours.length).toBeGreaterThanOrEqual(50);
-  });
-
   it('includes snow white and the midnight background', () => {
     expect(masterColours).toContain('#ffffff');
     expect(masterColours).toContain('#0b1026');

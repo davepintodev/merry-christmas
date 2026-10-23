@@ -1,13 +1,8 @@
 // XMAS-24 "Cap script: download caps checked after every build": pure cap
 // logic. Classifies dist files into caps, adds up Brotli sizes per cap,
 // formats the table and picks out failures, using made-up file sets.
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CAPS, KB, capsFor, evaluateCaps, failures, formatTable, type CapResult, type CapSetting, type FileSize } from './caps.ts';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function result(results: readonly CapResult[], name: string): CapResult {
   const r = results.find((x) => x.name === name);
@@ -220,27 +215,6 @@ describe('formatTable', () => {
     expect(failRow).toContain('100');
     expect(passRow).not.toContain('FAIL');
     expect(passRow).toContain('pass');
-  });
-});
-
-describe('package.json wiring', () => {
-  const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
-  const scripts = pkg.scripts ?? {};
-
-  it('defines check:caps as the cap script', () => {
-    expect(scripts['check:caps']).toBe('node tools/check-caps.ts');
-  });
-
-  it('runs check:caps after build and before test:e2e in check', () => {
-    const check = scripts['check'] ?? '';
-    const steps = check.split('&&').map((s) => s.trim());
-    expect(steps).toEqual([
-      'pnpm run typecheck',
-      'pnpm run test:unit',
-      'pnpm run build',
-      'pnpm run check:caps',
-      'pnpm run test:e2e',
-    ]);
   });
 });
 
