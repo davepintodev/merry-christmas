@@ -9,10 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { leanBox } from '../scene/lean.ts';
 import { BASE_ROWS, BASE_WIDTH, renderBase } from '../scene/base-fine.ts';
-import { sceneLayout, type SceneLayout } from '../scene/frame.ts';
+import { sceneLayout } from '../scene/frame.ts';
 import { BASE_SINK, NO_FRONT } from '../scene/globe.ts';
 import { globeShapes, onFloor } from '../scene/shapes.ts';
-import { renderShadowSteps, shadowDrawList, shapeDrawList, type DrawStep } from '../scene/shape-draw-list.ts';
+import { renderShadowSteps, shadowDrawList, shapeDrawList } from '../scene/shape-draw-list.ts';
 import type { FaceDraw } from '../scene/shapes-draw.ts';
 import { flakeSize, type SnowStep } from '../scene/snow-draw-list.ts';
 import type { GlassLayer } from '../scene/glass-layer.ts';
@@ -27,6 +27,8 @@ const BW = BOX.right - BOX.left + 1;
 const BH = BOX.bottom - BOX.top;
 const SITE: FineSite = { scale: 3, ratio: 1.5, left: 7 };
 const IDENTITY = [1, 0, 0, 1, 0, 0];
+const FRACTIONAL: FineSite = { scale: 5, ratio: 1.25, left: 12.8 };
+const NARROW: FineSite = { scale: 3, ratio: 1.5, left: -41.333333333333336 };
 
 type Matrix = number[];
 type Call = { source: HTMLCanvasElement; args: number[]; matrix: Matrix; smoothing: boolean; clips: Region[] };
@@ -40,20 +42,10 @@ type Rect = { x: number; y: number; w: number; h: number; style: string };
 
 class FakeStyle {
   writes = 0;
+  cssText = '';
   private values = new Map<string, string>();
-  set cssText(text: string) {
-    this.values.set('cssText', text);
-  }
-  get cssText(): string {
-    return this.values.get('cssText') ?? '';
-  }
-  private get(key: string): string {
-    return this.values.get(key) ?? '';
-  }
-  private set(key: string, value: string): void {
-    this.writes++;
-    this.values.set(key, value);
-  }
+  private get(key: string): string { return this.values.get(key) ?? ''; }
+  private set(key: string, value: string): void { this.writes++; this.values.set(key, value); }
   get left(): string { return this.get('left'); }
   set left(v: string) { this.set('left', v); }
   get top(): string { return this.get('top'); }
@@ -93,28 +85,15 @@ class FakeContext {
   /** Ellipses and arcs added to the current path, as device regions. */
   private shapesInPath: Region[] = [];
   constructor(readonly canvas: FakeCanvas) {}
-  save(): void {
-    this.saves++;
-    this.saved.push([...this.matrix]);
-    this.savedClips.push([...this.clipStack]);
-  }
-  restore(): void {
-    this.restores++;
-    this.matrix = this.saved.pop() ?? [...IDENTITY];
-    this.clipStack = this.savedClips.pop() ?? [];
-  }
-  setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
-    this.matrix = [a, b, c, d, e, f];
-  }
+  save(): void { this.saves++; this.saved.push([...this.matrix]); this.savedClips.push([...this.clipStack]); }
+  restore(): void { this.restores++; this.matrix = this.saved.pop() ?? [...IDENTITY]; this.clipStack = this.savedClips.pop() ?? []; }
+  setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void { this.matrix = [a, b, c, d, e, f]; }
   /** The current transform times the given one, as a canvas does (a shear may be put in a draw transform this way). */
   transform(a: number, b: number, c: number, d: number, e: number, f: number): void {
     const [m0 = 1, m1 = 0, m2 = 0, m3 = 1, m4 = 0, m5 = 0] = this.matrix;
     this.matrix = [m0 * a + m2 * b, m1 * a + m3 * b, m0 * c + m2 * d, m1 * c + m3 * d, m0 * e + m2 * f + m4, m1 * e + m3 * f + m5];
   }
-  beginPath(): void {
-    this.path.length = 0;
-    this.shapesInPath = [];
-  }
+  beginPath(): void { this.path.length = 0; this.shapesInPath = []; }
   /** An ellipse (or a circle, from arc) under the current transform, as a region of device points. */
   private ellipseRegion(x: number, y: number, rx: number, ry: number, rotation: number): Region {
     const [a = 1, b = 0, c = 0, d = 0, e = 0, f = 0] = this.matrix;
@@ -130,12 +109,8 @@ class FakeContext {
       return (lx / rx) ** 2 + (ly / ry) ** 2 <= 1;
     };
   }
-  ellipse(x: number, y: number, rx: number, ry: number, rotation: number): void {
-    this.shapesInPath.push(this.ellipseRegion(x, y, rx, ry, rotation));
-  }
-  arc(x: number, y: number, r: number): void {
-    this.shapesInPath.push(this.ellipseRegion(x, y, r, r, 0));
-  }
+  ellipse(x: number, y: number, rx: number, ry: number, rotation: number): void { this.shapesInPath.push(this.ellipseRegion(x, y, rx, ry, rotation)); }
+  arc(x: number, y: number, r: number): void { this.shapesInPath.push(this.ellipseRegion(x, y, r, r, 0)); }
   /**
    * The current path as a device region: its rings, each subpath from a moveTo, filled by nonzero winding as a
    * canvas fills them, or its ellipses, whichever it holds. Rings that overlap add up, so a pixel under two is inside once.
@@ -156,39 +131,25 @@ class FakeContext {
   fill(): void {
     this.fills.push({ seq: this.ops++, style: this.fillStyle, alpha: this.globalAlpha, points: this.path.map((p) => through(p.matrix, p.x, p.y)), clips: [...this.clipStack, ...[]], region: this.pathRegion() } as Fill);
   }
-  moveTo(x: number, y: number): void {
-    this.path.push({ x, y, matrix: [...this.matrix], move: true });
-  }
-  lineTo(x: number, y: number): void {
-    this.path.push({ x, y, matrix: [...this.matrix], move: false });
-  }
+  moveTo(x: number, y: number): void { this.path.push({ x, y, matrix: [...this.matrix], move: true }); }
+  lineTo(x: number, y: number): void { this.path.push({ x, y, matrix: [...this.matrix], move: false }); }
   closePath(): void {}
-  clip(): void {
-    this.clips.push(this.path.map(({ x, y }) => ({ x, y })));
-    this.clipStack.push(this.pathRegion());
-  }
-  clearRect(x: number, y: number, w: number, h: number): void {
-    this.clears.push([x, y, w, h]);
-    this.clearAt.push(this.ops);
-    this.lit = [];
-  }
+  clip(): void { this.clips.push(this.path.map(({ x, y }) => ({ x, y }))); this.clipStack.push(this.pathRegion()); }
+  clearRect(x: number, y: number, w: number, h: number): void { this.clears.push([x, y, w, h]); this.clearAt.push(this.ops); this.lit = []; }
   fillRect(x: number, y: number, w: number, h: number): void {
     const rect = { x, y, w, h, style: this.fillStyle };
     this.rects.push(rect);
     this.lit.push(rect);
-    this.canvas.page.log.push({ canvas: this.canvas, op: 'rect', rect });
   }
   drawImage(source: FakeCanvas, ...args: number[]): void {
     this.drawAt.push(this.ops++);
     this.calls.push({ source: source as unknown as HTMLCanvasElement, args, matrix: [...this.matrix], smoothing: this.imageSmoothingEnabled, clips: [...this.clipStack] });
-    this.canvas.page.log.push({ canvas: this.canvas, op: 'draw', call: this.calls[this.calls.length - 1] as Call });
   }
-  createImageData(width: number, height: number): { data: Uint8ClampedArray; width: number; height: number } {
-    return { data: new Uint8ClampedArray(width * height * 4), width, height };
-  }
+  createImageData(width: number, height: number): { data: Uint8ClampedArray; width: number; height: number } { return { data: new Uint8ClampedArray(width * height * 4), width, height }; }
   putImageData(image: Put, _dx?: number, _dy?: number, ...dirty: number[]): void {
-    this.puts.push({ data: Uint8ClampedArray.from(image.data), width: image.width, height: image.height, dirty });
-    this.canvas.page.log.push({ canvas: this.canvas, op: 'put', put: this.puts[this.puts.length - 1] as Put });
+    const put = { data: Uint8ClampedArray.from(image.data), width: image.width, height: image.height, dirty };
+    this.puts.push(put);
+    this.canvas.page.puts.push(put);
   }
 }
 
@@ -215,12 +176,9 @@ class FakeCanvas {
   }
 }
 
-/** One operation on any canvas's context, in the order it happened: the fake's single ordered record. */
-type Op = { canvas: FakeCanvas; op: 'put'; put: Put } | { canvas: FakeCanvas; op: 'rect'; rect: Rect } | { canvas: FakeCanvas; op: 'draw'; call: Call };
-
 class FakeDocument {
-  /** Every putImageData, fillRect and drawImage on every canvas, in order. */
-  readonly log: Op[] = [];
+  /** Every putImageData on every canvas, in order. */
+  readonly puts: Put[] = [];
   readonly order: FakeCanvas[] = [];
   readonly made: FakeCanvas[] = [];
   contextless = false;
@@ -266,7 +224,6 @@ function layersOf(main: FakeCanvas): { behind: FakeCanvas; shapes: FakeCanvas; f
   return { behind, shapes, fronts };
 }
 
-/** The layer of the flakes in front (XMAS-84), over the shapes and Santa. */
 /** XMAS-68: the base's canvas, the last of the layers. */
 function baseOf(main: FakeCanvas): FakeCanvas {
   const base = page.order[page.order.indexOf(main) + 4];
@@ -274,10 +231,11 @@ function baseOf(main: FakeCanvas): FakeCanvas {
   return base;
 }
 
-function snowFrontOf(main: FakeCanvas): FakeCanvas {
-  const snow = page.order[page.order.indexOf(main) + 3];
-  if (snow === undefined) throw new Error('the snow layer is not on the page');
-  return snow;
+/** A fresh layer on a fresh page order (the fake document itself is kept). */
+function fresh(): ReturnType<typeof setup> {
+  page.made.length = 0;
+  page.order.length = 0;
+  return setup();
 }
 
 function ctxOf(canvas: FakeCanvas): FakeContext {
@@ -287,9 +245,7 @@ function ctxOf(canvas: FakeCanvas): FakeContext {
 }
 
 /** The '#rrggbb' a flake's colour is drawn in. */
-function hex(colour: number): string {
-  return `#${colour.toString(16).padStart(6, '0')}`;
-}
+function hex(colour: number): string { return `#${colour.toString(16).padStart(6, '0')}`; }
 
 /** The device pixels ("x,y", sorted, once each) that rects cover. */
 function keysOf(rects: readonly Rect[]): string[] {
@@ -298,9 +254,7 @@ function keysOf(rects: readonly Rect[]): string[] {
   return [...out].sort();
 }
 
-function px(value: number): number {
-  return Number.parseFloat(value as unknown as string);
-}
+function px(value: string): number { return Number.parseFloat(value); }
 
 /** The matrix and clip the layer should use for a step, worked out from the step alone. */
 function expectedMatrix(step: FaceDraw, k: number): Matrix {
@@ -310,9 +264,7 @@ function expectedMatrix(step: FaceDraw, k: number): Matrix {
   return [(k * (b[0] - a[0])) / drawing.width, (k * (b[1] - a[1])) / drawing.width, (k * (d[0] - a[0])) / drawing.height, (k * (d[1] - a[1])) / drawing.height, ox + k * a[0], oy + k * a[1]];
 }
 
-function near(p: readonly number[], q: readonly number[]): boolean {
-  return p.length === q.length && p.every((v, i) => Math.abs(v - (q[i] ?? Number.NaN)) < 1e-6);
-}
+function near(p: readonly number[], q: readonly number[]): boolean { return p.length === q.length && p.every((v, i) => Math.abs(v - (q[i] ?? Number.NaN)) < 1e-6); }
 
 /** The winding number of the closed ring `pts` about (px, py): an edge crossing the point's row counts +1 if it goes up with the point on its left, -1 if down with the point on its right. */
 function windingOf(pts: readonly Point[], px: number, py: number): number {
@@ -387,26 +339,18 @@ describe('makeFineLayer: what it puts on the page', () => {
     expect(page.order).toHaveLength(1);
   });
 
-  it('puts the flakes-behind canvas right after the scene canvas, then the shapes canvas, the flakes-in-front canvas and the base canvas last', () => {
+  it('puts the flakes-behind canvas (XMAS-89, under the shapes) right after the scene canvas, then the shapes, the flakes in front and the base last, once: a second draw adds none', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { behind, shapes, fronts } = layersOf(main);
     expect(page.order).toEqual([main, behind, shapes, fronts, baseOf(main)]);
     expect(new Set([behind, shapes, fronts]).size).toBe(3);
-    // XMAS-89: the flakes behind sit on a layer of their own, under the shapes, so the shapes need not be redrawn as they move.
-    expect(page.order[3]).toBe(snowFrontOf(main));
-  });
-
-  it('makes the two layers once: a second draw adds no canvas to the page', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
     const first = [...page.order];
     layer.draw(frame({ turn: 1.9 }), SITE);
     expect(page.order).toEqual(first);
-    expect(page.order[0]).toBe(main);
   });
 
-  it('lays both layers fixed, above nothing, never taking the pointer, and not smoothed when scaled', () => {
+  it('lays the layers fixed, never taking the pointer, and not smoothed when scaled', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { behind, shapes, fronts } = layersOf(main);
@@ -422,37 +366,25 @@ describe('makeFineLayer: lined up with the glass', () => {
   const SITES: [string, FineSite][] = [
     ['360x700 at 2x (scale 6, left 0)', { scale: 6, ratio: 2, left: 0 }],
     ['1920x1130 at 1x', { scale: 4, ratio: 1, left: 336 }],
-    ['a fractional ratio', { scale: 5, ratio: 1.25, left: 12.8 }],
-    ['a narrow window: the picture overhangs, left negative', { scale: 3, ratio: 1.5, left: -41.333333333333336 }],
+    ['a fractional ratio', FRACTIONAL],
+    ['a narrow window: the picture overhangs, left negative', NARROW],
   ];
 
   for (const [name, site] of SITES) {
-    it(`${name}: both layers sit on the lean box in CSS pixels`, () => {
+    it(`${name}: all three layers sit on the lean box in CSS pixels, one canvas pixel per device pixel`, () => {
       const { main, layer } = setup();
       layer.draw(frame(), site);
-      const { behind, shapes, fronts } = layersOf(main);
       const css = site.scale / site.ratio;
-      for (const canvas of [behind, shapes, fronts]) {
-        expect(px(canvas.style.left as unknown as number)).toBeCloseTo(site.left + BOX.left * css, 6);
-        expect(px(canvas.style.top as unknown as number)).toBeCloseTo(BOX.top * css, 6);
-        expect(px(canvas.style.width as unknown as number)).toBeCloseTo(BW * css, 6);
-        expect(px(canvas.style.height as unknown as number)).toBeCloseTo(BH * css, 6);
+      for (const canvas of Object.values(layersOf(main))) {
+        expect(px(canvas.style.left)).toBeCloseTo(site.left + BOX.left * css, 6);
+        expect(px(canvas.style.top)).toBeCloseTo(BOX.top * css, 6);
+        expect(px(canvas.style.width)).toBeCloseTo(BW * css, 6);
+        expect(px(canvas.style.height)).toBeCloseTo(BH * css, 6);
+        expect([canvas.width, canvas.height]).toEqual([BW * site.scale, BH * site.scale]);
+        // A device pixel is 1 / ratio CSS pixels: the canvas's CSS size times the ratio is its pixel size.
+        expect(px(canvas.style.width) * site.ratio).toBeCloseTo(canvas.width, 6);
+        expect(px(canvas.style.height) * site.ratio).toBeCloseTo(canvas.height, 6);
       }
-    });
-
-    it(`${name}: the shapes canvas has one pixel per device pixel, the flakes-in-front canvas one per device pixel too`, () => {
-      const { main, layer } = setup();
-      layer.draw(frame(), site);
-      const { behind, shapes, fronts } = layersOf(main);
-      expect(behind.width).toBe(BW * site.scale);
-      expect(behind.height).toBe(BH * site.scale);
-      expect(shapes.width).toBe(BW * site.scale);
-      expect(shapes.height).toBe(BH * site.scale);
-      // A device pixel is 1 / ratio CSS pixels: the canvas's CSS size times the ratio is its pixel size.
-      expect(px(shapes.style.width as unknown as number) * site.ratio).toBeCloseTo(shapes.width, 6);
-      expect(px(shapes.style.height as unknown as number) * site.ratio).toBeCloseTo(shapes.height, 6);
-      expect(fronts.width).toBe(BW * site.scale);
-      expect(fronts.height).toBe(BH * site.scale);
     });
 
     it(`${name}: the layer's left edge lands on a whole device pixel when the picture's does`, () => {
@@ -460,7 +392,7 @@ describe('makeFineLayer: lined up with the glass', () => {
       const { main, layer } = setup();
       layer.draw(frame(), { ...site, left: wholeLeft });
       const { shapes } = layersOf(main);
-      const device = px(shapes.style.left as unknown as number) * site.ratio;
+      const device = px(shapes.style.left) * site.ratio;
       expect(Math.abs(device - Math.round(device))).toBeLessThan(1e-6);
     });
   }
@@ -470,25 +402,25 @@ describe('makeFineLayer: lined up with the glass', () => {
     layer.draw(frame(), SITE);
     const wide = sceneLayout(W + 40, H, 7);
     const wideBox = leanBox(W + 40, wide);
-    layer.draw({ layout: wide, width: W + 40, turn: 0.4, lean: 0 }, { scale: 2, ratio: 2, left: 3 });
+    const wideFrame = { layout: wide, width: W + 40, turn: 0.4, lean: 0 };
+    layer.draw(wideFrame, { scale: 2, ratio: 2, left: 3 });
     const { behind, shapes, fronts } = layersOf(main);
-    expect(behind.width).toBe((wideBox.right - wideBox.left + 1) * 2);
-    expect(shapes.width).toBe((wideBox.right - wideBox.left + 1) * 2);
-    expect(fronts.width).toBe((wideBox.right - wideBox.left + 1) * 2);
-    expect(px(shapes.style.left as unknown as number)).toBeCloseTo(3 + wideBox.left * 1, 6);
-    layer.draw({ layout: wide, width: W + 40, turn: 0.4, lean: 0 }, { scale: 2, ratio: 1, left: 3 });
-    expect(px(shapes.style.left as unknown as number)).toBeCloseTo(3 + wideBox.left * 2, 6);
-    expect(px(shapes.style.width as unknown as number)).toBeCloseTo((wideBox.right - wideBox.left + 1) * 2, 6);
+    for (const canvas of [behind, shapes, fronts]) expect(canvas.width).toBe((wideBox.right - wideBox.left + 1) * 2);
+    expect(px(shapes.style.left)).toBeCloseTo(3 + wideBox.left * 1, 6);
+    layer.draw(wideFrame, { scale: 2, ratio: 1, left: 3 });
+    expect(px(shapes.style.left)).toBeCloseTo(3 + wideBox.left * 2, 6);
+    expect(px(shapes.style.width)).toBeCloseTo((wideBox.right - wideBox.left + 1) * 2, 6);
   });
 
   it('does not touch the canvases\' sizes or styles when nothing changed (a size change would clear them)', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const { behind, shapes, fronts } = layersOf(main);
-    const before = [behind.resizes, shapes.resizes, fronts.resizes, behind.style.writes, shapes.style.writes, fronts.style.writes];
+    const touched = (): number[] => [behind, shapes, fronts].flatMap((c) => [c.resizes, c.style.writes]);
+    const before = touched();
     layer.draw(frame({ turn: 2.2 }), SITE);
     layer.draw(frame({ turn: 3.1 }), SITE);
-    expect([behind.resizes, shapes.resizes, fronts.resizes, behind.style.writes, shapes.style.writes, fronts.style.writes]).toEqual(before);
+    expect(touched()).toEqual(before);
   });
 
   it('re-sizes the canvases when the scale changes, drawing the new picture fully', () => {
@@ -496,11 +428,9 @@ describe('makeFineLayer: lined up with the glass', () => {
     layer.draw(frame(), SITE);
     const { shapes } = layersOf(main);
     layer.draw(frame(), { ...SITE, scale: 4, ratio: 2 });
-    expect(shapes.width).toBe(BW * 4);
-    expect(shapes.height).toBe(BH * 4);
+    expect([shapes.width, shapes.height]).toEqual([BW * 4, BH * 4]);
     // Cleared at the new size, then drawn: the last clear covers the whole canvas.
-    const clear = ctxOf(shapes).clears.at(-1);
-    expect(clear).toEqual([0, 0, BW * 4, BH * 4]);
+    expect(ctxOf(shapes).clears.at(-1)).toEqual([0, 0, BW * 4, BH * 4]);
   });
 });
 
@@ -518,12 +448,15 @@ describe('makeFineLayer: the shapes with canvas transforms', () => {
     }
   });
 
-  it('turns smoothing off before the first image and clears the canvas first', () => {
+  it('turns smoothing off and clears the canvas first, and every face is its own save and restore, so a clip does not leak onto the next', () => {
     const { main, layer } = setup();
-    layer.draw(frame(), SITE);
+    layer.draw(frame({ turn: 0.4 }), SITE);
     const ctx = ctxOf(layersOf(main).shapes);
     expect(ctx.imageSmoothingEnabled).toBe(false);
     expect(ctx.clears[0]).toEqual([0, 0, BW * SITE.scale, BH * SITE.scale]);
+    expect(ctx.saves).toBeGreaterThanOrEqual(shapeDrawList(0.4).length);
+    expect(ctx.restores).toBe(ctx.saves);
+    expect(ctx.matrix).toEqual(IDENTITY);
   });
 
   it('keeps its bitmaps cached: no canvas is made per frame, and every frame draws from the same few bitmaps', () => {
@@ -608,15 +541,6 @@ describe('makeFineLayer: the shapes with canvas transforms', () => {
     expect(gables).toBeGreaterThan(0);
   });
 
-  it('a clip does not leak onto the next face: every face is its own save and restore', () => {
-    const { main, layer } = setup();
-    layer.draw(frame({ turn: 0.4 }), SITE);
-    const ctx = ctxOf(layersOf(main).shapes);
-    expect(ctx.saves).toBeGreaterThanOrEqual(shapeDrawList(0.4).length);
-    expect(ctx.restores).toBe(ctx.saves);
-    expect(ctx.matrix).toEqual(IDENTITY);
-  });
-
   it('skips a face that is edge-on instead of drawing a degenerate transform', () => {
     const { main, layer } = setup();
     const real = shapeDrawList(0.4);
@@ -649,12 +573,16 @@ describe('makeFineLayer: the shapes with canvas transforms', () => {
   it('survives a canvas with no 2d context: no throw, and nothing drawn', () => {
     page.contextless = true;
     const { layer } = setup();
-    expect(() => layer.draw(frame({ lean: 0.2 }), SITE)).not.toThrow();
+    for (const lean of [0, 0.2]) expect(() => layer.draw(frame({ lean }), SITE)).not.toThrow();
   });
 
-  it('throws for a non-finite turn rather than drawing garbage', () => {
-    const { layer } = setup();
+  it('throws for a non-finite turn rather than drawing garbage, before any shadow is filled', () => {
+    const { main, layer } = setup();
+    layer.draw(frame(), SITE);
+    const ctx = ctxOf(layersOf(main).shapes);
+    ctx.fills.length = 0;
     expect(() => layer.draw(frame({ turn: Number.NaN }), SITE)).toThrow(RangeError);
+    expect(ctx.fills).toHaveLength(0);
   });
 });
 
@@ -663,7 +591,7 @@ describe('makeFineLayer: the lean is one smooth shear in the draw transforms (XM
     const { main, layer } = setup();
     layer.draw(frame({ lean: 0 }), SITE);
     const { behind, shapes } = layersOf(main);
-    const snow = snowFrontOf(main);
+    const snow = layersOf(main).fronts;
     const calls = ctxOf(shapes).calls;
     expect(calls.length).toBeGreaterThanOrEqual(shapeDrawList(0.4).length);
     findFaces(calls, shapeDrawList(0.4), SITE.scale);
@@ -671,25 +599,17 @@ describe('makeFineLayer: the lean is one smooth shear in the draw transforms (XM
     expect(page.made.some((c) => c !== behind && c !== shapes && c !== snow && c.width === BW * SITE.scale)).toBe(false);
   });
 
-  it('returns to drawing straight onto the layer when the lean goes back to 0, clearing the leaned copy', () => {
+  it('clears the layer on a lean frame after an upright one, and returns to drawing straight onto it when the lean goes back to 0', () => {
     const { main, layer } = setup();
+    layer.draw(frame({ lean: 0 }), SITE);
     layer.draw(frame({ lean: 0.3 }), SITE);
-    const { shapes } = layersOf(main);
-    const ctx = ctxOf(shapes);
+    const ctx = ctxOf(layersOf(main).shapes);
+    expect(ctx.clears.length).toBeGreaterThanOrEqual(2);
     ctx.calls.splice(0);
     layer.draw(frame({ lean: 0 }), SITE);
     findFaces(ctx.calls, shapeDrawList(0.4), SITE.scale);
     expect(ctx.calls.every((c) => c.source !== (ctx.canvas as unknown))).toBe(true);
     expect(ctx.clears.at(-1)).toEqual([0, 0, BW * SITE.scale, BH * SITE.scale]);
-  });
-
-  it('a lean frame after an upright one leaves nothing of the upright frame behind', () => {
-    const { main, layer } = setup();
-    layer.draw(frame({ lean: 0 }), SITE);
-    layer.draw(frame({ lean: 0.2 }), SITE);
-    const ctx = ctxOf(layersOf(main).shapes);
-    // The last clear of the layer comes before its copies.
-    expect(ctx.clears.length).toBeGreaterThanOrEqual(2);
   });
 
   // The shear in device pixels: a point at height y (box device rows, down from the box top) moves lean x (box bottom - y) across.
@@ -698,9 +618,7 @@ describe('makeFineLayer: the lean is one smooth shear in the draw transforms (XM
   const upright = (extra: Partial<FineFrame> = {}): FakeContext => drawnOn(0, extra);
   /** A fresh layer's frame at `lean`: the shapes canvas's context. */
   function drawnOn(lean: number, extra: Partial<FineFrame> = {}): FakeContext {
-    page.made.length = 0;
-    page.order.length = 0;
-    const { main, layer } = setup();
+    const { main, layer } = fresh();
     layer.draw(frame({ lean, ...extra }), SITE);
     return ctxOf(layersOf(main).shapes);
   }
@@ -808,13 +726,12 @@ describe('makeFineLayer: the flakes in front', () => {
     const { main, layer } = setup();
     layer.draw(frame(), SITE);
     const ctx = ctxOf(layersOf(main).fronts);
-    expect(layersOf(main).fronts.width).toBe(BW * k);
-    expect(layersOf(main).fronts.height).toBe(BH * k);
+    expect([layersOf(main).fronts.width, layersOf(main).fronts.height]).toEqual([BW * k, BH * k]);
     expect(ctx.clears.at(-1)).toEqual([0, 0, BW * k, BH * k]);
     expect(ctx.rects).toEqual([]);
   });
 
-  it('puts a flake opaque, with its own red, green and blue, at its place in the box', () => {
+  it('puts a flake opaque, with its own red, green and blue, at its place in the box, and a plus flake as five squares', () => {
     const { main, layer } = setup();
     layer.draw(frame({ snowFront: [step(0, 0, 0x112233), step(-5, 3, 0xfdfcfb), step(4, -9, 0x000000) /* black is a colour, not "nothing" */] }), SITE);
     const { lit } = ctxOf(layersOf(main).fronts);
@@ -823,15 +740,11 @@ describe('makeFineLayer: the flakes in front', () => {
       { x: k * (cx - 5), y: k * (cy + 3), w: size, h: size, style: '#fdfcfb' },
       { x: k * (cx + 4), y: k * (cy - 9), w: size, h: size, style: '#000000' },
     ]);
-  });
-
-  it('draws a plus flake as five squares of the flake size, spaced by that size', () => {
-    const { main, layer } = setup();
+    // A plus flake is five squares of the flake size, spaced by that size.
     const plus: SnowStep['shape'] = [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]];
     layer.draw(frame({ snowFront: [{ x: 2, y: 3, colour: 0x123456, shape: plus, depth: 20 }] }), SITE);
-    const { lit } = ctxOf(layersOf(main).fronts);
     const [x, y] = [k * (cx + 2), k * (cy + 3)];
-    expect(lit).toEqual(plus.map(([dx = 0, dy = 0]) => ({ x: x + dx * size, y: y + dy * size, w: size, h: size, style: '#123456' })));
+    expect(ctxOf(layersOf(main).fronts).lit).toEqual(plus.map(([dx = 0, dy = 0]) => ({ x: x + dx * size, y: y + dy * size, w: size, h: size, style: '#123456' })));
   });
 
   it('drops a flake the lean pushes out of the box instead of wrapping it onto the next row', () => {
@@ -858,14 +771,6 @@ describe('makeFineLayer: the flakes in front', () => {
     expect(ctx.clears.at(-1)).toEqual([0, 0, BW * k, BH * k]);
     expect(ctx.rects.length).toBe(drawn);
     expect(ctx.lit).toEqual([]);
-  });
-
-  it('puts the flakes canvas in front of the shapes: the shapes layer comes first in the page', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
-    const { shapes, fronts } = layersOf(main);
-    expect(page.order.indexOf(shapes)).toBeLessThan(page.order.indexOf(fronts));
-    expect(page.order.indexOf(main)).toBeLessThan(page.order.indexOf(shapes));
   });
 
   it('survives a frame with no flake lists at all: nothing is lit on either canvas', () => {
@@ -924,20 +829,16 @@ describe('makeFineLayer: a leaning flake is one block moved by the shear at its 
       const list = cases(lean);
       expect(new Set(list.map((c) => c.d)).size, 'different shears').toBeGreaterThan(2);
       expect(list.some((c) => c.d % k !== 0), 'a shear that is not a whole art pixel').toBe(true);
-      page.made.length = 0;
-      page.order.length = 0;
-      const { main, layer } = setup();
+      const { main, layer } = fresh();
       layer.draw(frame({ lean, snowFront: list.map((c) => c.step(WHITE, 20)) }), SITE);
-      expect(keysOf(ctxOf(snowFrontOf(main)).lit)).toEqual(sorted(list.flatMap((c) => blockKeys(c.x, c.top))));
+      expect(keysOf(ctxOf(layersOf(main).fronts).lit)).toEqual(sorted(list.flatMap((c) => blockKeys(c.x, c.top))));
     }
   });
 
   it('moves each flake behind the glass centre the same way, on the flakes-behind layer under the shapes', () => {
     for (const lean of [0.1, -0.15]) {
       const list = cases(lean);
-      page.made.length = 0;
-      page.order.length = 0;
-      const { main, layer } = setup();
+      const { main, layer } = fresh();
       layer.draw(frame({ lean, snowBehind: list.map((c) => c.step(BEHIND, -20)) }), SITE);
       expect(keysOf(ctxOf(layersOf(main).behind).lit)).toEqual(sorted(list.flatMap((c) => blockKeys(c.x, c.top))));
     }
@@ -958,7 +859,7 @@ describe('makeFineLayer: a leaning flake is one block moved by the shear at its 
     const { main, layer } = setup();
     layer.draw(frame({ lean, snowFront: [{ x: 0, y: ay, colour: 0x123456, shape: plus, depth: 20 }] }), SITE);
     const want = plus.flatMap(([dx = 0, dy = 0]) => blockKeys(gx * k + dx * size + d, Math.floor((gy + ay) * k) + dy * size));
-    expect(keysOf(ctxOf(snowFrontOf(main)).lit)).toEqual(sorted(want));
+    expect(keysOf(ctxOf(layersOf(main).fronts).lit)).toEqual(sorted(want));
   });
 });
 
@@ -977,7 +878,7 @@ describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () =
   it('lands a flake on the screen pixel its own position picks, so two fractions inside one art pixel land on different screen pixels', () => {
     const { main, layer } = setup();
     layer.draw(frame({ snowFront: [flake(10, 0, WHITE, 20)] }), SITE);
-    const snow = ctxOf(snowFrontOf(main));
+    const snow = ctxOf(layersOf(main).fronts);
     const whole = [...snow.lit];
     layer.draw(frame({ snowFront: [flake(10.34, 0, WHITE, 20)] }), SITE);
     const fraction = [...snow.lit];
@@ -987,47 +888,17 @@ describe('makeFineLayer: the flakes on the screen\'s pixel grid (XMAS-84)', () =
     expect((fraction[0]?.x ?? 0) % k, 'not a multiple of the art pixel size').not.toBe(0);
   });
 
-  it('a flake behind the glass centre is on the flakes-behind layer, under the shapes, on the same screen pixel grid', () => {
+  it('a flake behind the glass centre is a flake-sized block on the flakes-behind layer only, on the same screen pixel grid', () => {
     const { main, layer } = setup();
+    layer.draw(frame({ snowBehind: [flake(0, 0, BEHIND, -20)] }), SITE);
+    const { behind, shapes, fronts } = layersOf(main);
+    expect(ctxOf(behind).lit).toEqual([square(k * cx, k * cy, BEHIND)]);
     layer.draw(frame({ snowBehind: [flake(10.34, 0, BEHIND, -20)] }), SITE);
-    expect(ctxOf(layersOf(main).behind).lit).toEqual([square(k * (cx + 10) + 1, k * cy, BEHIND)]);
+    expect(ctxOf(behind).lit).toEqual([square(k * (cx + 10) + 1, k * cy, BEHIND)]);
     // Not on the front layer, nor on the shapes: the behind flake is drawn only on its own layer.
-    expect(ctxOf(layersOf(main).shapes).rects).toEqual([]);
-    expect(ctxOf(snowFrontOf(main)).rects).toEqual([]);
-  });
-});
-
-describe('makeFineLayer: the flakes behind go on a canvas under the shapes (XMAS-84, XMAS-89)', () => {
-  const k = SITE.scale;
-  const WHITE_BEHIND = 0xaebcf0;
-  const cx = LAYOUT.globe.cx - BOX.left;
-  const cy = LAYOUT.globe.cy - BOX.top;
-  const flake = (x: number, y: number): SnowStep => ({ x, y, colour: WHITE_BEHIND, shape: [[0, 0]], depth: -20 });
-  /** Where the log has the first flake square drawn on `canvas`, and the first face drawn on it (-1 for none). */
-  const firstLitPut = (canvas: FakeCanvas): number => page.log.findIndex((o) => o.canvas === canvas && o.op === 'rect');
-  const firstDraw = (canvas: FakeCanvas): number => page.log.findIndex((o) => o.canvas === canvas && o.op === 'draw');
-
-  it('puts the behind flakes on their own canvas, under the shapes canvas in the page, and none on the shapes', () => {
-    const { main, layer } = setup();
-    layer.draw(frame({ snowBehind: [flake(10, 0)] }), SITE);
-    const { behind, shapes } = layersOf(main);
-    expect(firstLitPut(behind)).toBeGreaterThanOrEqual(0);
-    expect(firstDraw(shapes)).toBeGreaterThanOrEqual(0);
-    expect(firstLitPut(shapes)).toBe(-1);
-    expect(page.order.indexOf(behind)).toBeLessThan(page.order.indexOf(shapes));
-  });
-
-  it('puts nothing lit under the shapes when no snow is behind', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
-    expect(firstLitPut(layersOf(main).behind)).toBe(-1);
-  });
-
-  it('puts a flake behind the glass centre at its own pixel, a flake-sized block', () => {
-    const { main, layer } = setup();
-    layer.draw(frame({ snowBehind: [flake(0, 0)] }), SITE);
-    const { behind } = layersOf(main);
-    expect(ctxOf(behind).lit).toEqual([{ x: cx * k, y: cy * k, w: flakeSize(k), h: flakeSize(k), style: hex(WHITE_BEHIND) }]);
+    expect(ctxOf(shapes).rects).toEqual([]);
+    expect(ctxOf(shapes).calls.length).toBeGreaterThan(0);
+    expect(ctxOf(fronts).rects).toEqual([]);
   });
 });
 
@@ -1056,35 +927,21 @@ function covered(ctx: FakeContext, w: number, h: number): Set<number> {
 describe('makeFineLayer: the shadows', () => {
   const k = SITE.scale;
 
-  it('fills all the shadows in one path and one fill, so a pixel under two shadows takes the shade once', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
-    const { fills } = ctxOf(layersOf(main).shapes);
-    expect(fills.length).toBe(1);
-  });
-
-  it('fills a polygon for the shadows, in the shadow ink at the shadow strength', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
-    const { fills } = ctxOf(layersOf(main).shapes);
-    expect(fills.length).toBeGreaterThan(0);
-    expect(fills.length).toBeLessThanOrEqual(globeShapes.length);
-    for (const fill of fills) {
-      const { rgb, alpha } = resolved(fill);
-      expect(rgb).toBe(0x1d3350);
-      expect(alpha).toBeCloseTo(0.32, 9);
-    }
-  });
-
-  it('fills every shadow before the first face is drawn, so the shadows are under the shapes', () => {
+  it('fills all the shadows in one path and one fill (a pixel under two takes the shade once), in the shadow ink at the shadow strength, before the first face', () => {
     const { main, layer } = setup();
     for (const turn of [0.4, 2.2]) {
       layer.draw(frame({ turn }), SITE);
       const ctx = ctxOf(layersOf(main).shapes);
-      expect(ctx.fills.length).toBeGreaterThan(0);
-      const lastFill = Math.max(...ctx.fills.map((f) => f.seq));
-      const firstFace = Math.min(...ctx.drawAt);
-      expect(lastFill).toBeLessThan(firstFace);
+      const { fills } = ctx;
+      expect(fills.length).toBe(1);
+      expect(fills.length).toBeLessThanOrEqual(globeShapes.length);
+      for (const fill of fills) {
+        const { rgb, alpha } = resolved(fill);
+        expect(rgb).toBe(0x1d3350);
+        expect(alpha).toBeCloseTo(0.32, 9);
+      }
+      // The shadows are under the shapes.
+      expect(Math.max(...fills.map((f) => f.seq))).toBeLessThan(Math.min(...ctx.drawAt));
       ctx.fills.length = 0;
       ctx.drawAt.length = 0;
     }
@@ -1092,9 +949,7 @@ describe('makeFineLayer: the shadows', () => {
 
   it('covers the device pixels renderShadowSteps covers at the same scale: the same shadow on the screen\'s grid, disc clip included', () => {
     for (const turn of [0.4, 1.7, 3.0, 5.9]) {
-      page.made.length = 0;
-      page.order.length = 0;
-      const { main, layer } = setup();
+      const { main, layer } = fresh();
       layer.draw(frame({ turn }), SITE);
       const dw = BW * k;
       const dh = BH * k;
@@ -1118,9 +973,7 @@ describe('makeFineLayer: the shadows', () => {
     it(`puts no shadow pixel outside the floor disc, at scale ${site.scale} and several turns`, () => {
       const { cx, cy } = LAYOUT.globe;
       for (const turn of [0, 0.4, 2.5, 4.4]) {
-        page.made.length = 0;
-        page.order.length = 0;
-        const { main, layer } = setup();
+        const { main, layer } = fresh();
         layer.draw(frame({ turn }), site);
         const dw = BW * site.scale;
         const cover = covered(ctxOf(layersOf(main).shapes), dw, BH * site.scale);
@@ -1143,20 +996,19 @@ describe('makeFineLayer: the shadows', () => {
     const ctx = ctxOf(layersOf(main).shapes);
     // Each fill is made inside a clip (the disc), and at least one polygon alone reaches past it.
     for (const fill of ctx.fills) expect(fill.clips.length).toBeGreaterThan(0);
-    const dw = BW * k;
-    const dh = BH * k;
-    let beyond = 0;
-    for (const fill of ctx.fills) {
-      for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) if (fill.region(x + 0.5, y + 0.5) && !fill.clips.every((c) => c(x + 0.5, y + 0.5))) beyond += 1;
-    }
+    const cutBy = (fills: Fill[]): number => {
+      let cut = 0;
+      for (const fill of fills) {
+        for (let y = 0; y < BH * k; y++) for (let x = 0; x < BW * k; x++) if (fill.region(x + 0.5, y + 0.5) && !fill.clips.every((c) => c(x + 0.5, y + 0.5))) cut += 1;
+      }
+      return cut;
+    };
     // Some shape stands near the rim for at least one turn: sweep and require the clip to have cut something.
-    let cut = beyond;
+    let cut = cutBy(ctx.fills);
     for (const turn of [1.0, 2.0, 3.0, 4.0, 5.0]) {
       ctx.fills.length = 0;
       layer.draw(frame({ turn }), SITE);
-      for (const fill of ctx.fills) {
-        for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) if (fill.region(x + 0.5, y + 0.5) && !fill.clips.every((c) => c(x + 0.5, y + 0.5))) cut += 1;
-      }
+      cut += cutBy(ctx.fills);
     }
     expect(cut).toBeGreaterThan(0);
   });
@@ -1211,7 +1063,7 @@ describe('makeFineLayer: the shadows', () => {
     }
   });
 
-  it('does not keep last frame\'s shadows: the layer is cleared before the fills of a frame', () => {
+  it('does not keep last frame\'s shadows (the layer is cleared before the fills of a frame), and restores the context so the disc clip does not leak', () => {
     const { main, layer } = setup();
     layer.draw(frame({ turn: 0.4 }), SITE);
     const ctx = ctxOf(layersOf(main).shapes);
@@ -1220,35 +1072,9 @@ describe('makeFineLayer: the shadows', () => {
     layer.draw(frame({ turn: 0.9 }), SITE);
     expect(ctx.clears.length).toBeGreaterThan(clears);
     expect(ctx.fills.length).toBeGreaterThan(fills);
-    // The clear came before this frame's first fill.
     expect(ctx.fills[fills]?.seq).toBeGreaterThan(-1);
-  });
-
-  it('restores the context after the shadows: the disc clip does not leak onto the faces or the next frame', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
-    layer.draw(frame({ turn: 1.1 }), SITE);
-    const ctx = ctxOf(layersOf(main).shapes);
     expect(ctx.restores).toBe(ctx.saves);
     expect(ctx.matrix).toEqual(IDENTITY);
-    // No face is drawn inside the disc clip: the faces' own saves hold no region from the shadows.
-    const lastFill = Math.max(...ctx.fills.map((f) => f.seq));
-    expect(lastFill).toBeGreaterThanOrEqual(0);
-  });
-
-  it('draws no shadow and does not throw with no 2d context', () => {
-    page.contextless = true;
-    const { layer } = setup();
-    expect(() => layer.draw(frame(), SITE)).not.toThrow();
-  });
-
-  it('throws for a non-finite turn before drawing any shadow', () => {
-    const { main, layer } = setup();
-    layer.draw(frame(), SITE);
-    const ctx = ctxOf(layersOf(main).shapes);
-    ctx.fills.length = 0;
-    expect(() => layer.draw(frame({ turn: Number.NaN }), SITE)).toThrow(RangeError);
-    expect(ctx.fills).toHaveLength(0);
   });
 });
 
@@ -1273,34 +1099,27 @@ describe('makeFineLayer: the base', () => {
     return image;
   };
 
-  it('draws true and puts the base on its own canvas at BASE_WIDTH x BASE_ROWS art pixels at the screen\'s size', () => {
-    const { main, layer } = setup();
-    expect(layer.draw(frame(), SITE)).toBe(true);
-    const canvas = baseOf(main);
-    expect(canvas.width).toBe(BASE_WIDTH * SITE.scale);
-    expect(canvas.height).toBe(BASE_ROWS * SITE.scale);
-  });
-
   for (const [name, site] of [
     ['scale 3, ratio 1.5', SITE],
-    ['a fractional ratio', { scale: 5, ratio: 1.25, left: 12.8 }],
-    ['a narrow window: left negative', { scale: 3, ratio: 1.5, left: -41.333333333333336 }],
+    ['a fractional ratio', FRACTIONAL],
+    ['a narrow window: left negative', NARROW],
   ] as [string, FineSite][]) {
     it(`${name}: sits centred on the globe with its top ${BASE_SINK} rows above the ground line, in CSS pixels`, () => {
       const { main, layer } = setup();
       layer.draw(frame(), site);
       const canvas = baseOf(main);
       const css = site.scale / site.ratio;
-      expect(px(canvas.style.left as unknown as number)).toBeCloseTo(site.left + (LAYOUT.globe.cx - BASE_WIDTH / 2) * css, 6);
-      expect(px(canvas.style.top as unknown as number)).toBeCloseTo((LAYOUT.groundTop - BASE_SINK) * css, 6);
-      expect(px(canvas.style.width as unknown as number)).toBeCloseTo(BASE_WIDTH * css, 6);
-      expect(px(canvas.style.height as unknown as number)).toBeCloseTo(BASE_ROWS * css, 6);
+      expect(px(canvas.style.left)).toBeCloseTo(site.left + (LAYOUT.globe.cx - BASE_WIDTH / 2) * css, 6);
+      expect(px(canvas.style.top)).toBeCloseTo((LAYOUT.groundTop - BASE_SINK) * css, 6);
+      expect(px(canvas.style.width)).toBeCloseTo(BASE_WIDTH * css, 6);
+      expect(px(canvas.style.height)).toBeCloseTo(BASE_ROWS * css, 6);
     });
   }
 
-  it.each([0, 0.5, 2.2])('puts exactly what renderBase draws at the screen\'s size (turn %s): hard colours, clear elsewhere', (turn) => {
+  it.each([0, 0.5, 2.2])('draws true and puts exactly what renderBase draws on the base canvas at the screen\'s size (turn %s): hard colours, clear elsewhere', (turn) => {
     const { main, layer } = setup();
-    layer.draw(frame({ turn }), SITE);
+    expect(layer.draw(frame({ turn }), SITE)).toBe(true);
+    expect([baseOf(main).width, baseOf(main).height]).toEqual([BASE_WIDTH * SITE.scale, BASE_ROWS * SITE.scale]);
     const image = baseImage(main);
     expect(image.width).toBe(BASE_WIDTH * SITE.scale);
     expect(image.height).toBe(BASE_ROWS * SITE.scale);
@@ -1367,16 +1186,14 @@ describe('makeFineLayer: the glass layer (XMAS-92b)', () => {
   const withGlass = (glass: GlassLayer | undefined, over: Partial<FineFrame> = {}): FineFrame => ({ ...frame(over), glass }) as FineFrame;
   const glassCanvas = (main: FakeCanvas): FakeCanvas => page.order[page.order.indexOf(main) + 1] as FakeCanvas;
   /** The put images that hold the glass's own pixels (one art pixel each), wherever the layer builds them. */
-  const glassPuts = (): Put[] => page.log.flatMap((o) => (o.op === 'put' && o.put.width === GLASS.width && o.put.height === GLASS.height ? [o.put] : []));
+  const glassPuts = (): Put[] => page.puts.filter((put) => put.width === GLASS.width && put.height === GLASS.height);
   /** The glass's corner places, in the box's device pixels, when drawn upright. */
   const uprightCorners = (g: GlassLayer): Point[] => {
     const [x0, y0] = [(g.left - BOX.left) * K, (g.top - BOX.top) * K];
     return [[x0, y0], [x0 + g.width * K, y0], [x0, y0 + g.height * K], [x0 + g.width * K, y0 + g.height * K]];
   };
   function drawGlass(lean: number, glass: GlassLayer = GLASS): { main: FakeCanvas; glassCtx: FakeContext; shapesCtx: FakeContext } {
-    page.made.length = 0;
-    page.order.length = 0;
-    const { main, layer } = setup();
+    const { main, layer } = fresh();
     layer.draw(withGlass(glass, { lean }), SITE);
     return { main, glassCtx: ctxOf(glassCanvas(main)), shapesCtx: ctxOf(page.order[3] as FakeCanvas) };
   }
@@ -1405,39 +1222,26 @@ describe('makeFineLayer: the glass layer (XMAS-92b)', () => {
     expect(page.order[0]).toBe(main);
   });
 
-  it('at lean 0 lands the glass upright at its box position, one art pixel per scale device pixels, in one draw', () => {
-    const { glassCtx } = drawGlass(0);
-    expect(glassCtx.calls).toHaveLength(1);
-    const quad = drawnQuad(glassCtx.calls[0] as Call) as Point[];
-    uprightCorners(GLASS).forEach(([x, y], i) => {
-      expect(quad[i]?.[0] ?? Number.NaN).toBeCloseTo(x, 6);
-      expect(quad[i]?.[1] ?? Number.NaN).toBeCloseTo(y, 6);
-    });
-    expect(glassCtx.calls[0]?.smoothing, 'nearest-neighbour').toBe(false);
-  });
+  /** The first face the shapes layer draws at a lean with the glass on. */
+  const firstFace = (ctx: FakeContext): Call => ctx.calls.find((c) => c.source.width < BW * K) as Call;
 
-  it('at a lean draws the glass once under the shapes\' shear: every corner moves lean x (box bottom - y) across, and nothing is copied in rows', () => {
-    for (const lean of [0.3, -0.35]) {
+  it('lands the glass upright at its box position at lean 0, and at a lean draws it once under the shapes\' shear: every corner moves lean x (box bottom - y) across, nothing copied in rows', () => {
+    for (const lean of [0, 0.3, -0.35]) {
       const { glassCtx, shapesCtx } = drawGlass(lean);
       expect(glassCtx.calls, `one draw at lean ${lean}`).toHaveLength(1);
+      expect(glassCtx.calls[0]?.smoothing, 'nearest-neighbour').toBe(false);
       const quad = drawnQuad(glassCtx.calls[0] as Call) as Point[];
       uprightCorners(GLASS).forEach(([x, y], i) => {
-        expect(quad[i]?.[0] ?? Number.NaN, `corner ${i} x`).toBeCloseTo(x + lean * (BH * K - y), 4);
-        expect(quad[i]?.[1] ?? Number.NaN, `corner ${i} y`).toBeCloseTo(y, 4);
+        expect(quad[i]?.[0] ?? Number.NaN, `corner ${i} x`).toBeCloseTo(x + lean * (BH * K - y), lean === 0 ? 6 : 4);
+        expect(quad[i]?.[1] ?? Number.NaN, `corner ${i} y`).toBeCloseTo(y, lean === 0 ? 6 : 4);
       });
       // The shapes get the very same shear: a point at the same height moves the same across.
-      const face = shapesCtx.calls.find((c) => c.source.width < BW * K) as Call;
-      const upFace = drawGlassShapes();
-      const [fx, fy] = (drawnQuad(face) as Point[])[0] as Point;
-      const [ux, uy] = (drawnQuad(upFace) as Point[])[0] as Point;
+      const [fx, fy] = (drawnQuad(firstFace(shapesCtx)) as Point[])[0] as Point;
+      const [ux, uy] = (drawnQuad(firstFace(drawGlass(0).shapesCtx)) as Point[])[0] as Point;
       expect(fx - ux).toBeCloseTo(lean * (BH * K - uy), 4);
       expect(fy).toBeCloseTo(uy, 4);
     }
   });
-  /** The first face the shapes layer draws at lean 0 with the glass on. */
-  function drawGlassShapes(): Call {
-    return drawGlass(0).shapesCtx.calls.find((c) => c.source.width < BW * K) as Call;
-  }
 
   it('clears the glass canvas each frame and sizes it once: a second frame with nothing changed writes no size or style', () => {
     const { main, layer } = setup();
@@ -1582,7 +1386,7 @@ describe('makeFineLayer: the shapes canvas is redrawn only when it changes (XMAS
   });
 
   it('a new glass does not redraw the shapes', () => {
-    const { main, layer } = setup();
+    const { layer } = setup();
     const glass = (fill: number): GlassLayer => ({ left: BOX.left + 10, top: BOX.top + 5, width: 20, height: 30, pixels: new Uint32Array(600).fill(fill) });
     layer.draw({ ...frame(), glass: glass(0x336699) }, SITE);
     const ctx = ctxOf(page.order[3] as FakeCanvas);
@@ -1595,40 +1399,29 @@ describe('makeFineLayer: the shapes canvas is redrawn only when it changes (XMAS
   });
 });
 
+const blank = (): FineTrace => ({ glassMs: -1, behindMs: -1, shapesMs: -1, frontMs: -1, baseMs: -1, shapesCalls: -1, behindFlakes: -1, frontFlakes: -1, shapesRedrawn: false, glassPainted: false, baseBuilt: false, santaMs: -1, santaPaints: -1, santaSame: -1, shapesClipMs: -1, shapesDrawMs: -1, shapesSameInputs: -1, totalMs: -1, inputsMs: -1, shadowsMs: -1, facesMs: -1, shapesRestMs: -1, width: 0, height: 0, baseWidth: 0, baseHeight: 0 });
+/** performance.now moves 2 ms per call, so any timed section reads above 0. */
+const tick = (): ReturnType<typeof vi.spyOn> => {
+  let t = 0;
+  return vi.spyOn(performance, 'now').mockImplementation(() => (t += 2));
+};
+
 describe('makeFineLayer: the frame trace (XMAS-102)', () => {
-  const blank = (): FineTrace => ({ glassMs: -1, behindMs: -1, shapesMs: -1, frontMs: -1, baseMs: -1, shapesCalls: -1, behindFlakes: -1, frontFlakes: -1, shapesRedrawn: false, glassPainted: false, baseBuilt: false, santaMs: -1, santaPaints: -1, santaSame: -1, shapesClipMs: -1, shapesDrawMs: -1, shapesSameInputs: -1, totalMs: -1, inputsMs: -1, shadowsMs: -1, facesMs: -1, shapesRestMs: -1, width: 0, height: 0, baseWidth: 0, baseHeight: 0 });
-  /** performance.now moves 2 ms per call, so any timed section reads above 0. */
-  const tick = (): ReturnType<typeof vi.spyOn> => {
-    let t = 0;
-    return vi.spyOn(performance, 'now').mockImplementation(() => (t += 2));
-  };
+  beforeEach(() => {
+    tick();
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it('fills the trace: each section timed, draw calls counted, canvas sizes in device pixels', () => {
-    tick();
     const { layer } = setup();
     const trace = blank();
     layer.draw(frame({ santaTimeMs: 3000 }), { ...SITE, trace });
     for (const ms of [trace.glassMs, trace.behindMs, trace.shapesMs, trace.frontMs, trace.baseMs]) expect(ms).toBeGreaterThan(0);
     expect(trace).toMatchObject({ shapesRedrawn: true, baseBuilt: true });
-    expect(trace.shapesCalls).toBeGreaterThan(0);
-    expect(trace.width).toBeGreaterThan(0);
-    expect(trace.height).toBeGreaterThan(0);
-    expect(trace.baseWidth).toBeGreaterThan(0);
-    expect(trace.baseHeight).toBeGreaterThan(0);
-  });
-
-  it('a repeated identical still frame redraws no shapes and builds no base: no draw calls', () => {
-    tick();
-    const { layer } = setup();
-    const trace = blank();
-    layer.draw(frame(), { ...SITE, trace });
-    layer.draw(frame(), { ...SITE, trace });
-    expect(trace).toMatchObject({ shapesRedrawn: false, shapesCalls: 0, behindFlakes: 0, frontFlakes: 0, glassPainted: false, baseBuilt: false });
+    for (const n of [trace.shapesCalls, trace.width, trace.height, trace.baseWidth, trace.baseHeight]) expect(n).toBeGreaterThan(0);
   });
 
   it('counts the shapes canvas drawImage calls and the flakes in each snow layer, per frame', () => {
-    tick();
     const { main, layer } = setup();
     const flakes = (n: number, depth: number): SnowStep[] => Array.from({ length: n }, (_, i) => ({ x: i, y: i, colour: 0xaebcf0, shape: [[0, 0]], depth }));
     const trace = blank();
@@ -1648,8 +1441,7 @@ describe('makeFineLayer: the frame trace (XMAS-102)', () => {
     expect(trace).toMatchObject({ shapesRedrawn: false, shapesCalls: 0, behindFlakes: 4, frontFlakes: 1 });
   });
 
-  it('splits a shapes redraw into clip ms and drawImage ms (XMAS-108), and a still frame reads 0 for both', () => {
-    tick();
+  it('splits a shapes redraw into clip ms and drawImage ms (XMAS-108); a repeated identical still frame redraws no shapes, builds no base and reads 0 for all of it', () => {
     const { layer } = setup();
     const trace = blank();
     layer.draw(frame(), { ...SITE, trace });
@@ -1657,11 +1449,10 @@ describe('makeFineLayer: the frame trace (XMAS-102)', () => {
     expect(trace.shapesDrawMs).toBeGreaterThan(0);
     expect(trace.shapesMs).toBeGreaterThanOrEqual(trace.shapesClipMs);
     layer.draw(frame(), { ...SITE, trace });
-    expect(trace).toMatchObject({ shapesRedrawn: false, shapesClipMs: 0, shapesDrawMs: 0, shapesSameInputs: 0 });
+    expect(trace).toMatchObject({ shapesRedrawn: false, shapesCalls: 0, behindFlakes: 0, frontFlakes: 0, glassPainted: false, baseBuilt: false, shapesClipMs: 0, shapesDrawMs: 0, shapesSameInputs: 0 });
   });
 
   it('counts a redraw with the same turn, scale, lean and size as same inputs: Santa moving, then the wipe frame; not the first draw', () => {
-    tick();
     const { layer } = setup();
     const trace = blank();
     layer.draw(frame({ santaTimeMs: 3000 }), { ...SITE, trace });
@@ -1675,7 +1466,6 @@ describe('makeFineLayer: the frame trace (XMAS-102)', () => {
   });
 
   it('is not same inputs when the turn, lean or place changed since the last redraw, even with Santa', () => {
-    tick();
     const { layer } = setup();
     const trace = blank();
     layer.draw(frame({ santaTimeMs: 3000 }), { ...SITE, trace });
@@ -1688,7 +1478,7 @@ describe('makeFineLayer: the frame trace (XMAS-102)', () => {
   });
 
   it('without a trace it never reads the clock and draws the same as with one', () => {
-    const spy = tick();
+    const spy = vi.mocked(performance.now);
     const plain = setup();
     plain.layer.draw(frame({ santaTimeMs: 3000 }), SITE);
     expect(spy).not.toHaveBeenCalled();
@@ -1700,10 +1490,8 @@ describe('makeFineLayer: the frame trace (XMAS-102)', () => {
 
 // XMAS-108: with Santa on and nothing else changed, the shapes are cached below and above him and blitted.
 describe('makeFineLayer: the shapes cached below and above Santa (XMAS-108)', () => {
-  const blank = (): FineTrace => ({ glassMs: -1, behindMs: -1, shapesMs: -1, frontMs: -1, baseMs: -1, shapesCalls: -1, behindFlakes: -1, frontFlakes: -1, shapesRedrawn: false, glassPainted: false, baseBuilt: false, santaMs: -1, santaPaints: -1, santaSame: -1, shapesClipMs: -1, shapesDrawMs: -1, shapesSameInputs: -1, totalMs: -1, inputsMs: -1, shadowsMs: -1, facesMs: -1, shapesRestMs: -1, width: 0, height: 0, baseWidth: 0, baseHeight: 0 });
   beforeEach(() => {
-    let t = 0;
-    vi.spyOn(performance, 'now').mockImplementation(() => (t += 2));
+    tick();
   });
   afterEach(() => vi.restoreAllMocks());
 
