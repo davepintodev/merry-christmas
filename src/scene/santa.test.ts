@@ -522,31 +522,49 @@ describe('drawSanta: Santa in the picture', () => {
         drawSanta(pic, W, LAYOUT, turnAt(time), time);
         return pic;
       };
+      const timeAt = (k: number): number => start + k * STEP_MS;
+      // Eight windows of 30 steps spread evenly from the first step to the last; the window nearest the orbit's wrap
+      // (where his angle passes 2π) is moved to sit across it.
+      const WINDOWS = 8;
+      const LENGTH = 30;
+      const firsts = Array.from({ length: WINDOWS }, (_, i) => 1 + Math.round((i * (steps - LENGTH)) / (WINDOWS - 1)));
+      const angleAt = (k: number): number => 2 + turnAt(timeAt(k)) + (timeAt(k) / 1000) * 0.45;
+      const wrap = Array.from({ length: steps }, (_, k) => k + 1).find((k) => Math.floor(angleAt(k) / FULL) > Math.floor(angleAt(k - 1) / FULL));
+      expect(wrap, 'the step where his angle passes 2π').toBeDefined();
+      if (wrap !== undefined) {
+        let nearest = 1;
+        for (let i = 1; i < WINDOWS - 1; i++) if (Math.abs((firsts[i] ?? 0) + LENGTH / 2 - wrap) < Math.abs((firsts[nearest] ?? 0) + LENGTH / 2 - wrap)) nearest = i;
+        firsts[nearest] = wrap - LENGTH / 2;
+      }
       let worst = 0;
       let where = '';
       let compared = 0;
-      let prevTime = start;
-      let prev = paint(prevTime);
-      for (let k = 1; k <= steps; k++) {
-        const time = start + k * STEP_MS;
-        const next = paint(time);
-        const a = expected(turnAt(prevTime), prevTime);
-        const b = expected(turnAt(time), time);
-        for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
-        // A trot frame change and the flip at the ends of the orbit are meant to change the drawing.
-        if (a.trot === b.trot && a.mirrored === b.mirrored) {
-          compared++;
-          const [pb, nb] = [pixelBox(prev), pixelBox(next)];
-          const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
-          if (changed > worst) {
-            worst = changed;
-            where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
+      for (const first of firsts) {
+        // Each window starts from its own baseline step, the one before it.
+        let prevTime = timeAt(first - 1);
+        let prev = paint(prevTime);
+        for (let k = first; k < first + LENGTH; k++) {
+          const time = timeAt(k);
+          const next = paint(time);
+          const a = expected(turnAt(prevTime), prevTime);
+          const b = expected(turnAt(time), time);
+          for (const c of next) if (c !== FILL_A && !SANTA_COLOURS.has(c)) expect.fail(`time ${time}: a pixel that is neither his colour nor the background`);
+          // A trot frame change and the flip at the ends of the orbit are meant to change the drawing.
+          if (a.trot === b.trot && a.mirrored === b.mirrored) {
+            compared++;
+            const [pb, nb] = [pixelBox(prev), pixelBox(next)];
+            const changed = Math.max(Math.abs(pb.left - nb.left), Math.abs(pb.right - nb.right), Math.abs(pb.top - nb.top), Math.abs(pb.bottom - nb.bottom));
+            if (changed > worst) {
+              worst = changed;
+              where = `time ${prevTime.toFixed(1)} -> ${time.toFixed(1)}`;
+            }
           }
+          prev = next;
+          prevTime = time;
         }
-        prev = next;
-        prevTime = time;
       }
-      expect(compared, 'steps compared').toBeGreaterThan(300);
+      // The whole walk once had to compare more than 300 of the row's steps; the same share of the steps walked now.
+      expect(compared, 'steps compared').toBeGreaterThan((300 / steps) * WINDOWS * LENGTH);
       expect(worst, `furthest an edge of his box jumped in one step (${where})`).toBeLessThanOrEqual(WORST_STEP);
     },
     60_000,

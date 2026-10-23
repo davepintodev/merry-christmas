@@ -135,9 +135,17 @@ const MAX_SKY_STEP = 8;
 const MIN_HORIZON_CHROMA = 36;
 const MIN_HORIZON_SATURATION = 0.3;
 
-/** 3 seconds at 60 steps a second. */
-function sweep(phase: PhaseReading, seed = SEED): SceneFrame[] {
-  return Array.from({ length: 180 }, (_, i) => sceneFrame(input({ phase, seed, time: T + (i * 1000) / 60 })));
+const sweeps = new Map<string, readonly SceneFrame[]>();
+
+/** 3 seconds at 60 steps a second, rendered once per phase and seed: the callers only read the frames. */
+function sweep(phase: PhaseReading, seed = SEED): readonly SceneFrame[] {
+  const key = `${phase.from}|${phase.to}|${phase.share}|${seed}`;
+  let frames = sweeps.get(key);
+  if (frames === undefined) {
+    frames = Array.from({ length: 180 }, (_, i) => sceneFrame(input({ phase, seed, time: T + (i * 1000) / 60 })));
+    sweeps.set(key, frames);
+  }
+  return frames;
 }
 
 describe('sceneFrame: the picture', () => {

@@ -3,10 +3,10 @@
 // `pnpm run test:unit` runs, and the loopback address `pnpm frames` serves on.
 // Pictures are PNGs written with tools/png.ts; only the update command writes them.
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { BASE_ROWS } from '../src/scene/base-fine.ts';
 import { sceneFrame } from '../src/scene/frame.ts';
 import { BASE_SINK } from '../src/scene/globe.ts';
@@ -153,15 +153,29 @@ describe('renderReference', () => {
 });
 
 describe('updateReferences and referenceProblems', () => {
-  function freshDir(): string {
+  /** A folder updateReferences wrote, after checking it wrote every picture. */
+  function updatedDir(): string {
     const dir = tempDir();
     const written = updateReferences(dir);
     expect(written.map((f) => path.basename(f)).sort()).toEqual(FILES);
     return dir;
   }
 
+  // Rendering every reference is slow, so it is done once here; each test gets its own copy.
+  let golden = '';
+  beforeAll(() => {
+    golden = updatedDir();
+  }, 120_000);
+
+  /** A folder of its own holding what updateReferences writes. */
+  function freshDir(): string {
+    const dir = tempDir();
+    cpSync(golden, dir, { recursive: true });
+    return dir;
+  }
+
   it('writes exactly one PNG per reference, which then matches', () => {
-    const dir = freshDir();
+    const dir = updatedDir();
     expect(readdirSync(dir).sort()).toEqual(FILES);
     expect(referenceProblems(dir)).toEqual([]);
   });

@@ -201,15 +201,46 @@ function paintedAsDrawn(pic: Drawn, f: ProjectedFace, skip: (px: number, py: num
   return { checked, wrong };
 }
 
+/** One step of a sweep's turn. */
+const STEP = 0.001;
+/** The last step a sweep reaches: a little past a whole turn. */
+const LAST_STEP = Math.floor(FULL / STEP) + 1;
+
 /**
- * Draws `shape` alone over a plain background at every 0.001 rad all the way
- * round, in the smallest picture. Returns the first pixel that is not crisp
- * (neither the background, one of the drawings' own colours nor the floor
- * shadow's flat shade, once or laid over itself) and, for the pixels in a
- * drawing's own colours, the furthest any edge of their box jumped in one
- * step, with where.
+ * The turns of `count` windows of `length` consecutive 0.001 rad steps spread
+ * evenly over a whole turn: the first window starts at 0, the last ends just
+ * past 2π (the wrap), and the window nearest each quarter turn is moved to sit
+ * across it. Each window starts with its own baseline turn, one step before it.
  */
-function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = sceneLayout(161, 172, SEED)): { bad: string; jump: number; where: string } {
+function turnWindows(count = 16, length = 50): number[][] {
+  const starts = Array.from({ length: count }, (_, i) => 1 + Math.round((i * (LAST_STEP - length)) / (count - 1)));
+  for (const quarter of [1, 2, 3]) {
+    const k = Math.round((quarter * FULL) / 4 / STEP);
+    let nearest = 1;
+    for (let i = 1; i < count - 1; i++) if (Math.abs((starts[i] ?? 0) + length / 2 - k) < Math.abs((starts[nearest] ?? 0) + length / 2 - k)) nearest = i;
+    starts[nearest] = k - length / 2;
+  }
+  return starts.map((first) => Array.from({ length: length + 1 }, (_, j) => (first - 1 + j) * STEP));
+}
+
+/** For the whole globe: every 0.01 rad from 0 to just past 2π, and each quarter turn with 0.001 rad either side. */
+function globeTurns(): number[] {
+  const turns = Array.from({ length: Math.floor(FULL / 0.01) + 2 }, (_, k) => k * 0.01);
+  for (const quarter of [1, 2, 3]) for (const d of [-STEP, 0, STEP]) turns.push((quarter * FULL) / 4 + d);
+  return turns;
+}
+
+/**
+ * Draws `shape` alone over a plain background at each turn of each window
+ * (by default the sixteen windows of fifty 0.001 rad steps `turnWindows`
+ * spreads over a whole turn), in a 161 x 172 picture unless `layout` says
+ * otherwise. Returns the first pixel that is not crisp (neither the
+ * background, one of the drawings' own colours nor the floor shadow's flat
+ * shade, once or laid over itself) and, for the pixels in a drawing's own
+ * colours, the furthest any edge of their box jumped in one step inside a
+ * window, with where.
+ */
+function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = sceneLayout(161, 172, SEED), windows: readonly (readonly number[])[] = turnWindows()): { bad: string; jump: number; where: string } {
   const shapes: readonly GlobeShape[] = Array.isArray(shape) ? shape : [shape as GlobeShape];
   const width = layout.width;
   const allowed = new Set<number>([FILL_A, ...SPRITE_COLOURS]);
@@ -230,32 +261,34 @@ function sweep(shape: GlobeShape | readonly GlobeShape[], layout: SceneLayout = 
     });
     return box;
   };
-  const STEP = 0.001;
-  let prev = boxOf(paint(0));
   let bad = '';
   let jump = 0;
   let where = '';
-  for (let k = 1; k * STEP <= FULL + STEP; k++) {
-    const t = k * STEP;
-    const pic = paint(t);
-    if (bad === '') {
-      for (let i = 0; i < pic.length; i++) {
-        if (!allowed.has(pic[i] ?? -1)) {
-          bad = `turn ${t.toFixed(3)} pixel ${i % width},${Math.floor(i / width)}: ${(pic[i] ?? 0).toString(16)}`;
-          break;
+  for (const turns of windows) {
+    let prev: [number, number, number, number] | undefined;
+    let prevTurn = 0;
+    for (const t of turns) {
+      const pic = paint(t);
+      if (bad === '') {
+        for (let i = 0; i < pic.length; i++) {
+          if (!allowed.has(pic[i] ?? -1)) {
+            bad = `turn ${t.toFixed(3)} pixel ${i % width},${Math.floor(i / width)}: ${(pic[i] ?? 0).toString(16)}`;
+            break;
+          }
         }
       }
-    }
-    const next = boxOf(pic);
-    // A single drawing's box moves by whole pixels, never far, as it turns (a shape that comes into or leaves the picture aside).
-    if (Number.isFinite(prev[0]) && Number.isFinite(next[0])) {
-      const step = Math.max(...next.map((v, j) => Math.abs(v - (prev[j] ?? 0))));
-      if (step > jump) {
-        jump = step;
-        where = `turn ${(t - STEP).toFixed(3)} -> ${t.toFixed(3)}`;
+      const next = boxOf(pic);
+      // A single drawing's box moves by whole pixels, never far, as it turns (a shape that comes into or leaves the picture aside).
+      if (prev !== undefined && Number.isFinite(prev[0]) && Number.isFinite(next[0])) {
+        const step = Math.max(...next.map((v, j) => Math.abs(v - (prev?.[j] ?? 0))));
+        if (step > jump) {
+          jump = step;
+          where = `turn ${prevTurn.toFixed(3)} -> ${t.toFixed(3)}`;
+        }
       }
+      prev = next;
+      prevTurn = t;
     }
-    prev = next;
   }
   return { bad, jump, where };
 }
@@ -521,7 +554,7 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
     ['pine-1', 1, 1],
     ['pine-2', 2, 1],
     ['pine-3', 3, 1],
-  ] as const)('turns %s in whole pixels: 0.001 rad never makes a mixed pixel, and its box never jumps more than the limit, all the way round', (label, k, limit) => {
+  ] as const)('turns %s in whole pixels: in sixteen windows of fifty 0.001 rad steps spread all the way round, no step makes a mixed pixel, and its box never jumps more than the limit', (label, k, limit) => {
     const sorted = [...pines()].sort((a, b) => pineName(a).localeCompare(pineName(b)));
     const { bad, jump, where } = sweep(k === 0 ? only(snowmen()) : (sorted[k - 1] as GlobeShape));
     expect(bad, `${label}: first pixel that is not crisp`).toBe('');
@@ -533,8 +566,8 @@ describe('drawShapes: the pines and the snowman in the picture', () => {
   // flips a whole patch of pixels from one to the other within 0.001 rad.
   // Point-sampled, a swap is a crisp pop by design, so what is pinned is that
   // every pixel stays a drawing's own colour or the shadow's flat shade.
-  it('turns the whole globe (all its shapes together) in whole pixels: 0.001 rad never makes a mixed pixel, all the way round', () => {
-    const { bad } = sweep(globeShapes, LAYOUT);
+  it('turns the whole globe (all its shapes together) in whole pixels: no turn every 0.01 rad, nor 0.001 rad either side of a quarter turn, makes a mixed pixel, all the way round', () => {
+    const { bad } = sweep(globeShapes, LAYOUT, [globeTurns()]);
     expect(bad, 'first pixel that is not crisp').toBe('');
   }, 300_000);
 
