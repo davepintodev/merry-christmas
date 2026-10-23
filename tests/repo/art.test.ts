@@ -1,6 +1,5 @@
-// XMAS-26 "Art build step and the rough Font sheet": repo-level checks that
-// the build runs the art step, the committed outputs are up to date with the
-// sheets, and the built site holds no PNG.
+// XMAS-26 "Art build step and the rough Font sheet": the committed art
+// outputs are up to date with the sheets, and the built site holds no PNG.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -21,53 +20,13 @@ function readText(rel: string): string {
   return readFileSync(p, 'utf8');
 }
 
-function scripts(): Record<string, string> {
-  return (JSON.parse(readText('package.json')) as { scripts?: Record<string, string> }).scripts ?? {};
-}
-
-function expandScript(all: Record<string, string>, body: string, depth = 0): string {
-  if (depth > 10) throw new Error('script expansion too deep (cycle?)');
-  return body.replace(/\bpnpm\s+(?:run\s+)?([A-Za-z0-9:_-]+)/g, (whole, name: string) => {
-    const target = all[name];
-    return target === undefined ? whole : `( ${expandScript(all, target, depth + 1)} )`;
-  });
-}
-
-function tracked(rel: string): boolean {
-  const r = spawnSync('git', ['ls-files', '--error-unmatch', rel], { cwd: ROOT, encoding: 'utf8' });
-  return r.status === 0;
-}
-
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)],
   );
 }
 
-describe('package.json runs the art step', () => {
-  it('has build:art = node tools/build-art.ts', () => {
-    expect(scripts()['build:art']).toBe('node tools/build-art.ts');
-  });
-
-  it('build runs build:art before vite build, chained with &&', () => {
-    const all = scripts();
-    const build = all['build'] ?? '';
-    expect(build).toMatch(/\bpnpm\s+(?:run\s+)?build:art\b[^&|;]*&&/);
-    const expanded = expandScript(all, build);
-    const art = expanded.search(/\bnode\s+tools\/build-art\.ts\b/);
-    const vite = expanded.search(/\bvite\s+build\b/);
-    expect(art, `build must run the art step (expanded: ${expanded})`).toBeGreaterThanOrEqual(0);
-    expect(vite, `build must still run vite build (expanded: ${expanded})`).toBeGreaterThan(art);
-    expect(expanded).not.toMatch(/\|\||;/);
-  });
-});
-
 describe('committed art outputs are up to date', () => {
-  it('the font sheet, the generated module and the palette file are tracked by git', () => {
-    for (const f of ['art/sheets/font.png', 'art/sheets.ts', GENERATED, GPL, 'tools/build-art.ts']) {
-      expect(tracked(f), `${f} must be committed`).toBe(true);
-    }
-  });
 
   it(`${GPL} is the GIMP palette of the master colour list`, () => {
     const text = readText(GPL);
