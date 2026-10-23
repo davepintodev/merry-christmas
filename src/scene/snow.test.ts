@@ -3,16 +3,8 @@
 // stepGlobeSnow call is one 1/60 s step. Coordinates are art px relative to
 // the globe centre, y grows downward, z > 0 is toward the viewer; the glass
 // has radius 56 and lying snow rests on the floor at y = 25 below the centre.
-//
-// Ordinary days: 340 flakes, about 30% in the air, falling at 6.5 px/s.
-// Christmas Day: 500 flakes, about 50% in the air. The stir lifts snow from
-// the floor and moves it in eddies; it fades to almost nothing in about 6.5 s.
-// Flakes only come to rest when the stir is below 0.25. A push moves the air
-// snow for a moment; turning the globe carries the air snow round with a lag.
-//
-// Bad input: a non-finite raise, turn or push throws (RangeError or Error)
-// and leaves the snow untouched; a negative raise either throws the same way
-// or is ignored (treated as 0) - it never lowers the stir.
+// Bad input: a non-finite raise, turn or push throws and leaves the snow
+// untouched; a negative raise throws the same way or is treated as 0.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   GLOBE_SNOW,
@@ -55,15 +47,18 @@ function moved(a: Flake, b: Flake): number {
   return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 }
 
-/** Angle about the vertical (y) axis, and its wrapped change. */
-function yaw(f: Flake): number {
-  return Math.atan2(f.z, f.x);
+/** Every flake is finite and inside the glass. */
+function expectSound(snow: GlobeSnow): void {
+  for (const f of snow.flakes) {
+    for (const v of [f.x, f.y, f.z, f.phase]) expect(Number.isFinite(v)).toBe(true);
+    expect(dist(f)).toBeLessThanOrEqual(RADIUS + 1e-9);
+  }
 }
+
+/** Change of angle about the vertical (y) axis, wrapped into [-pi, pi]. */
 function yawChange(a: Flake, b: Flake): number {
-  let d = yaw(b) - yaw(a);
-  while (d > Math.PI) d -= 2 * Math.PI;
-  while (d < -Math.PI) d += 2 * Math.PI;
-  return d;
+  const d = Math.atan2(b.z, b.x) - Math.atan2(a.z, a.x);
+  return Math.atan2(Math.sin(d), Math.cos(d));
 }
 
 function mean(xs: number[]): number {
@@ -76,8 +71,7 @@ function percentile(xs: number[], p: number): number {
 }
 
 function target(christmasDay: boolean): number {
-  const a = christmasDay ? { flakes: 500, share: 0.5 } : { flakes: 340, share: 0.3 };
-  return a.flakes * a.share;
+  return christmasDay ? 500 * 0.5 : 340 * 0.3;
 }
 
 /** "Back near the target": within 15% of the target plus 3 flakes. */
@@ -96,20 +90,27 @@ function record(snow: GlobeSnow, steps: number, inputAt: (i: number) => SnowInpu
   return out;
 }
 
+/** Every flake's (before, after) pair over each step of the recording. */
+function stepPairs(frames: Flake[][]): [Flake, Flake][] {
+  return frames.slice(1).flatMap((fr, k) => fr.map((b, i): [Flake, Flake] => [frames[k]![i]!, b]));
+}
+
 /** Indices of flakes in the air in every snapshot and never jumping more than MAX_STEP. */
 function airThroughout(frames: Flake[][], awayFromGlass = RADIUS + 1): number[] {
-  const n = frames[0]!.length;
   const keep: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let ok = true;
-    for (let k = 0; k < frames.length && ok; k++) {
-      const f = frames[k]![i]!;
-      if (f.resting || dist(f) > awayFromGlass) ok = false;
-      if (k > 0 && moved(frames[k - 1]![i]!, f) > MAX_STEP) ok = false;
-    }
+  for (let i = 0; i < frames[0]!.length; i++) {
+    const ok = frames.every((fr, k) => {
+      const f = fr[i]!;
+      return !f.resting && dist(f) <= awayFromGlass && (k === 0 || moved(frames[k - 1]![i]!, f) <= MAX_STEP);
+    });
     if (ok) keep.push(i);
   }
   return keep;
+}
+
+/** Number of lying flakes that rose without jumping, over the recording. */
+function liftedCount(frames: Flake[][]): number {
+  return stepPairs(frames).filter(([a, b]) => a.resting && !b.resting && moved(a, b) <= MAX_STEP).length;
 }
 
 afterEach(() => {
@@ -117,82 +118,56 @@ afterEach(() => {
 });
 
 describe('GLOBE_SNOW and SNOW_SETTINGS', () => {
-  it('names the ordinary amounts: 340 flakes, 30% in the air, 6.5 px/s', () => {
+  it('names the ordinary and Christmas Day amounts (340 / 500 flakes, 30% / 50% in the air, 6.5 px/s)', () => {
     expect(GLOBE_SNOW.ordinary).toEqual({ flakes: 340, airShare: 0.3, fallSpeed: 6.5 });
-  });
-
-  it('names the Christmas Day amounts: 500 flakes, 50% in the air, 6.5 px/s', () => {
     expect(GLOBE_SNOW.christmasDay).toEqual({ flakes: 500, airShare: 0.5, fallSpeed: 6.5 });
   });
 
   it('names every stir and glass number', () => {
-    expect(SNOW_SETTINGS).toMatchObject({
-      radius: 56,
-      settleSeconds: 6.5,
-      swirlLag: 1.3,
-      turbulence: 60,
-      settleBelow: 0.25,
-      throwAbove: 0.12,
-      maxStir: 1.6,
-    });
+    expect(SNOW_SETTINGS).toMatchObject({ radius: 56, settleSeconds: 6.5, swirlLag: 1.3, turbulence: 60, settleBelow: 0.25, throwAbove: 0.12, maxStir: 1.6 });
   });
 });
 
 describe('createGlobeSnow', () => {
-  it('makes 340 flakes on an ordinary day with about 30% in the air', () => {
-    const snow = createGlobeSnow(1, false);
-    expect(snow.flakes).toHaveLength(340);
-    expect(nearTarget(airCount(snow), false), `air ${airCount(snow)}`).toBe(true);
-  });
-
-  it('makes 500 flakes on Christmas Day with about 50% in the air', () => {
-    const snow = createGlobeSnow(1, true);
-    expect(snow.flakes).toHaveLength(500);
-    expect(nearTarget(airCount(snow), true), `air ${airCount(snow)}`).toBe(true);
-  });
-
-  it('starts calm: no stir', () => {
-    expect(createGlobeSnow(3, false).stir).toBe(0);
+  it.each([
+    [false, 340],
+    [true, 500],
+  ])('makes the right flake count with the right air share, calm (Christmas Day %s)', (christmasDay, flakes) => {
+    const snow = createGlobeSnow(1, christmasDay);
+    expect(snow.flakes).toHaveLength(flakes);
+    expect(nearTarget(airCount(snow), christmasDay), `air ${airCount(snow)}`).toBe(true);
+    expect(snow.stir).toBe(0);
   });
 
   it('counts the air flakes as the flakes that are not resting', () => {
     const snow = createGlobeSnow(4, true);
-    expect(airCount(snow)).toBe(snow.flakes.filter((f) => !f.resting).length);
+    const notResting = () => snow.flakes.filter((f) => !f.resting).length;
+    expect(airCount(snow)).toBe(notResting());
     run(snow, 120, input({ raise: 0.02 }));
-    expect(airCount(snow)).toBe(snow.flakes.filter((f) => !f.resting).length);
+    expect(airCount(snow)).toBe(notResting());
   });
 
   it.each([0, 1, -7, 0xffffffff, 2 ** 40 + 3, 0.5])('makes a valid globe for seed %s', (seed) => {
     const snow = createGlobeSnow(seed, false);
     expect(snow.flakes).toHaveLength(340);
-    for (const f of snow.flakes) {
-      for (const v of [f.x, f.y, f.z, f.phase]) expect(Number.isFinite(v)).toBe(true);
-      expect(dist(f)).toBeLessThanOrEqual(RADIUS + 1e-9);
-    }
+    expectSound(snow);
   });
 
-  it('lays resting flakes on the floor and keeps air flakes above it', () => {
-    const snow = createGlobeSnow(5, false);
-    for (const f of snow.flakes) {
+  it('lays resting flakes on the floor and keeps air flakes above it, and gives different seeds different snow', () => {
+    for (const f of createGlobeSnow(5, false).flakes) {
       if (f.resting) expect(Math.abs(f.y - FLOOR_Y)).toBeLessThanOrEqual(2);
       else expect(f.y).toBeLessThan(FLOOR_Y);
     }
-  });
-
-  it('gives different seeds different snow', () => {
     expect(snap(createGlobeSnow(1, false))).not.toEqual(snap(createGlobeSnow(2, false)));
   });
 
   it('uses no Math.random and no clock', () => {
-    vi.spyOn(Math, 'random').mockImplementation(() => {
-      throw new Error('Math.random used');
-    });
-    vi.spyOn(Date, 'now').mockImplementation(() => {
-      throw new Error('Date.now used');
-    });
-    vi.spyOn(performance, 'now').mockImplementation(() => {
-      throw new Error('performance.now used');
-    });
+    const banned = (name: string) => () => {
+      throw new Error(`${name} used`);
+    };
+    vi.spyOn(Math, 'random').mockImplementation(banned('Math.random'));
+    vi.spyOn(Date, 'now').mockImplementation(banned('Date.now'));
+    vi.spyOn(performance, 'now').mockImplementation(banned('performance.now'));
     const snow = createGlobeSnow(9, false);
     run(snow, 60, input({ raise: 0.5, turn: 0.2, push: { x: 10, y: 0, z: 0 } }));
     setChristmasDay(snow, true);
@@ -217,22 +192,18 @@ describe('determinism', () => {
     return snow;
   }
 
-  it('gives identical state for the same seed and inputs over 600 steps', () => {
+  it('gives identical state for the same seed and inputs over 600 steps, and different state for a different seed', () => {
     const a = scripted(42);
     const b = scripted(42);
     expect(snap(a)).toEqual(snap(b));
     expect(a.stir).toBe(b.stir);
     expect(airCount(a)).toBe(airCount(b));
-  });
-
-  it('gives different state for different seeds under the same inputs', () => {
-    expect(snap(scripted(42))).not.toEqual(snap(scripted(43)));
+    expect(snap(a)).not.toEqual(snap(scripted(43)));
   });
 
   it('shares no state between globes: running one does not change a new one', () => {
     const fresh = snap(createGlobeSnow(7, false));
-    const busy = createGlobeSnow(7, false);
-    run(busy, 100, input({ raise: 0.3 }));
+    run(createGlobeSnow(7, false), 100, input({ raise: 0.3 }));
     expect(snap(createGlobeSnow(7, false))).toEqual(fresh);
   });
 });
@@ -270,7 +241,7 @@ describe('setChristmasDay', () => {
     for (const f of snow.flakes) expect(dist(f)).toBeLessThanOrEqual(RADIUS + 1e-9);
   });
 
-  it('is idempotent: setting the same day twice is the same as once', () => {
+  it('is idempotent: setting the same day twice is the same as once, and the day it already is changes nothing', () => {
     const once = createGlobeSnow(14, false);
     const twice = createGlobeSnow(14, false);
     setChristmasDay(once, true);
@@ -280,9 +251,7 @@ describe('setChristmasDay', () => {
     run(once, 120);
     run(twice, 120);
     expect(snap(twice)).toEqual(snap(once));
-  });
 
-  it('setting the day it already is changes nothing', () => {
     const snow = createGlobeSnow(15, false);
     run(snow, 30);
     const before = snap(snow);
@@ -319,66 +288,32 @@ describe('calm snow', () => {
 
   it('restarts lying flakes from the upper dome so the snow keeps falling', () => {
     const snow = createGlobeSnow(23, false);
-    const frames = record(snow, 30 * STEPS_PER_SECOND);
-    let restarts = 0;
-    let low = 0;
-    for (let k = 1; k < frames.length; k++) {
-      for (let i = 0; i < frames[k]!.length; i++) {
-        const a = frames[k - 1]![i]!;
-        const b = frames[k]![i]!;
-        if (a.resting && !b.resting) {
-          restarts++;
-          if (b.y >= 0) low++;
-        }
-      }
-    }
-    expect(low, 'restarts in the upper dome').toBe(0);
-    expect(restarts).toBeGreaterThan(10);
+    const restarts = stepPairs(record(snow, 30 * STEPS_PER_SECOND)).filter(([a, b]) => a.resting && !b.resting);
+    expect(restarts.filter(([, b]) => b.y >= 0).length, 'restarts in the upper dome').toBe(0);
+    expect(restarts.length).toBeGreaterThan(10);
   });
 
-  it('lets air flakes fall at 0.6-1.4 times the fall speed, not all at one speed', () => {
-    const snow = createGlobeSnow(24, false);
-    const frames = record(snow, STEPS_PER_SECOND);
+  it('lets air flakes fall at 0.6-1.4 times the fall speed, not all at one speed, and sway slightly from side to side', () => {
+    const frames = record(createGlobeSnow(24, false), STEPS_PER_SECOND);
     const ids = airThroughout(frames, 48);
     expect(ids.length).toBeGreaterThan(30);
-    const speeds = ids.map((i) => frames[STEPS_PER_SECOND]![i]!.y - frames[0]![i]!.y); // px per second
+    const first = frames[0]!;
+    const last = frames[STEPS_PER_SECOND]!;
+    const speeds = ids.map((i) => last[i]!.y - first[i]!.y); // px per second
     for (const v of speeds) {
       expect(v).toBeGreaterThanOrEqual(0.6 * FALL - 0.3);
       expect(v).toBeLessThanOrEqual(1.4 * FALL + 0.3);
     }
     expect(Math.max(...speeds) - Math.min(...speeds)).toBeGreaterThan(1);
-  });
-
-  it('lets air flakes sway slightly from side to side', () => {
-    const snow = createGlobeSnow(25, false);
-    const frames = record(snow, STEPS_PER_SECOND);
-    const ids = airThroughout(frames, 48);
-    const side = ids.map((i) => {
-      const a = frames[0]![i]!;
-      const b = frames[STEPS_PER_SECOND]![i]!;
-      return Math.hypot(b.x - a.x, b.z - a.z);
-    });
+    const side = ids.map((i) => Math.hypot(last[i]!.x - first[i]!.x, last[i]!.z - first[i]!.z));
     expect(Math.max(...side), 'some sway').toBeGreaterThan(0.05);
     for (const s of side) expect(s, 'only slight').toBeLessThan(FALL);
   });
 
   it('keeps resting flakes perfectly still while the globe does not turn', () => {
-    const snow = createGlobeSnow(26, false);
-    const frames = record(snow, 5 * STEPS_PER_SECOND);
-    let checked = 0;
-    let movedCount = 0;
-    for (let k = 1; k < frames.length; k++) {
-      for (let i = 0; i < frames[k]!.length; i++) {
-        const a = frames[k - 1]![i]!;
-        const b = frames[k]![i]!;
-        if (a.resting && b.resting) {
-          checked++;
-          if (b.x !== a.x || b.y !== a.y || b.z !== a.z) movedCount++;
-        }
-      }
-    }
-    expect(movedCount).toBe(0);
-    expect(checked).toBeGreaterThan(1000);
+    const lying = stepPairs(record(createGlobeSnow(26, false), 5 * STEPS_PER_SECOND)).filter(([a, b]) => a.resting && b.resting);
+    expect(lying.filter(([a, b]) => b.x !== a.x || b.y !== a.y || b.z !== a.z).length).toBe(0);
+    expect(lying.length).toBeGreaterThan(1000);
   });
 
   it('runs calm forever with zero raise: no stir, finite flakes, inside the glass', () => {
@@ -386,10 +321,7 @@ describe('calm snow', () => {
     run(snow, 120 * STEPS_PER_SECOND);
     expect(snow.stir).toBe(0);
     expect(snow.flakes).toHaveLength(340);
-    for (const f of snow.flakes) {
-      for (const v of [f.x, f.y, f.z, f.phase]) expect(Number.isFinite(v)).toBe(true);
-      expect(dist(f)).toBeLessThanOrEqual(RADIUS + 1e-9);
-    }
+    expectSound(snow);
     expect(nearTarget(airCount(snow), false)).toBe(true);
   });
 });
@@ -397,6 +329,10 @@ describe('calm snow', () => {
 describe('turning the globe', () => {
   /** Turns from 0 to `total` over `steps` steps, then holds. */
   const turning = (total: number, steps: number) => (i: number) => input({ turn: (total * Math.min(i + 1, steps)) / steps });
+  /** Air flakes that stay in the air and well away from the axis. */
+  const outerAir = (frames: Flake[][]) =>
+    airThroughout(frames).filter((i) => frames.every((fr) => Math.hypot(fr[i]!.x, fr[i]!.z) > 8));
+  const farRestIndex = (snow: GlobeSnow) => snow.flakes.findIndex((f) => f.resting && Math.hypot(f.x, f.z) > 5);
 
   it('turns resting flakes with the globe about the vertical axis', () => {
     const snow = createGlobeSnow(31, false);
@@ -409,10 +345,8 @@ describe('turning the globe', () => {
     const turns = ids.filter((i) => Math.hypot(first[i]!.x, first[i]!.z) > 2).map((i) => yawChange(first[i]!, last[i]!));
     const sign = Math.sign(turns[0]!);
     for (const i of ids) {
-      const a = first[i]!;
-      const b = last[i]!;
-      expect(b.y).toBeCloseTo(a.y, 9);
-      expect(Math.hypot(b.x, b.z)).toBeCloseTo(Math.hypot(a.x, a.z), 6);
+      expect(last[i]!.y).toBeCloseTo(first[i]!.y, 9);
+      expect(Math.hypot(last[i]!.x, last[i]!.z)).toBeCloseTo(Math.hypot(first[i]!.x, first[i]!.z), 6);
     }
     for (const d of turns) expect(d * sign).toBeCloseTo(0.3, 6);
   });
@@ -421,18 +355,17 @@ describe('turning the globe', () => {
     const snow = createGlobeSnow(32, false);
     run(snow, 60);
     // The sign of the globe's turn in flake coordinates, from a resting flake.
-    const restIndex = snow.flakes.findIndex((f) => f.resting && Math.hypot(f.x, f.z) > 5);
+    const restIndex = farRestIndex(snow);
     const restBefore = { ...snow.flakes[restIndex]! };
 
     const spin = (frames: Flake[][]) => {
-      const ids = airThroughout(frames).filter((i) => frames.every((fr) => Math.hypot(fr[i]!.x, fr[i]!.z) > 8));
+      const ids = outerAir(frames);
       expect(ids.length).toBeGreaterThan(20);
       return mean(ids.map((i) => yawChange(frames[0]![i]!, frames[frames.length - 1]![i]!)));
     };
 
     const during = record(snow, 60, turning(1, 60)); // 1 rad over 1 s
-    const restAfter = snow.flakes[restIndex]!;
-    const sign = Math.sign(yawChange(restBefore, restAfter));
+    const sign = Math.sign(yawChange(restBefore, snow.flakes[restIndex]!));
     expect(sign).not.toBe(0);
     const hold = input({ turn: 1 });
     const after = record(snow, 60, () => hold);
@@ -453,7 +386,7 @@ describe('turning the globe', () => {
     run(snow, 60);
     const rate = 0.01; // rad per step, 0.6 rad/s
     let turn = 0;
-    const restIndex = snow.flakes.findIndex((f) => f.resting && Math.hypot(f.x, f.z) > 5);
+    const restIndex = farRestIndex(snow);
     let restTotal = 0; // summed per step: the 4.8 rad total would wrap past pi
     for (let i = 0; i < 8 * STEPS_PER_SECOND; i++) {
       const before = { ...snow.flakes[restIndex]! };
@@ -467,27 +400,25 @@ describe('turning the globe', () => {
       turn += rate;
       return input({ turn });
     });
-    const ids = airThroughout(frames).filter((i) => frames.every((fr) => Math.hypot(fr[i]!.x, fr[i]!.z) > 8));
+    const ids = outerAir(frames);
     expect(ids.length).toBeGreaterThan(20);
     // Sum the per-step yaw change so a flake going past half a turn is still counted right.
-    const perFlake = ids.map((i) => {
+    const totals = ids.map((i) => {
       let total = 0;
       for (let k = 1; k < frames.length; k++) total += yawChange(frames[k - 1]![i]!, frames[k]![i]!);
       return total;
     });
-    const ratio = (mean(perFlake) * sign) / (rate * STEPS_PER_SECOND);
+    const ratio = (mean(totals) * sign) / (rate * STEPS_PER_SECOND);
     expect(ratio).toBeGreaterThan(1.15);
     expect(ratio).toBeLessThan(1.45);
   });
 
-  it('stirs the snow when the globe is turned fast, even with no raise', () => {
-    const snow = createGlobeSnow(34, false);
-    stepGlobeSnow(snow, CALM);
-    for (let i = 1; i <= 10; i++) stepGlobeSnow(snow, input({ turn: 0.2 * i })); // 12 rad/s
-    expect(snow.stir).toBeGreaterThan(0.05);
-  });
+  it('stirs the snow when the globe turns fast, barely when it turns slowly, and not at all when it holds still', () => {
+    const fast = createGlobeSnow(34, false);
+    stepGlobeSnow(fast, CALM);
+    for (let i = 1; i <= 10; i++) stepGlobeSnow(fast, input({ turn: 0.2 * i })); // 12 rad/s
+    expect(fast.stir, 'fast, no raise').toBeGreaterThan(0.05);
 
-  it('barely stirs the snow when the globe turns slowly, and not at all when it holds still', () => {
     const slow = createGlobeSnow(35, false);
     const still = createGlobeSnow(35, false);
     for (let i = 0; i <= 10 * STEPS_PER_SECOND; i++) {
@@ -509,20 +440,14 @@ describe('turning the globe', () => {
     }
     const a = snap(plain);
     const b = snap(wrapped);
-    let worst = 0;
-    let restingDiffers = 0;
-    for (let i = 0; i < a.length; i++) {
-      worst = Math.max(worst, Math.abs(a[i]!.x - b[i]!.x), Math.abs(a[i]!.y - b[i]!.y), Math.abs(a[i]!.z - b[i]!.z));
-      if (a[i]!.resting !== b[i]!.resting) restingDiffers++;
-    }
-    expect(restingDiffers).toBe(0);
-    expect(worst).toBeLessThan(1e-6);
+    expect(a.filter((f, i) => f.resting !== b[i]!.resting).length).toBe(0);
+    expect(Math.max(...a.flatMap((f, i) => [Math.abs(f.x - b[i]!.x), Math.abs(f.y - b[i]!.y), Math.abs(f.z - b[i]!.z)]))).toBeLessThan(1e-6);
     expect(wrapped.stir).toBeCloseTo(plain.stir, 9);
   });
 });
 
 describe('the stir', () => {
-  it('adds raise to the stir', () => {
+  it('adds raise to the stir and caps it at 1.6', () => {
     const snow = createGlobeSnow(41, false);
     stepGlobeSnow(snow, input({ raise: 0.5 }));
     expect(snow.stir).toBeGreaterThan(0.49);
@@ -530,16 +455,14 @@ describe('the stir', () => {
     stepGlobeSnow(snow, input({ raise: 0.5 }));
     expect(snow.stir).toBeGreaterThan(0.97);
     expect(snow.stir).toBeLessThanOrEqual(1 + 1e-12);
-  });
 
-  it('caps the stir at 1.6', () => {
-    const snow = createGlobeSnow(42, false);
-    stepGlobeSnow(snow, input({ raise: 5 }));
-    expect(snow.stir).toBeLessThanOrEqual(1.6 + 1e-12);
-    expect(snow.stir).toBeGreaterThan(1.55);
+    const capped = createGlobeSnow(42, false);
+    stepGlobeSnow(capped, input({ raise: 5 }));
+    expect(capped.stir).toBeLessThanOrEqual(1.6 + 1e-12);
+    expect(capped.stir).toBeGreaterThan(1.55);
     for (let i = 0; i < 30; i++) {
-      stepGlobeSnow(snow, input({ raise: 1 }));
-      expect(snow.stir).toBeLessThanOrEqual(1.6 + 1e-12);
+      stepGlobeSnow(capped, input({ raise: 1 }));
+      expect(capped.stir).toBeLessThanOrEqual(1.6 + 1e-12);
     }
   });
 
@@ -558,35 +481,14 @@ describe('the stir', () => {
     expect(snow.stir, 'almost nothing after ~6.5 s').toBeLessThan(0.05 * start);
   });
 
-  it('does not throw snow up from the floor while the stir is below 0.12', () => {
-    const snow = createGlobeSnow(44, false);
-    run(snow, 60);
-    const frames = record(snow, 2 * STEPS_PER_SECOND, (i) => input({ raise: i === 0 ? 0.1 : 0 }));
-    let lifted = 0;
-    for (let k = 1; k < frames.length; k++) {
-      for (let i = 0; i < frames[k]!.length; i++) {
-        const a = frames[k - 1]![i]!;
-        const b = frames[k]![i]!;
-        if (a.resting && !b.resting && moved(a, b) <= MAX_STEP) lifted++;
-      }
-    }
-    expect(lifted).toBe(0);
-  });
-
-  it('throws snow up from the floor once the stir passes 0.12', () => {
-    const snow = createGlobeSnow(44, false);
-    run(snow, 60);
-    const frames = record(snow, STEPS_PER_SECOND, (i) => input({ raise: i === 0 ? 1 : 0 }));
-    let lifted = 0;
-    for (let k = 1; k < frames.length; k++) {
-      for (let i = 0; i < frames[k]!.length; i++) {
-        const a = frames[k - 1]![i]!;
-        const b = frames[k]![i]!;
-        if (a.resting && !b.resting && moved(a, b) <= MAX_STEP) lifted++;
-      }
-    }
-    expect(lifted).toBeGreaterThan(10);
-    expect(airCount(snow)).toBeGreaterThan(target(false) + 20);
+  it('throws snow up from the floor only once the stir passes 0.12', () => {
+    const weak = createGlobeSnow(44, false);
+    const strong = createGlobeSnow(44, false);
+    run(weak, 60);
+    run(strong, 60);
+    expect(liftedCount(record(weak, 2 * STEPS_PER_SECOND, (i) => input({ raise: i === 0 ? 0.1 : 0 }))), 'stir 0.1').toBe(0);
+    expect(liftedCount(record(strong, STEPS_PER_SECOND, (i) => input({ raise: i === 0 ? 1 : 0 }))), 'stir 1').toBeGreaterThan(10);
+    expect(airCount(strong)).toBeGreaterThan(target(false) + 20);
   });
 
   it('lifts more snow and stirs wilder eddies the stronger the stir', () => {
@@ -597,9 +499,7 @@ describe('the stir', () => {
       run(snow, 30);
       const frames = record(snow, 60);
       const ids = airThroughout(frames);
-      const speed = mean(
-        ids.flatMap((i) => frames.slice(1).map((fr, k) => moved(frames[k]![i]!, fr[i]!))),
-      );
+      const speed = mean(ids.flatMap((i) => frames.slice(1).map((fr, k) => moved(frames[k]![i]!, fr[i]!))));
       return { air: airCount(snow), speed };
     };
     const gentle = measure(0.5);
@@ -620,9 +520,7 @@ describe('the stir', () => {
     const speeds: number[] = [];
     for (const i of ids) {
       for (let k = 2; k < frames.length; k++) {
-        const a = frames[k - 2]![i]!;
-        const b = frames[k - 1]![i]!;
-        const c = frames[k]![i]!;
+        const [a, b, c] = [frames[k - 2]![i]!, frames[k - 1]![i]!, frames[k]![i]!];
         const v1 = [b.x - a.x, b.y - a.y, b.z - a.z];
         const v2 = [c.x - b.x, c.y - b.y, c.z - b.z];
         changes.push(Math.hypot(v2[0]! - v1[0]!, v2[1]! - v1[1]!, v2[2]! - v1[2]!));
@@ -638,13 +536,8 @@ describe('the stir', () => {
     run(snow, 60);
     const frames = record(snow, 3 * STEPS_PER_SECOND, (i) => input({ raise: i % 20 === 0 ? 1.6 : 0 }));
     let biggest = 0;
-    for (let k = 1; k < frames.length; k++) {
-      for (let i = 0; i < frames[k]!.length; i++) {
-        const a = frames[k - 1]![i]!;
-        const b = frames[k]![i]!;
-        const restart = a.resting && !b.resting && b.y < 0;
-        if (!restart) biggest = Math.max(biggest, moved(a, b));
-      }
+    for (const [a, b] of stepPairs(frames)) {
+      if (!(a.resting && !b.resting && b.y < 0)) biggest = Math.max(biggest, moved(a, b));
     }
     expect(biggest).toBeLessThanOrEqual(MAX_STEP);
   });
@@ -706,7 +599,7 @@ describe('the push', () => {
       const okP = new Set(airThroughout(window(p)));
       const ids = airThroughout(window(t)).filter((i) => okP.has(i));
       expect(ids.length).toBeGreaterThan(20);
-      return mean(ids.map((i) => (p[to]![i]![axis] - p[from]![i]![axis]) - (t[to]![i]![axis] - t[from]![i]![axis])));
+      return mean(ids.map((i) => p[to]![i]![axis] - p[from]![i]![axis] - (t[to]![i]![axis] - t[from]![i]![axis])));
     };
 
     expect(drift(0, STEPS_PER_SECOND) * dir, 'moved in the push direction').toBeGreaterThan(3);
@@ -718,16 +611,9 @@ describe('the push', () => {
     run(snow, 60);
     const before = snap(snow);
     stepGlobeSnow(snow, input({ push: { x: 120, y: -80, z: 40 } }));
-    let checked = 0;
-    for (let i = 0; i < before.length; i++) {
-      const a = before[i]!;
-      const b = snow.flakes[i]!;
-      if (a.resting && b.resting) {
-        checked++;
-        expect([b.x, b.y, b.z]).toEqual([a.x, a.y, a.z]);
-      }
-    }
-    expect(checked).toBeGreaterThan(100);
+    const lying = before.flatMap((a, i): [Flake, Flake][] => (a.resting && snow.flakes[i]!.resting ? [[a, snow.flakes[i]!]] : []));
+    for (const [a, b] of lying) expect([b.x, b.y, b.z]).toEqual([a.x, a.y, a.z]);
+    expect(lying.length).toBeGreaterThan(100);
   });
 });
 
@@ -762,28 +648,23 @@ describe('the glass', () => {
 });
 
 describe('bad input', () => {
-  it.each([NaN, Infinity, -Infinity])('throws on a non-finite raise (%s) and leaves the snow untouched', (raise) => {
-    const snow = createGlobeSnow(71, false);
-    run(snow, 30, input({ raise: 0.01 }));
-    const before = snap(snow);
-    const stir = snow.stir;
-    expect(() => stepGlobeSnow(snow, input({ raise }))).toThrow();
-    expect(snap(snow)).toEqual(before);
-    expect(snow.stir).toBe(stir);
-  });
-
   it.each([
+    ['raise NaN', { raise: NaN }],
+    ['raise Infinity', { raise: Infinity }],
+    ['raise -Infinity', { raise: -Infinity }],
     ['turn NaN', { turn: NaN }],
     ['turn Infinity', { turn: Infinity }],
     ['push.x NaN', { push: { x: NaN, y: 0, z: 0 } }],
     ['push.y Infinity', { push: { x: 0, y: Infinity, z: 0 } }],
     ['push.z -Infinity', { push: { x: 0, y: 0, z: -Infinity } }],
   ])('throws on a non-finite %s and leaves the snow untouched', (_name, over) => {
-    const snow = createGlobeSnow(72, false);
-    run(snow, 30);
+    const snow = createGlobeSnow(71, false);
+    run(snow, 30, input({ raise: 0.01 }));
     const before = snap(snow);
+    const stir = snow.stir;
     expect(() => stepGlobeSnow(snow, input(over as Partial<SnowInput>))).toThrow();
     expect(snap(snow)).toEqual(before);
+    expect(snow.stir).toBe(stir);
   });
 
   it('never lowers the stir for a negative raise: it throws untouched or acts as raise 0', () => {
