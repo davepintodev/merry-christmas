@@ -1,11 +1,8 @@
-// XMAS-32a "The globe", slice 1: the glass (tinted by phase, rim, frost,
-// reflections that travel round with the turn), the floor tint, the base from
-// the base under the globe, and the lettering "Fam. Pinto Merry Christmas"
-// from the font glyphs, wrapped round the base's drum as the globe turns.
-// XMAS-68: the base is drawn in code (base-fine.ts), over the glass's foot, in
-// hard master colours; without a fine layer sceneFrame draws it at one pixel to
-// an art pixel. sceneFrame draws it after the ground, centred on layout.globe;
-// nothing outside the globe, its base and the base's shadow changes.
+// XMAS-32a "The globe": the glass (phase tint, rim, reflections that travel
+// with the turn), the base's cast shadow and the lettering wrapped round the
+// base's drum. XMAS-68: the base is drawn in code (base-fine.ts) in hard master
+// colours, centred on layout.globe, after the ground; nothing outside the
+// globe, its base and the base's shadow changes.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { drawings } from '../shared/art.generated.ts';
@@ -29,7 +26,7 @@ vi.mock('./globe.ts', async (importOriginal) => {
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 const READINGS: [string, PhaseReading][] = [
-  ...PHASES.map((p): [string, PhaseReading] => [p, { from: p, to: p, share: 0 }]),
+  ...PHASES.map((p): [string, PhaseReading] => [p, steady(p)]),
   ['purple-night -> dawn at 0.5', { from: 'purple-night', to: 'dawn', share: 0.5 }],
   ['frosty-morning -> sunset at 0.25', { from: 'frosty-morning', to: 'sunset', share: 0.25 }],
 ];
@@ -55,8 +52,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function overDisc(l: SceneLayout, x: number, y: number): boolean {
-  return x >= l.disc.x && x < l.disc.x + l.disc.width && y >= l.disc.y && y < l.disc.y + l.disc.height;
+function overDisc({ disc: d }: SceneLayout, x: number, y: number): boolean {
+  return x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height;
 }
 
 /** Whether a disc flush with the left edge would stay outside the globe's circle. */
@@ -93,16 +90,6 @@ function hexNum(hex: string): number {
   return Number.parseInt(hex.slice(1), 16);
 }
 
-function rgb(n: number): [number, number, number] {
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function distance(a: number, b: number): number {
-  const [ar, ag, ab] = rgb(a);
-  const [br, bg, bb] = rgb(b);
-  return Math.abs(ar - br) + Math.abs(ag - bg) + Math.abs(ab - bb);
-}
-
 function at(f: SceneFrame, x: number, y: number): number {
   return f.picture[y * f.width + x] ?? -1;
 }
@@ -126,6 +113,22 @@ function drawnBase(turn: number): Uint32Array {
   return out;
 }
 
+/** Calls fn for every pixel renderBase draws at this turn: base-box coordinates, the wanted colour, the frame's colour. */
+function eachBasePixel(f: SceneFrame, turn: number, fn: (x: number, y: number, want: number, got: number) => void): void {
+  const box = baseBox(f);
+  const want = drawnBase(turn);
+  for (let y = 0; y < BASE_ROWS; y++) {
+    for (let x = 0; x < BASE_WIDTH; x++) {
+      const c = want[y * BASE_WIDTH + x] ?? NO_FRONT;
+      if (c !== NO_FRONT) fn(x, y, c, at(f, box.x + x, box.y + y));
+    }
+  }
+}
+
+function pic(over: Partial<SceneInput> = {}): number[] {
+  return Array.from(sceneFrame(input(over)).picture);
+}
+
 /**
  * Every colour any drawing uses. Sprites are point-sampled (XMAS-75), so their pixels
  * are crisp and carry the art's own patterns; only the glass is smooth, and the glass
@@ -146,9 +149,7 @@ function inBox(box: Box, x: number, y: number): boolean {
 /** The glass: pixel centres well inside the circle, off the base. */
 function glassPixels(f: SceneFrame, box: Box): [number, number][] {
   const out: [number, number][] = [];
-  for (let y = 0; y < f.height; y++) {
-    for (let x = 0; x < f.width; x++) if (inCircle(f.layout, x, y, -2) && !inBox(box, x, y)) out.push([x, y]);
-  }
+  for (let y = 0; y < f.height; y++) for (let x = 0; x < f.width; x++) if (inCircle(f.layout, x, y, -2) && !inBox(box, x, y)) out.push([x, y]);
   return out;
 }
 
@@ -156,17 +157,25 @@ function glassPixels(f: SceneFrame, box: Box): [number, number][] {
 function outsideChanges(f: SceneFrame, b: SceneFrame, box: Box): [number, number][] {
   const out: [number, number][] = [];
   for (let y = 0; y < f.height; y++) {
-    for (let x = 0; x < f.width; x++) {
-      if (inCircle(f.layout, x, y, 1) || inBox(box, x, y)) continue;
-      if (at(f, x, y) !== at(b, x, y)) out.push([x, y]);
-    }
+    for (let x = 0; x < f.width; x++) if (!inCircle(f.layout, x, y, 1) && !inBox(box, x, y) && at(f, x, y) !== at(b, x, y)) out.push([x, y]);
   }
   return out;
 }
 
 function brightness(n: number): number {
-  const [r, g, b] = rgb(n);
-  return r + g + b;
+  return ((n >> 16) & 255) + ((n >> 8) & 255) + (n & 255);
+}
+
+/** Whether the 2 x 2 block at x,y is a checkerboard of two alternating colours. */
+function checkered(f: SceneFrame, x: number, y: number): boolean {
+  const a = at(f, x, y);
+  const b = at(f, x + 1, y);
+  return a !== b && a === at(f, x + 1, y + 1) && b === at(f, x, y + 1);
+}
+
+/** Ground pixels outside the circle and base box that the cast shadow darkened. */
+function darkened(f: SceneFrame, b: SceneFrame, box: Box): [number, number][] {
+  return outsideChanges(f, b, box).filter(([x, y]) => y >= f.layout.groundTop && brightness(at(f, x, y)) < brightness(at(b, x, y)));
 }
 
 /** Fails unless sceneFrame draws a globe at all (so the other checks are not passing on a bare sky). */
@@ -209,25 +218,14 @@ describe('sceneFrame: the globe in the picture', () => {
     let drawn = 0;
     for (let y = 0; y < f.layout.globe.cy; y++) {
       for (let x = 0; x < width; x++) {
-        if (!inCircle(f.layout, x, y, -0.5) || inCircle(f.layout, x, y, -1.5)) continue;
         // Where even a disc flush with the left edge overlaps the globe (XMAS-63, the narrowest pictures) the disc hides part of the band.
-        if (!discClears && overDisc(f.layout, x, y)) continue;
+        if (!inCircle(f.layout, x, y, -0.5) || inCircle(f.layout, x, y, -1.5) || (!discClears && overDisc(f.layout, x, y))) continue;
         band++;
         if (at(f, x, y) !== at(b, x, y)) drawn++;
       }
     }
     expect(band).toBeGreaterThan(100);
     expect(drawn / band, 'share of the rim band that is drawn').toBeGreaterThanOrEqual(0.9);
-  });
-
-  it('tints the glass in every phase: most glass pixels differ from the bare sky', () => {
-    for (const [name, phase] of READINGS) {
-      const f = sceneFrame(input({ phase }));
-      const b = baseline({ phase });
-      const glass = glassPixels(f, baseBox(f));
-      const tinted = glass.filter(([x, y]) => at(f, x, y) !== at(b, x, y)).length;
-      expect(tinted / glass.length, `${name}: tinted share of the glass`).toBeGreaterThanOrEqual(0.5);
-    }
   });
 
   it('draws no checkerboard dither: no 2 x 2 block of two alternating colours on the glass (the sprites\' own crisp art patterns aside)', () => {
@@ -237,12 +235,8 @@ describe('sceneFrame: the globe in the picture', () => {
         const box = baseBox(f);
         for (const [x, y] of glassPixels(f, box)) {
           if (!inCircle(f.layout, x + 1, y + 1, -2) || inBox(box, x + 1, y + 1)) continue;
-          const a = at(f, x, y);
-          const b = at(f, x + 1, y);
-          if (SPRITE_COLOURS.has(a) || SPRITE_COLOURS.has(b)) continue;
-          if (a !== b && a === at(f, x + 1, y + 1) && b === at(f, x, y + 1)) {
-            expect.fail(`${name} turn ${turn}: checkerboard at ${x},${y}`);
-          }
+          if (SPRITE_COLOURS.has(at(f, x, y)) || SPRITE_COLOURS.has(at(f, x + 1, y))) continue;
+          if (checkered(f, x, y)) expect.fail(`${name} turn ${turn}: checkerboard at ${x},${y}`);
         }
       }
     }
@@ -251,18 +245,14 @@ describe('sceneFrame: the globe in the picture', () => {
 
 describe('sceneFrame: the cast shadow', () => {
   /** Sizes with ground to the right of the base for a shadow to fall on. */
-  const ROOMY: [number, number][] = [
-    [W, H],
-    [320, 180],
-    [240, 300],
-  ];
+  const ROOMY = SIZES.slice(0, 3);
 
   it.each(ROOMY)('casts a shadow on the ground under the base, leaning right and within its sides, at %s x %s', (width, height) => {
     for (const [name, phase] of READINGS) {
       const f = sceneFrame(input({ width, height, phase }));
       const b = baseline({ width, height, phase });
       const box = baseBox(f);
-      const cast = outsideChanges(f, b, box).filter(([x, y]) => y >= f.layout.groundTop && brightness(at(f, x, y)) < brightness(at(b, x, y)));
+      const cast = darkened(f, b, box);
       expect(cast.length, `${name}: darkened ground pixels`).toBeGreaterThanOrEqual(10);
       const xs = cast.map(([x]) => x);
       expect(Math.min(...xs), `${name}: shadow left of the base's footprint`).toBeGreaterThanOrEqual(box.x);
@@ -278,13 +268,8 @@ describe('sceneFrame: the cast shadow', () => {
       const box = baseBox(first);
       expect(outsideChanges(first, baseline({ width, height, phase }), box).length, `${name}: a shadow is drawn`).toBeGreaterThan(0);
       for (const turn of [0.01, 1.3, Math.PI, 4, -2]) {
-        const f = sceneFrame(input({ width, height, phase, turn }));
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            if (inCircle(f.layout, x, y, 1) || inBox(box, x, y)) continue;
-            if (at(f, x, y) !== at(first, x, y)) expect.fail(`${name} turn ${turn}: pixel ${x},${y} outside the globe changed with the turn`);
-          }
-        }
+        const [moved] = outsideChanges(sceneFrame(input({ width, height, phase, turn })), first, box);
+        expect(moved, `${name} turn ${turn}: a pixel outside the globe changed with the turn`).toBeUndefined();
       }
     }
   });
@@ -296,9 +281,7 @@ describe('sceneFrame: the cast shadow', () => {
       for (let y = f.layout.groundTop; y + 1 < f.height; y++) {
         for (let x = 0; x + 1 < f.width; x++) {
           if (inBox(box, x, y) || inBox(box, x + 1, y) || inBox(box, x, y + 1) || inBox(box, x + 1, y + 1)) continue;
-          const a = at(f, x, y);
-          const b = at(f, x + 1, y);
-          if (a !== b && a === at(f, x + 1, y + 1) && b === at(f, x, y + 1)) expect.fail(`${name}: checkerboard on the ground at ${x},${y}`);
+          if (checkered(f, x, y)) expect.fail(`${name}: checkerboard on the ground at ${x},${y}`);
         }
       }
     }
@@ -313,15 +296,12 @@ describe('sceneFrame: the shortest picture', () => {
       expect(f.picture.length).toBe(width * height);
       for (const c of f.picture) expect(c).toBeLessThanOrEqual(0xffffff);
       const box = baseBox(f);
-      const { cy, radius } = f.layout.globe;
+      const { cx, cy, radius } = f.layout.globe;
       expect(box.y + BASE_ROWS, `${name}: the margin under the base`).toBe(height - 12);
       // The globe's foot is hidden in the base: its lowest rows sit inside the base's box.
       expect(cy + radius, `${name}: globe bottom`).toBeGreaterThan(box.y);
       expect(cy + radius).toBeLessThanOrEqual(box.y + BASE_ROWS);
-      // Above the base the glass is drawn right down to it.
-      const b = baseline({ width, height, phase });
-      const { cx } = f.layout.globe;
-      expect(at(f, cx, box.y - 1), `${name}: glass just above the base`).not.toBe(at(b, cx, box.y - 1));
+      expect(at(f, cx, box.y - 1), `${name}: glass just above the base`).not.toBe(at(baseline({ width, height, phase }), cx, box.y - 1));
     }
   });
 
@@ -355,49 +335,28 @@ describe('sceneFrame: the base', () => {
   });
 
   it.each([0, 0.5, 2.2, 5.9])('draws exactly renderBase at one pixel to an art pixel (turn %s)', (turn) => {
-    const f = sceneFrame(input({ turn }));
-    const box = baseBox(f);
-    const want = drawnBase(turn);
     let drawn = 0;
-    for (let y = 0; y < BASE_ROWS; y++) {
-      for (let x = 0; x < BASE_WIDTH; x++) {
-        const c = want[y * BASE_WIDTH + x] ?? NO_FRONT;
-        if (c === NO_FRONT) continue;
-        drawn++;
-        if (at(f, box.x + x, box.y + y) !== c) expect.fail(`turn ${turn}: base pixel ${x},${y} is not what renderBase draws`);
-      }
-    }
+    eachBasePixel(sceneFrame(input({ turn })), turn, (x, y, want, got) => {
+      drawn++;
+      if (got !== want) expect.fail(`turn ${turn}: base pixel ${x},${y} is not what renderBase draws`);
+    });
     expect(drawn).toBeGreaterThan(BASE_WIDTH * 15);
   });
 
   it('draws the base in the same colour numbers in every phase and blend (lettering included)', () => {
-    const turn = 0.9;
-    const want = drawnBase(turn);
     for (const [name, phase] of READINGS) {
-      const f = sceneFrame(input({ phase, turn }));
-      const box = baseBox(f);
-      for (let y = 0; y < BASE_ROWS; y++) {
-        for (let x = 0; x < BASE_WIDTH; x++) {
-          const c = want[y * BASE_WIDTH + x] ?? NO_FRONT;
-          if (c !== NO_FRONT && at(f, box.x + x, box.y + y) !== c) expect.fail(`${name}: base pixel ${x},${y} differs from the base's own colour`);
-        }
-      }
+      eachBasePixel(sceneFrame(input({ phase, turn: 0.9 })), 0.9, (x, y, want, got) => {
+        if (got !== want) expect.fail(`${name}: base pixel ${x},${y} differs from the base's own colour`);
+      });
     }
   });
 
   it('shows every base pixel as one hard master colour: no blend of two colours anywhere on the base', () => {
     const master = new Set(masterColours.map(hexNum));
     for (const turn of [0, 0.004, 0.5, 2, 3.3]) {
-      const want = drawnBase(turn);
-      const f = sceneFrame(input({ turn }));
-      const box = baseBox(f);
-      for (let y = 0; y < BASE_ROWS; y++) {
-        for (let x = 0; x < BASE_WIDTH; x++) {
-          if ((want[y * BASE_WIDTH + x] ?? NO_FRONT) === NO_FRONT) continue;
-          const c = at(f, box.x + x, box.y + y);
-          if (!master.has(c)) expect.fail(`turn ${turn}: base pixel ${x},${y} is ${c.toString(16)}, not a master colour`);
-        }
-      }
+      eachBasePixel(sceneFrame(input({ turn })), turn, (x, y, _want, got) => {
+        if (!master.has(got)) expect.fail(`turn ${turn}: base pixel ${x},${y} is ${got.toString(16)}, not a master colour`);
+      });
     }
   });
 
@@ -431,23 +390,19 @@ describe('sceneFrame: the base', () => {
 });
 
 describe('sceneFrame: the base\'s cast shadow', () => {
-  it.each([[W, 300], [320, 260]])('stays within %s x %s: no ground changes from %i rows under the base down', (width, height) => {
+  const TALL: [number, number][] = [[W, 300], [320, 260]];
+
+  it.each(TALL)('keeps the shade inside the base\'s footprint at %s x %s: nothing changes %i rows under the base down or beside the base, some ground under it, and each column\'s shade starts no higher than the drum\'s foot in that column, the shade\'s top being the row under the highest of them', (width, height) => {
     const f = sceneFrame(input({ width, height }));
     const b = baseline({ width, height });
-    const below = baseBox(f).y + BASE_ROWS;
-    for (let y = below + SHADOW_ROWS; y < height; y++) {
+    const box = baseBox(f);
+    for (let y = box.y + BASE_ROWS + SHADOW_ROWS; y < height; y++) {
       for (let x = 0; x < width; x++) if (at(f, x, y) !== at(b, x, y)) expect.fail(`pixel ${x},${y} is more than ${SHADOW_ROWS} rows under the base and changed`);
     }
-  });
-
-  it('stays within the base\'s own sides: no ground beside the base changes', () => {
-    const f = sceneFrame(input({ width: 320, height: 260 }));
-    const b = baseline({ width: 320, height: 260 });
-    const box = baseBox(f);
     let beside = 0;
     let under = 0;
-    for (let y = f.layout.groundTop; y < f.height; y++) {
-      for (let x = 0; x < f.width; x++) {
+    for (let y = f.layout.groundTop; y < height; y++) {
+      for (let x = 0; x < width; x++) {
         if (inBox(box, x, y) || at(f, x, y) === at(b, x, y)) continue;
         if (x < box.x || x >= box.x + BASE_WIDTH) beside++;
         else under++;
@@ -455,37 +410,26 @@ describe('sceneFrame: the base\'s cast shadow', () => {
     }
     expect(beside, 'shadow pixels beside the base').toBe(0);
     expect(under, 'shadow pixels under the base').toBeGreaterThan(0);
-  });
-
-  it('starts each column\'s shade no higher than the drum\'s foot in that column, and the shade\'s top is the row under the highest of them', () => {
-    const f = sceneFrame(input({ width: 320, height: 260 }));
-    const b = baseline({ width: 320, height: 260 });
-    const box = baseBox(f);
     const want = drawnBase(0);
-    const shadeRows = (col: number): number[] => {
-      const rows: number[] = [];
-      for (let y = Math.max(f.layout.groundTop, box.y); y < box.y + BASE_ROWS + SHADOW_ROWS; y++) {
-        if ((want[(y - box.y) * BASE_WIDTH + col] ?? NO_FRONT) !== NO_FRONT) continue;
-        if (at(f, box.x + col, y) !== at(b, box.x + col, y)) rows.push(y);
-      }
-      return rows;
-    };
     let top = Number.POSITIVE_INFINITY;
     for (let col = 0; col < BASE_WIDTH; col++) {
-      const first = shadeRows(col)[0] ?? Number.POSITIVE_INFINITY;
+      let first = Number.POSITIVE_INFINITY;
+      for (let y = Math.max(f.layout.groundTop, box.y); y < box.y + BASE_ROWS + SHADOW_ROWS && first === Number.POSITIVE_INFINITY; y++) {
+        if ((want[(y - box.y) * BASE_WIDTH + col] ?? NO_FRONT) === NO_FRONT && at(f, box.x + col, y) !== at(b, box.x + col, y)) first = y;
+      }
       expect(first, `column ${col}: first shaded row`).toBeGreaterThanOrEqual(box.y + (BASE_FOOT_ROWS[col] ?? 0));
       top = Math.min(top, first);
     }
     expect(top, 'the shade starts under the highest foot of the drum').toBe(box.y + Math.min(...BASE_FOOT_ROWS));
   });
 
-  it.each([[W, 300], [320, 260]])('clamps the shade to the base\'s sides at every turn: no darkened ground pixel lies past them, at %s x %s', (width, height) => {
+  it.each(TALL)('clamps the shade to the base\'s sides at every turn: no darkened ground pixel lies past them, at %s x %s', (width, height) => {
     for (const turn of [0, 1.3, -2]) {
       for (const [name, phase] of READINGS) {
         const f = sceneFrame(input({ width, height, phase, turn }));
         const b = baseline({ width, height, phase });
         const box = baseBox(f);
-        const past = outsideChanges(f, b, box).filter(([x, y]) => y >= f.layout.groundTop && (x < box.x || x >= box.x + BASE_WIDTH) && brightness(at(f, x, y)) < brightness(at(b, x, y)));
+        const past = darkened(f, b, box).filter(([x]) => x < box.x || x >= box.x + BASE_WIDTH);
         expect(past, `${name} turn ${turn}: shade past the base's sides`).toEqual([]);
       }
     }
@@ -510,11 +454,8 @@ describe('sceneFrame: the lettering on the base', () => {
     return out;
   }
 
-  it('writes the lettering in solid gold: some base pixels are the gold itself at turn 0', () => {
+  it('writes the lettering in solid gold on its own rows: at turn 0 some base pixels are the gold itself, and the gold ink spans rows 7 to 14 of the base box, at most', () => {
     expect(letterPixels(0).filter((p) => p.c === GOLD).length).toBeGreaterThanOrEqual(30);
-  });
-
-  it('keeps the lettering on its own rows: the gold ink spans rows 7 to 14 of the base box, at most', () => {
     for (const turn of [0, 0.013, 1.7, 3.1, 5]) {
       const rows = letterPixels(turn).map((p) => p.y);
       expect(rows.length, `turn ${turn}: lettering pixels`).toBeGreaterThan(0);
@@ -532,47 +473,39 @@ describe('sceneFrame: the lettering on the base', () => {
 });
 
 describe('sceneFrame: turning the globe', () => {
-  it('changes the picture with the turn (reflections and lettering move)', () => {
+  it('changes the picture with the turn (reflections and lettering move), and half a turn moves the glass reflections somewhere else', () => {
+    expect(pic({ turn: 0 })).not.toEqual(pic({ turn: 1 }));
     const a = sceneFrame(input({ turn: 0 }));
-    const b = sceneFrame(input({ turn: 1 }));
-    expect(Array.from(a.picture)).not.toEqual(Array.from(b.picture));
+    const b = sceneFrame(input({ turn: Math.PI }));
+    expect(glassPixels(a, baseBox(a)).filter(([x, y]) => at(a, x, y) !== at(b, x, y)).length).toBeGreaterThan(0);
   });
 
-  it('draws an undefined turn exactly as turn 0', () => {
-    expectGlobeDrawn();
-    for (const [, phase] of READINGS) {
-      expect(Array.from(sceneFrame(input({ phase })).picture)).toEqual(Array.from(sceneFrame(input({ phase, turn: 0 })).picture));
-    }
-  });
-
-  it('comes back to the same picture after a full turn: 2π, -2π and 4π equal 0 exactly', () => {
-    expectGlobeDrawn();
-    const zero = Array.from(sceneFrame(input({ turn: 0 })).picture);
-    for (const turn of [2 * Math.PI, -2 * Math.PI, 4 * Math.PI]) {
-      expect(Array.from(sceneFrame(input({ turn })).picture), `turn ${turn}`).toEqual(zero);
-    }
-  });
-
-  it('draws a negative turn as the same turn a full circle on: -0.5 equals 2π - 0.5', () => {
+  it('draws the turn as an angle: undefined equals 0, 2π, -2π and 4π equal 0 exactly, and -0.5 equals 2π - 0.5', () => {
     expectGlobeDrawn({ turn: -0.5 });
-    expect(Array.from(sceneFrame(input({ turn: -0.5 })).picture)).toEqual(Array.from(sceneFrame(input({ turn: 2 * Math.PI - 0.5 })).picture));
+    for (const [, phase] of READINGS) expect(pic({ phase })).toEqual(pic({ phase, turn: 0 }));
+    const zero = pic({ turn: 0 });
+    for (const turn of [2 * Math.PI, -2 * Math.PI, 4 * Math.PI]) expect(pic({ turn }), `turn ${turn}`).toEqual(zero);
+    expect(pic({ turn: -0.5 })).toEqual(pic({ turn: 2 * Math.PI - 0.5 }));
   });
 
   it('gives the same frame for the same inputs, fresh or drawn into a reused target', () => {
     expectGlobeDrawn({ turn: 0.37 });
-    const fresh = Array.from(sceneFrame(input({ turn: 0.37 })).picture);
-    expect(Array.from(sceneFrame(input({ turn: 0.37 })).picture)).toEqual(fresh);
+    const fresh = pic({ turn: 0.37 });
+    expect(pic({ turn: 0.37 })).toEqual(fresh);
     const target = new Uint32Array(W * H).fill(0xffffffff);
     sceneFrame(input({ turn: 2, phase: steady('frosty-morning') }), target);
     sceneFrame(input({ turn: 0.37 }), target);
     expect(Array.from(target)).toEqual(fresh);
   });
 
-  it('moves the reflections with the turn but keeps the glass tint: some glass pixels change, most stay', () => {
+  it('tints the glass in every phase and moves only the reflections with the turn: most glass pixels differ from the bare sky, some change with the turn, most stay', () => {
     for (const [name, phase] of READINGS) {
       const a = sceneFrame(input({ phase, turn: 0 }));
       const b = sceneFrame(input({ phase, turn: 1.5 }));
       const glass = glassPixels(a, baseBox(a));
+      const bare = baseline({ phase, turn: 0 });
+      const tinted = glass.filter(([x, y]) => at(a, x, y) !== at(bare, x, y)).length;
+      expect(tinted / glass.length, `${name}: tinted share of the glass`).toBeGreaterThanOrEqual(0.5);
       const changed = glass.filter(([x, y]) => at(a, x, y) !== at(b, x, y)).length;
       expect(changed, `${name}: glass pixels the reflections moved`).toBeGreaterThan(0);
       expect(changed / glass.length, `${name}: share of the glass that changed with the turn`).toBeLessThanOrEqual(0.4);
@@ -591,10 +524,7 @@ describe('sceneFrame: turning the globe', () => {
       for (const [x, y] of glass) {
         const counts = new Map<number, number>();
         for (const f of round) counts.set(at(f, x, y), (counts.get(at(f, x, y)) ?? 0) + 1);
-        let best = -1;
-        let most = -1;
-        for (const [c, n] of counts) if (n > most) [best, most] = [c, n];
-        bare.set(y * W + x, best);
+        bare.set(y * W + x, [...counts].sort((p, q) => q[1] - p[1])[0]?.[0] ?? -1);
       }
       /** The reflections' solid colours in a frame: colours off the bare glass that fill ten or more glass pixels. */
       const solids = (f: SceneFrame): Set<number> => {
@@ -633,13 +563,6 @@ describe('sceneFrame: turning the globe', () => {
     }
   });
 
-  it('carries the reflections round the glass: half a turn moves them somewhere else', () => {
-    const a = sceneFrame(input({ turn: 0 }));
-    const b = sceneFrame(input({ turn: Math.PI }));
-    const glass = glassPixels(a, baseBox(a));
-    expect(glass.filter(([x, y]) => at(a, x, y) !== at(b, x, y)).length).toBeGreaterThan(0);
-  });
-
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('throws a RangeError for a turn of %s and leaves the target alone', (turn) => {
     const target = new Uint32Array(W * H).fill(0xffffffff);
     expect(() => sceneFrame(input({ turn }), target)).toThrow(RangeError);
@@ -661,10 +584,7 @@ describe('drawGlobe', () => {
         const c = at(f, x, y);
         if (inCircle(layout, x, y, 1) || inBox(box, x, y)) {
           if (inCircle(layout, x, y, -2) && c !== fill) inside++;
-          continue;
-        }
-        if (c === fill) continue;
-        if (y < layout.groundTop || x < box.x || x >= box.x + BASE_WIDTH || brightness(c) >= brightness(fill)) {
+        } else if (c !== fill && (y < layout.groundTop || x < box.x || x >= box.x + BASE_WIDTH || brightness(c) >= brightness(fill))) {
           expect.fail(`pixel ${x},${y} outside the globe and base was drawn on, and is not a shadow on the ground under the base`);
         }
       }
@@ -672,5 +592,4 @@ describe('drawGlobe', () => {
     expect(inside).toBeGreaterThan(0);
     for (const c of picture) expect(c).toBeLessThanOrEqual(0xffffff);
   });
-
 });
