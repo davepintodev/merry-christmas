@@ -1,20 +1,14 @@
 // XMAS-32b "The globe", slice 2: the turning shapes inside the globe (XMAS-21
-// 7.2-7.4). The red house (snowy gable roof, lit windows, chimney), eight
-// presents in four designs and the lamp post stand on the globe's floor disc
-// as small boxes and cylinders, turned about the globe's vertical axis by the
-// turn; their faces carry the House and Props sheets' drawings. Everything
-// that turns is blended on the fixed grid, nearer shapes cover farther ones,
-// the shapes cast smooth shadows on the floor away from the disc at the top
-// left, their colours never change with the phase, and nothing outside the
-// glass (nor the base) changes.
+// 7.2-7.4): the house, eight presents and the lamp post stand on the floor
+// disc as small boxes and cylinders, turned about the globe's vertical axis by
+// the turn, their faces carrying the House and Props sheets' drawings.
 //
 // Interface pinned here: src/scene/shapes.ts exports globeShapes, floorDisc
 // and projectShape(shape, turn); src/scene/shapes-draw.ts exports
 // drawShapes(picture, width, layout, phase, turn, shapes = globeShapes),
 // which drawGlobe calls (through that module) inside the glass. A point
-// (x, z) of a shape turns to screen x = x cos t - z sin t (the floor turns
-// the same way as the lettering slides), its nearness to the visitor being
-// x sin t + z cos t; at turn 0 the house's front faces the visitor.
+// (x, z) of a shape turns to screen x = x cos t - z sin t, its nearness to the
+// visitor being x sin t + z cos t; at turn 0 the house's front faces the visitor.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
@@ -51,13 +45,7 @@ const H = 180;
 const SEED = 12345;
 const T = 1_000_000;
 const FULL = 2 * Math.PI;
-const SIZES: [number, number][] = [
-  [W, H],
-  [320, 180],
-  [240, 300],
-  [161, 172],
-  [2 * GLOBE_RADIUS, 172],
-];
+const SIZES: [number, number][] = [[W, H], [320, 180], [240, 300], [161, 172], [2 * GLOBE_RADIUS, 172]];
 /** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by a shape. */
 const FILL_A = 0x010203;
 const FILL_B = 0xfdfcfb;
@@ -66,29 +54,19 @@ const FILL_MID = 0x8090a0;
 const LAYOUT = sceneLayout(W, H, SEED);
 const NIGHT: PhaseReading = { from: 'purple-night', to: 'purple-night', share: 0 };
 /** The rows below the globe's centre still above the base, in the shortest picture. */
-const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => {
-  const l = sceneLayout(w, h, SEED);
-  return l.groundTop - l.globe.cy;
-}));
+const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => sceneLayout(w, h, SEED).groundTop - sceneLayout(w, h, SEED).globe.cy));
 
 const HOUSE_DRAWINGS = ['house-wall-front', 'house-wall-back', 'house-wall-left', 'house-wall-right', 'house-roof-front', 'house-roof-back', 'house-chimney'];
 
-function hexNum(hex: string): number {
-  return Number.parseInt(hex.slice(1), 16);
-}
-
-function rgb(n: number): [number, number, number] {
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
+const hexNum = (hex: string): number => Number.parseInt(hex.slice(1), 16);
+const rgb = (n: number): [number, number, number] => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 
 /** The floor shadow's flat shade: this ink at this share over what is under it (as shapes-draw.ts paints it). */
 const SHADOW_INK = 0x1d3350;
 const SHADOW_SHARE = 0.32;
 
 /** Every colour any drawing uses: the only colours a shape pixel may take besides the floor shade. */
-const SPRITE_COLOURS = new Set<number>(
-  Object.values(drawings).flatMap((d) => Array.from(d.pixels).filter((n) => n !== 0).map((n) => Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16))),
-);
+const SPRITE_COLOURS = new Set<number>(Object.values(drawings).flatMap((d) => Array.from(d.pixels).filter((n) => n !== 0).map((n) => hexNum(masterColours[n - 1] ?? '#000000'))));
 
 /** The largest channel difference between two colours. */
 function distance(a: number, b: number): number {
@@ -97,10 +75,7 @@ function distance(a: number, b: number): number {
   return Math.max(Math.abs(ar - br), Math.abs(ag - bg), Math.abs(ab - bb));
 }
 
-function brightness(n: number): number {
-  const [r, g, b] = rgb(n);
-  return r + g + b;
-}
+const brightness = (n: number): number => rgb(n).reduce((sum, ch) => sum + ch, 0);
 
 function drawing(name: string): Drawing {
   const d = drawings[name];
@@ -121,9 +96,7 @@ function palette(d: Drawing): Set<number> {
   return out;
 }
 
-function input(over: Partial<SceneInput> = {}): SceneInput {
-  return { time: T, drag: 0, phase: NIGHT, seed: SEED, width: W, height: H, ...over };
-}
+const input = (over: Partial<SceneInput> = {}): SceneInput => ({ time: T, drag: 0, phase: NIGHT, seed: SEED, width: W, height: H, ...over });
 
 /** The slice-1 picture for the same input: the globe without its shapes. */
 function noShapes(over: Partial<SceneInput> = {}): SceneFrame {
@@ -135,11 +108,7 @@ function noShapes(over: Partial<SceneInput> = {}): SceneFrame {
   }
 }
 
-function inCircle(l: SceneLayout, x: number, y: number, margin: number): boolean {
-  const dx = x + 0.5 - l.globe.cx;
-  const dy = y + 0.5 - l.globe.cy;
-  return dx * dx + dy * dy <= (l.globe.radius + margin) ** 2;
-}
+const inCircle = (l: SceneLayout, x: number, y: number, margin: number): boolean => Math.hypot(x + 0.5 - l.globe.cx, y + 0.5 - l.globe.cy) <= l.globe.radius + margin;
 
 function only<T>(list: readonly T[]): T {
   expect(list.length).toBe(1);
@@ -152,34 +121,14 @@ const houses = (): GlobeShape[] => globeShapes.filter((s) => s.kind === 'house')
 const presents = (): GlobeShape[] => globeShapes.filter((s) => s.kind === 'present');
 const lamps = (): GlobeShape[] => globeShapes.filter((s) => s.kind === 'lamp-post');
 
-function face(faces: readonly ProjectedFace[], name: string): ProjectedFace | undefined {
-  return faces.find((f) => f.drawing === name);
-}
-
-function names(faces: readonly ProjectedFace[]): string[] {
-  return faces.map((f) => f.drawing);
-}
-
-function xs(f: ProjectedFace): number[] {
-  return f.corners.map((c) => c[0]);
-}
-
-function ys(f: ProjectedFace): number[] {
-  return f.corners.map((c) => c[1]);
-}
-
-function extentX(f: ProjectedFace): number {
-  return Math.max(...xs(f)) - Math.min(...xs(f));
-}
-
-function extentY(f: ProjectedFace): number {
-  return Math.max(...ys(f)) - Math.min(...ys(f));
-}
-
+const face = (faces: readonly ProjectedFace[], name: string): ProjectedFace | undefined => faces.find((f) => f.drawing === name);
+const names = (faces: readonly ProjectedFace[]): string[] => faces.map((f) => f.drawing);
+const xs = (f: ProjectedFace): number[] => f.corners.map((c) => c[0]);
+const ys = (f: ProjectedFace): number[] => f.corners.map((c) => c[1]);
+const extentX = (f: ProjectedFace): number => Math.max(...xs(f)) - Math.min(...xs(f));
+const extentY = (f: ProjectedFace): number => Math.max(...ys(f)) - Math.min(...ys(f));
 /** A point of the floor turned by t: [screen x, nearness to the visitor]. */
-function spin(x: number, z: number, t: number): [number, number] {
-  return [x * Math.cos(t) - z * Math.sin(t), x * Math.sin(t) + z * Math.cos(t)];
-}
+const spin = (x: number, z: number, t: number): [number, number] => [x * Math.cos(t) - z * Math.sin(t), x * Math.sin(t) + z * Math.cos(t)];
 
 /**
  * Whether a is nearer the visitor than b at turn t, from the axis their
@@ -189,8 +138,7 @@ function spin(x: number, z: number, t: number): [number, number] {
  */
 function nearer(a: GlobeShape, b: GlobeShape, t: number): boolean | undefined {
   const votes: boolean[] = [];
-  const s = Math.sin(t);
-  const c = Math.cos(t);
+  const [s, c] = [Math.sin(t), Math.cos(t)];
   if (Math.abs(s) > 1e-6) {
     if (a.x - a.width / 2 >= b.x + b.width / 2) votes.push(s > 0);
     if (b.x - b.width / 2 >= a.x + a.width / 2) votes.push(s < 0);
@@ -216,24 +164,13 @@ function drawn(turn: number, shapes: readonly GlobeShape[] = globeShapes, layout
 }
 
 /** Wholly covered by a shape: the same colour over both backgrounds. */
-function solid(d: Drawn, i: number): boolean {
-  return d.a[i] === d.b[i] && d.a[i] !== FILL_A;
-}
-
+const solid = (d: Drawn, i: number): boolean => d.a[i] === d.b[i] && d.a[i] !== FILL_A;
 /** Untouched: each background shows. */
-function bare(d: Drawn, i: number): boolean {
-  return d.a[i] === FILL_A && d.b[i] === FILL_B;
-}
-
-function solidIndexes(d: Drawn): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < d.a.length; i++) if (solid(d, i)) out.push(i);
-  return out;
-}
+const bare = (d: Drawn, i: number): boolean => d.a[i] === FILL_A && d.b[i] === FILL_B;
+const solidIndexes = (d: Drawn): number[] => Array.from(d.a.keys()).filter((i) => solid(d, i));
 
 function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const vx = bx - ax;
-  const vy = by - ay;
+  const [vx, vy] = [bx - ax, by - ay];
   const len = vx * vx + vy * vy;
   const t = len === 0 ? 0 : Math.min(1, Math.max(0, ((px - ax) * vx + (py - ay) * vy) / len));
   return Math.hypot(px - (ax + t * vx), py - (ay + t * vy));
@@ -261,15 +198,12 @@ function faceMask(layout: SceneLayout, turn: number, shapes: readonly GlobeShape
       const y1 = Math.min(layout.height - 1, Math.ceil(cy + Math.max(...ys(f)) + 2));
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
-          const px = x + 0.5 - cx;
-          const py = y + 0.5 - cy;
-          let near = insidePolygon(px, py, f.corners);
-          for (let i = 0; !near && i < f.corners.length; i++) {
-            const [ax, ay] = f.corners[i] ?? [0, 0];
+          const [px, py] = [x + 0.5 - cx, y + 0.5 - cy];
+          const nearEdge = f.corners.some(([ax, ay], i) => {
             const [bx, by] = f.corners[(i + 1) % f.corners.length] ?? [0, 0];
-            if (segmentDistance(px, py, ax, ay, bx, by) <= 1) near = true;
-          }
-          if (near) mask[y * layout.width + x] = 1;
+            return segmentDistance(px, py, ax, ay, bx, by) <= 1;
+          });
+          if (nearEdge || insidePolygon(px, py, f.corners)) mask[y * layout.width + x] = 1;
         }
       }
     }
@@ -278,18 +212,22 @@ function faceMask(layout: SceneLayout, turn: number, shapes: readonly GlobeShape
 }
 
 describe('globeShapes: what stands in the globe', () => {
-  it('holds exactly one house, 22 art pixels wide (its front wall) and 16 deep (its side walls)', () => {
+  it('holds exactly one house (its front wall wide, its side walls deep), one lamp post 5 across and 24 tall, and no other turning shape', () => {
     const house = only(houses());
     expect(house.width).toBe(drawing('house-wall-front').width);
     expect(house.depth).toBe(drawing('house-wall-left').width);
     expect(house.height).toBeGreaterThanOrEqual(drawing('house-wall-front').height);
+    const lamp = only(lamps());
+    expect([lamp.width, lamp.depth, lamp.height]).toEqual([5, 5, 24]);
+    // XMAS-32c adds the pines and the snowman (tests/frames/globe-trees-snowman.test.ts); the turning shapes stay ten.
+    expect(globeShapes.filter((s) => s.kind === 'house' || s.kind === 'present' || s.kind === 'lamp-post').length).toBe(10);
+    for (const s of globeShapes) if (s.kind !== 'present') expect(s.design, `${s.kind} carries no present design`).toBeUndefined();
   });
 
   it('holds eight presents in exactly four designs, two of each, each a cube the size of its design drawing', () => {
-    const list = presents();
-    expect(list.length).toBe(8);
+    expect(presents().length).toBe(8);
     const count = new Map<number, number>();
-    for (const p of list) {
+    for (const p of presents()) {
       expect(p.design, 'a present names its design').toBeDefined();
       const d = p.design ?? 0;
       count.set(d, (count.get(d) ?? 0) + 1);
@@ -297,14 +235,6 @@ describe('globeShapes: what stands in the globe', () => {
       expect([p.width, p.depth, p.height], `present design ${d} size`).toEqual([side.width, side.width, side.height]);
     }
     expect([...count.entries()].sort()).toEqual([[1, 2], [2, 2], [3, 2], [4, 2]]);
-  });
-
-  it('holds one lamp post, 5 across and 24 tall like its drawing, and no other turning shape', () => {
-    const lamp = only(lamps());
-    expect([lamp.width, lamp.depth, lamp.height]).toEqual([5, 5, 24]);
-    // XMAS-32c adds the pines and the snowman (tests/frames/globe-trees-snowman.test.ts); the turning shapes stay ten.
-    expect(globeShapes.filter((s) => s.kind === 'house' || s.kind === 'present' || s.kind === 'lamp-post').length).toBe(10);
-    for (const s of globeShapes) if (s.kind !== 'present') expect(s.design, `${s.kind} carries no present design`).toBeUndefined();
   });
 
   it('lays the floor disc below the globe centre, inside the glass and its rim, and above the base in the shortest picture', () => {
@@ -327,8 +257,7 @@ describe('globeShapes: what stands in the globe', () => {
   it('never lets two footprints overlap', () => {
     expect(globeShapes.length).toBeGreaterThan(1);
     globeShapes.forEach((a, i) => {
-      globeShapes.forEach((b, j) => {
-        if (j <= i) return;
+      globeShapes.slice(i + 1).forEach((b) => {
         const across = Math.min(a.x + a.width / 2, b.x + b.width / 2) - Math.max(a.x - a.width / 2, b.x - b.width / 2);
         const deep = Math.min(a.z + a.depth / 2, b.z + b.depth / 2) - Math.max(a.z - a.depth / 2, b.z - b.depth / 2);
         if (across > 0 && deep > 0) expect.fail(`${a.kind} at ${a.x},${a.z} overlaps ${b.kind} at ${b.x},${b.z}`);
@@ -338,61 +267,39 @@ describe('globeShapes: what stands in the globe', () => {
 });
 
 describe('projectShape: turning a shape about the globe axis', () => {
-  it('shows the house front wall, front roof slope and chimney at turn 0, and not the back wall', () => {
-    const faces = projectShape(only(houses()), 0);
-    expect(names(faces)).toEqual(expect.arrayContaining(['house-wall-front', 'house-roof-front', 'house-chimney']));
-    expect(names(faces)).not.toContain('house-wall-back');
-    for (const n of names(faces)) expect(HOUSE_DRAWINGS, `house face ${n}`).toContain(n);
+  it.each([
+    ['turn 0', 0, ['house-wall-front', 'house-roof-front', 'house-chimney'], ['house-wall-back']],
+    ['half a turn', Math.PI, ['house-wall-back', 'house-roof-back'], ['house-wall-front']],
+    ['a quarter turn', Math.PI / 2, ['house-wall-right'], ['house-wall-left']],
+    ['three quarters of a turn', (3 * Math.PI) / 2, ['house-wall-left'], ['house-wall-right']],
+  ] as const)('shows the right house faces, and only the right ones, at %s', (_name, turn, shown, hidden) => {
+    const seen = names(projectShape(only(houses()), turn));
+    expect(seen).toEqual(expect.arrayContaining([...shown]));
+    for (const n of hidden) expect(seen).not.toContain(n);
+    for (const n of seen) expect(HOUSE_DRAWINGS, `house face ${n}`).toContain(n);
   });
 
-  it('shows the back wall and back roof slope after half a turn, and not the front wall', () => {
-    const faces = projectShape(only(houses()), Math.PI);
-    expect(names(faces)).toEqual(expect.arrayContaining(['house-wall-back', 'house-roof-back']));
-    expect(names(faces)).not.toContain('house-wall-front');
-  });
-
-  it('shows the right wall after a quarter turn and the left wall after three quarters', () => {
-    const quarter = names(projectShape(only(houses()), Math.PI / 2));
-    expect(quarter).toContain('house-wall-right');
-    expect(quarter).not.toContain('house-wall-left');
-    const three = names(projectShape(only(houses()), (3 * Math.PI) / 2));
-    expect(three).toContain('house-wall-left');
-    expect(three).not.toContain('house-wall-right');
-  });
-
-  it('narrows the front wall as cos of the turn and widens the side wall as sin, smoothly', () => {
+  it('narrows the front wall as cos of the turn and widens the side wall as sin, smoothly, and carries it round the axis to x cos t - z sin t', () => {
     const house = only(houses());
+    const get = (t: number, name: string): ProjectedFace => face(projectShape(house, t), name) ?? expect.fail(`turn ${t}: no ${name}`);
     for (let k = 0; k <= 15; k++) {
       const t = k * 0.1;
-      const faces = projectShape(house, t);
-      const front = face(faces, 'house-wall-front');
-      if (front === undefined) expect.fail(`turn ${t}: no front wall`);
-      expect(Math.abs(extentX(front) - 28 * Math.cos(t)), `turn ${t}: front wall width`).toBeLessThanOrEqual(0.25);
-      if (k > 0) {
-        const side = face(faces, 'house-wall-right');
-        if (side === undefined) expect.fail(`turn ${t}: no right wall`);
-        expect(Math.abs(extentX(side) - 18 * Math.sin(t)), `turn ${t}: side wall width`).toBeLessThanOrEqual(0.25);
-      }
+      expect(Math.abs(extentX(get(t, 'house-wall-front')) - 28 * Math.cos(t)), `turn ${t}: front wall width`).toBeLessThanOrEqual(0.25);
+      if (k > 0) expect(Math.abs(extentX(get(t, 'house-wall-right')) - 18 * Math.sin(t)), `turn ${t}: side wall width`).toBeLessThanOrEqual(0.25);
     }
     for (const t of [0, Math.PI]) {
-      const wall = face(projectShape(house, t), t === 0 ? 'house-wall-front' : 'house-wall-back');
-      expect(wall && extentX(wall), `turn ${t}: square-on wall width`).toBeCloseTo(28, 6);
-      expect(wall && extentY(wall), `turn ${t}: walls stand at their full 15 rows`).toBeCloseTo(15, 6);
+      const wall = get(t, t === 0 ? 'house-wall-front' : 'house-wall-back');
+      expect(extentX(wall), `turn ${t}: square-on wall width`).toBeCloseTo(28, 6);
+      expect(extentY(wall), `turn ${t}: walls stand at their full 15 rows`).toBeCloseTo(15, 6);
     }
-  });
-
-  it('carries the house round the globe axis: the front wall centre sits at x cos t - z sin t', () => {
-    const house = only(houses());
     for (const t of [0, 0.4, 1, 1.4, -0.7, 5.5]) {
-      const front = face(projectShape(house, t), 'house-wall-front');
-      if (front === undefined) expect.fail(`turn ${t}: no front wall`);
-      const centre = xs(front).reduce((s, x) => s + x, 0) / front.corners.length;
-      const [want] = spin(house.x, house.z + house.depth / 2, t);
-      expect(Math.abs(centre - want), `turn ${t}: front wall centre across`).toBeLessThanOrEqual(0.25);
+      const front = get(t, 'house-wall-front');
+      const centre = xs(front).reduce((sum, x) => sum + x, 0) / front.corners.length;
+      expect(Math.abs(centre - spin(house.x, house.z + house.depth / 2, t)[0]), `turn ${t}: front wall centre across`).toBeLessThanOrEqual(0.25);
     }
   });
 
-  it('gives each present its own design drawings, a side and a top, and never another design', () => {
+  it('gives each present its own design drawings, a side and a top, never another design, the side square-on at turn 0 at the drawing size', () => {
     expect(presents().length).toBe(8);
     for (const p of presents()) {
       for (const t of [0, 1, 2.5, 4, 5.9]) {
@@ -401,12 +308,6 @@ describe('projectShape: turning a shape about the globe axis', () => {
         expect(faces, `design ${p.design} turn ${t}: its top is seen from above`).toContain(`present-${p.design}-top`);
         for (const n of faces) expect(n, `design ${p.design} turn ${t}`).toMatch(new RegExp(`^present-${p.design}-(side|top)$`));
       }
-    }
-  });
-
-  it('draws the present side square-on at turn 0 at the drawing size', () => {
-    expect(presents().length).toBe(8);
-    for (const p of presents()) {
       const side = projectShape(p, 0).filter((f) => f.drawing === `present-${p.design}-side`);
       expect(side.length, `design ${p.design}: one side square-on`).toBe(1);
       expect(extentX(side[0] as ProjectedFace)).toBeCloseTo(p.width, 6);
@@ -415,10 +316,9 @@ describe('projectShape: turning a shape about the globe axis', () => {
   });
 
   it('shows the lamp post the same from every side: its drawing, 5 across and 24 tall', () => {
-    const lamp = only(lamps());
     for (let k = 0; k < 24; k++) {
       const t = (k * FULL) / 24;
-      const post = face(projectShape(lamp, t), 'lamp-post');
+      const post = face(projectShape(only(lamps()), t), 'lamp-post');
       if (post === undefined) expect.fail(`turn ${t}: no lamp post face`);
       expect(extentX(post), `turn ${t}`).toBeCloseTo(5, 6);
       expect(extentY(post), `turn ${t}`).toBeCloseTo(24, 6);
@@ -459,25 +359,16 @@ describe('projectShape: turning a shape about the globe axis', () => {
     }
   });
 
-  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('throws a RangeError for a turn of %s', (turn) => {
-    expect(() => projectShape(only(houses()), turn)).toThrow(RangeError);
-  });
-
   it('is pure: the same faces for the same input, and the shape is left as it was', () => {
-    const house = only(houses());
-    const copy = Object.freeze({ ...house });
-    const a = projectShape(copy, 0.9);
-    expect(projectShape(copy, 0.9)).toEqual(a);
-    expect(copy).toEqual(house);
+    const copy = Object.freeze({ ...only(houses()) });
+    expect(projectShape(copy, 0.9)).toEqual(projectShape(copy, 0.9));
+    expect(copy).toEqual(only(houses()));
   });
 });
 
 describe('drawShapes: the shapes in the picture', () => {
-  it('draws the shapes: a house-sized patch of wholly covered pixels at turn 0', () => {
+  it('draws a house-sized patch of wholly covered pixels at turn 0, the front wall drawing on the grid in its own colour numbers, windows lit', () => {
     expect(solidIndexes(drawn(0)).length).toBeGreaterThanOrEqual(22 * 12);
-  });
-
-  it('puts the front wall drawing on the grid at turn 0 in its own colour numbers, windows lit', () => {
     const house = only(houses());
     const front = face(projectShape(house, 0), 'house-wall-front');
     if (front === undefined) expect.fail('no front wall at turn 0');
@@ -552,7 +443,7 @@ describe('drawShapes: the shapes in the picture', () => {
     expect(overlaps, 'overlapping shape pixels checked').toBeGreaterThan(0);
   });
 
-  it('draws the same picture whatever order the shapes are listed in', () => {
+  it('draws the same picture whatever order the shapes are listed in, and nothing for an empty list', () => {
     const reversed = [...globeShapes].reverse();
     const shuffled = globeShapes.map((s, i) => [s, (i * 7) % 10] as const).sort((a, b) => a[1] - b[1]).map(([s]) => s);
     for (const turn of [0, 1.1, 3.9]) {
@@ -560,11 +451,7 @@ describe('drawShapes: the shapes in the picture', () => {
       expect(Array.from(drawn(turn, reversed).a), `turn ${turn} reversed`).toEqual(want);
       expect(Array.from(drawn(turn, shuffled).a), `turn ${turn} shuffled`).toEqual(want);
     }
-  });
-
-  it('draws nothing for an empty shape list', () => {
-    const d = drawn(0.7, []);
-    expect(d.a.every((c) => c === FILL_A)).toBe(true);
+    expect(drawn(0.7, []).a.every((c) => c === FILL_A)).toBe(true);
   });
 
   it.each(SIZES)('changes nothing outside the glass (inside its rim) and nothing on the base rows at %s x %s, at every turn', (width, height) => {
@@ -587,10 +474,8 @@ describe('drawShapes: the shapes in the picture', () => {
 
   it('turns the shapes in whole pixels: every pixel is untouched, wholly one of the drawings\' colours, or the flat floor shade, never a mix, at every small step of the turn', () => {
     const shade = (under: number): number => {
-      const [r, g, b] = rgb(under);
-      const [ir, ig, ib] = rgb(SHADOW_INK);
-      const mix = (u: number, i: number): number => Math.round(u + (i - u) * SHADOW_SHARE);
-      return (mix(r, ir) << 16) | (mix(g, ig) << 8) | mix(b, ib);
+      const [r, g, b] = rgb(under).map((u, k) => Math.round(u + ((rgb(SHADOW_INK)[k] ?? 0) - u) * SHADOW_SHARE)) as [number, number, number];
+      return (r << 16) | (g << 8) | b;
     };
     // Overlapping shadows take their shade once, so the flat shade may still repeat across separate shadows.
     const nearestShade = (got: number, under: number): number => {
@@ -663,13 +548,9 @@ describe('drawShapes: the shapes in the picture', () => {
       const picture = new Uint32Array(W * H).fill(FILL_MID);
       drawShapes(picture, W, LAYOUT, NIGHT, turn);
       const mask = faceMask(LAYOUT, turn);
-      let shadow = 0;
-      let shadowX = 0;
-      let bodies = 0;
-      let bodyX = 0;
+      let [shadow, shadowX, bodies, bodyX] = [0, 0, 0, 0];
       for (let i = 0; i < picture.length; i++) {
-        const x = i % W;
-        const y = Math.floor(i / W);
+        const [x, y] = [i % W, Math.floor(i / W)];
         if (mask[i] === 1) {
           bodies++;
           bodyX += x;
@@ -688,7 +569,8 @@ describe('drawShapes: the shapes in the picture', () => {
     }
   });
 
-  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('throws a RangeError for a turn of %s and leaves the picture alone', (turn) => {
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('throws a RangeError for a turn of %s (projectShape and drawShapes) and leaves the picture alone', (turn) => {
+    expect(() => projectShape(only(houses()), turn)).toThrow(RangeError);
     const picture = new Uint32Array(W * H).fill(FILL_A);
     expect(() => drawShapes(picture, W, LAYOUT, NIGHT, turn)).toThrow(RangeError);
     expect(picture.every((c) => c === FILL_A)).toBe(true);
@@ -777,9 +659,7 @@ function apart(p: ColourRange, q: ColourRange): boolean {
   return [0, 1, 2].some((i) => (p.lo[i] ?? 0) - (q.hi[i] ?? 0) > 16 || (q.lo[i] ?? 0) - (p.hi[i] ?? 0) > 16);
 }
 
-function hex(n: number): string {
-  return `#${n.toString(16).padStart(6, '0')}`;
-}
+const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
 
 describe('drawShapes: the house is one solid, its own faces hiding each other', () => {
   // Review bug 1: the gable ends are see-through. The house (box walls under
@@ -837,20 +717,15 @@ describe('drawShapes: the house is one solid, its own faces hiding each other', 
     expect(mixed, 'overlap pixels showing a mix of two faces').toEqual([]);
   }, 60_000);
 
-  // XMAS-59: the roof slope stands in front of the chimney where they overlap,
-  // so the chimney's foot reads as set into the roof, not pasted over it.
-  it('lays the chimney under the roof slope where they overlap at a quarter turn, so the slope shows', () => {
-    const house = only(houses());
-    const turn = Math.PI / 2;
-    const faces = projectShape(house, turn);
+  /** The chimney pixels that a roof slope overlaps, and those among them not showing the slope's colours. */
+  function chimneyUnderRoof(turn: number, faces: readonly ProjectedFace[], d: Drawn, rows?: [number, number]): { checked: number; wrong: string[] } {
     const chimney = face(faces, 'house-chimney');
-    if (chimney === undefined) expect.fail('no chimney at a quarter turn');
+    if (chimney === undefined) expect.fail(`no chimney at turn ${turn.toFixed(2)}`);
     const roofs = faces.filter((f) => f.drawing.startsWith('house-roof-'));
-    expect(roofs.length, 'roof slopes shown at a quarter turn').toBeGreaterThan(0);
-    const d = drawn(turn, [house]);
+    expect(roofs.length, `turn ${turn.toFixed(2)}: roof slopes shown`).toBeGreaterThan(0);
     let checked = 0;
     const wrong: string[] = [];
-    for (let y = 0; y < H; y++) {
+    for (let y = rows?.[0] ?? 0; y <= (rows?.[1] ?? H - 1); y++) {
       for (let x = 0; x < W; x++) {
         const own = colourRange(chimney, LAYOUT, x, y);
         if (own === undefined) continue;
@@ -858,18 +733,24 @@ describe('drawShapes: the house is one solid, its own faces hiding each other', 
         if (over.length === 0) continue;
         checked++;
         const got = d.a[y * W + x] ?? -1;
-        if (!over.some((r) => withinRange(got, r))) wrong.push(`${x},${y}: ${hex(got)} is not in the roof slope's colours`);
+        if (!over.some((r) => withinRange(got, r)) && wrong.length < 8) wrong.push(`turn ${turn.toFixed(2)} pixel ${x},${y}: ${hex(got)} is not in the roof slope's colours`);
       }
     }
+    return { checked, wrong };
+  }
+
+  // XMAS-59: the roof slope stands in front of the chimney where they overlap,
+  // so the chimney's foot reads as set into the roof, not pasted over it.
+  it('lays the chimney under the roof slope where they overlap at a quarter turn, so the slope shows', () => {
+    const house = only(houses());
+    const turn = Math.PI / 2;
+    const { checked, wrong } = chimneyUnderRoof(turn, projectShape(house, turn), drawn(turn, [house]));
     expect(checked, 'chimney pixels under a roof slope').toBeGreaterThan(0);
     expect(wrong, 'chimney pixels under the roof slope').toEqual([]);
   });
 
-  // XMAS-59: the ridge runs slanted on screen while the chimney's foot is
-  // flat, so its ends hung over the roof at many turns; the foot is sunk into
-  // the roof, and the roof slope covers the chimney wherever they overlap. At
-  // every sampled turn the pixel just under the foot is the house's own, and a
-  // pixel shared by the chimney and a roof slope shows the slope's colour.
+  // XMAS-59: the ridge runs slanted while the chimney's foot is flat, so its
+  // ends hung over the roof at many turns; the foot is sunk into the roof.
   it('sets the chimney foot into the roof at every sampled turn: no gap under it, the slope over it', () => {
     const house = only(houses());
     const gaps: string[] = [];
@@ -878,27 +759,15 @@ describe('drawShapes: the house is one solid, its own faces hiding each other', 
     for (let k = 0; k < 48; k++) {
       const turn = (k * FULL) / 48;
       const faces = projectShape(house, turn);
-      const chimney = face(faces, 'house-chimney');
-      if (chimney === undefined) expect.fail(`no chimney at turn ${turn.toFixed(2)}`);
-      const roofs = faces.filter((f) => f.drawing.startsWith('house-roof-'));
+      const chimney = face(faces, 'house-chimney') as ProjectedFace;
       const row = Math.floor(LAYOUT.globe.cy + Math.max(...ys(chimney)));
       const d = drawn(turn, [house]);
-      const left = Math.floor(LAYOUT.globe.cx + Math.min(...xs(chimney)));
-      const right = Math.ceil(LAYOUT.globe.cx + Math.max(...xs(chimney)));
-      for (let x = left; x < right; x++) {
+      for (let x = Math.floor(LAYOUT.globe.cx + Math.min(...xs(chimney))); x < Math.ceil(LAYOUT.globe.cx + Math.max(...xs(chimney))); x++) {
         if (!solid(d, row * W + x)) gaps.push(`turn ${turn.toFixed(2)} pixel ${x},${row}`);
       }
-      for (let y = Math.floor(LAYOUT.globe.cy + Math.min(...ys(chimney))); y <= row; y++) {
-        for (let x = left; x < right; x++) {
-          const own = colourRange(chimney, LAYOUT, x, y);
-          if (own === undefined) continue;
-          const over = roofs.map((f) => colourRange(f, LAYOUT, x, y)).filter((r): r is ColourRange => r !== undefined && apart(r, own));
-          if (over.length === 0) continue;
-          overlaps++;
-          const got = d.a[y * W + x] ?? -1;
-          if (!over.some((r) => withinRange(got, r)) && wrong.length < 8) wrong.push(`turn ${turn.toFixed(2)} pixel ${x},${y}: ${hex(got)} is not in the roof slope's colours`);
-        }
-      }
+      const r = chimneyUnderRoof(turn, faces, d, [Math.floor(LAYOUT.globe.cy + Math.min(...ys(chimney))), row]);
+      overlaps += r.checked;
+      wrong.push(...r.wrong);
     }
     expect(overlaps, 'chimney pixels shared with a roof slope').toBeGreaterThan(0);
     expect(gaps, 'pixels under the chimney foot showing the background').toEqual([]);
