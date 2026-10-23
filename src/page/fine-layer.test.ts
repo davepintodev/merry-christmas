@@ -18,6 +18,7 @@ import { flakeSize, type SnowStep } from '../scene/snow-draw-list.ts';
 import type { GlassLayer } from '../scene/glass-layer.ts';
 import type { FineTrace } from './frame-trace.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
+import { IDENTITY, through, type Matrix, type Point } from '../../tests/helpers/matrix.ts';
 
 const W = 240;
 const H = 180;
@@ -26,13 +27,10 @@ const BOX = leanBox(W, LAYOUT);
 const BW = BOX.right - BOX.left + 1;
 const BH = BOX.bottom - BOX.top;
 const SITE: FineSite = { scale: 3, ratio: 1.5, left: 7 };
-const IDENTITY = [1, 0, 0, 1, 0, 0];
 const FRACTIONAL: FineSite = { scale: 5, ratio: 1.25, left: 12.8 };
 const NARROW: FineSite = { scale: 3, ratio: 1.5, left: -41.333333333333336 };
 
-type Matrix = number[];
 type Call = { source: HTMLCanvasElement; args: number[]; matrix: Matrix; smoothing: boolean; clips: Region[] };
-type Point = [number, number];
 /** XMAS-82: a region of the canvas in device pixels, as a test of a device point. */
 type Region = (x: number, y: number) => boolean;
 type Fill = { seq: number; style: string; alpha: number; points: Point[]; clips: Region[]; region: Region };
@@ -277,12 +275,6 @@ function windingOf(pts: readonly Point[], px: number, py: number): number {
     else if (by <= py && ay > py && side < 0) winding -= 1;
   }
   return winding;
-}
-
-/** Where a matrix puts a point of its source space. */
-function through(m: readonly number[], x: number, y: number): Point {
-  const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = m;
-  return [a * x + c * y + e, b * x + d * y + f];
 }
 
 /** The device corners (top-left, top-right, bottom-left, bottom-right) the layer should cover for a step: the drawing's own footprint. */

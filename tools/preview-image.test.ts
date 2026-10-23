@@ -1,25 +1,17 @@
 // XMAS-42a: the share-preview picture, 1200 by 630, drawn by the fine layer.
 // The owner approves the picture by eye on the frames page; the layout test
 // below pins the globe's centring and the central 630 square.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import os from 'node:os';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { sceneLayout } from '../src/scene/frame.ts';
 import { BASE_WIDTH } from '../src/scene/base-fine.ts';
 import { referenceProblems, updateReferences } from './frames.ts';
 import { decodePng } from './png.ts';
 import { PREVIEW_HEIGHT, PREVIEW_WIDTH, PREVIEW_ZOOM, renderPreview } from './preview-image.ts';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-preview-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-preview-');
 
 describe('renderPreview', () => {
   const bytes = renderPreview();

@@ -1,20 +1,17 @@
 // XMAS-85: tools/turn-sequence.ts, run as the CLI (`pnpm run frames:turn <dir>`),
 // which has no exports: its output folder is what is checked.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import os from 'node:os';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { fineFrame } from './fine-frames.ts';
 import { referenceFrames } from './frames.ts';
 import { decodePng } from './png.ts';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const temps: string[] = [];
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-turn-');
 
 const run = (args: string[]) => spawnSync(process.execPath, [path.join(ROOT, 'tools', 'turn-sequence.ts'), ...args], { cwd: ROOT, encoding: 'utf8', timeout: 120_000 });
 
@@ -26,8 +23,7 @@ describe('turn-sequence', () => {
     expect(r.stdout).toBe('');
   });
 
-  const dir = path.join(mkdtempSync(path.join(os.tmpdir(), 'xmas-turn-')), 'nested', 'out');
-  temps.push(path.dirname(path.dirname(dir)));
+  const dir = path.join(tempDir(), 'nested', 'out');
   let result: ReturnType<typeof run>;
   beforeAll(() => {
     result = run([dir]);

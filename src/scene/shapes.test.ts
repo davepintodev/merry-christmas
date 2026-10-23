@@ -16,6 +16,7 @@ import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { GLOBE_RADIUS, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
 import { drawShapes } from './shapes-draw.ts';
 import { floorDisc, globeShapes, projectShape, type GlobeShape, type ProjectedFace } from './shapes.ts';
+import { bare, colourAt, FILL_A, FILL_B, hexNum, overPlain, solid, type Drawn } from '../../tests/helpers/scene.ts';
 
 // The slice-1 globe (glass, base, lettering, no shapes) is sceneFrame with
 // drawShapes switched off; every other test draws the real shapes.
@@ -46,9 +47,6 @@ const SEED = 12345;
 const T = 1_000_000;
 const FULL = 2 * Math.PI;
 const SIZES: [number, number][] = [[W, H], [320, 180], [240, 300], [161, 172], [2 * GLOBE_RADIUS, 172]];
-/** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by a shape. */
-const FILL_A = 0x010203;
-const FILL_B = 0xfdfcfb;
 /** A mid-tone floor for the shadow, so darker is visible. */
 const FILL_MID = 0x8090a0;
 const LAYOUT = sceneLayout(W, H, SEED);
@@ -58,7 +56,6 @@ const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => sceneLayout(w, h, SEED).gr
 
 const HOUSE_DRAWINGS = ['house-wall-front', 'house-wall-back', 'house-wall-left', 'house-wall-right', 'house-roof-front', 'house-roof-back', 'house-chimney'];
 
-const hexNum = (hex: string): number => Number.parseInt(hex.slice(1), 16);
 const rgb = (n: number): [number, number, number] => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 
 /** The floor shadow's flat shade: this ink at this share over what is under it (as shapes-draw.ts paints it). */
@@ -81,12 +78,6 @@ function drawing(name: string): Drawing {
   const d = drawings[name];
   if (d === undefined) throw new Error(`no drawing ${name}`);
   return d;
-}
-
-/** A drawing's colour at (x, y), as a 0xRRGGBB number; -1 when transparent. */
-function colourAt(d: Drawing, x: number, y: number): number {
-  const n = d.pixels[y * d.width + x] ?? 0;
-  return n === 0 ? -1 : hexNum(masterColours[n - 1] ?? '#000000');
 }
 
 /** Every colour a drawing uses. */
@@ -151,22 +142,11 @@ function nearer(a: GlobeShape, b: GlobeShape, t: number): boolean | undefined {
   return votes[0];
 }
 
-interface Drawn { a: Uint32Array; b: Uint32Array; layout: SceneLayout; width: number }
-
 /** drawShapes over the two plain backgrounds. */
 function drawn(turn: number, shapes: readonly GlobeShape[] = globeShapes, layout: SceneLayout = LAYOUT, phase: PhaseReading = NIGHT): Drawn {
-  const width = layout.width;
-  const a = new Uint32Array(width * layout.height).fill(FILL_A);
-  const b = new Uint32Array(width * layout.height).fill(FILL_B);
-  drawShapes(a, width, layout, phase, turn, shapes);
-  drawShapes(b, width, layout, phase, turn, shapes);
-  return { a, b, layout, width };
+  return overPlain(layout, (pic, width) => drawShapes(pic, width, layout, phase, turn, shapes));
 }
 
-/** Wholly covered by a shape: the same colour over both backgrounds. */
-const solid = (d: Drawn, i: number): boolean => d.a[i] === d.b[i] && d.a[i] !== FILL_A;
-/** Untouched: each background shows. */
-const bare = (d: Drawn, i: number): boolean => d.a[i] === FILL_A && d.b[i] === FILL_B;
 const solidIndexes = (d: Drawn): number[] => Array.from(d.a.keys()).filter((i) => solid(d, i));
 
 function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {

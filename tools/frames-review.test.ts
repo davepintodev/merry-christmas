@@ -2,25 +2,17 @@
 // review page, without a browser: the frame list read from the folder at run
 // time, each frame's display name, the whole-number scale it is shown at,
 // and the result string the owner copies back.
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { displayName, frameList, frameScale, resultString, type ReviewEntry } from './frames-review.ts';
 import { encodePng } from './png.ts';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-review-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-review-');
 
 const TINY = encodePng(1, 1, Uint8Array.from([1, 2, 3, 255]));
 

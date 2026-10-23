@@ -4,25 +4,17 @@
 // Brotli size is close to their input size.
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(ROOT, 'tools', 'check-caps.ts');
 const CAP_NAMES = ['before-countdown', 'globe-ready', 'total', 'preview'];
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-check-caps-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-check-caps-');
 
 function runCaps(args: string[], cwd = ROOT): SpawnSyncReturns<string> {
   return spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8', timeout: 60_000 });

@@ -7,23 +7,17 @@ import { describe, expect, it } from 'vitest';
 import { sceneFrame, sceneLayout, GLOBE_RADIUS, type SceneFrame, type SceneInput } from './frame.ts';
 import { keepBackdrop, leanBox, leanGlass, rowShift, shiftAt, MAX_LEAN } from './lean.ts';
 import { createGlobeSnow, stepGlobeSnow } from './snow.ts';
-import type { PhaseName, PhaseReading } from '../shared/clock.ts';
+import type { PhaseReading } from '../shared/clock.ts';
+import { at } from '../../tests/helpers/scene.ts';
+import { steady } from '../../tests/helpers/phase.ts';
 
 const W = 400;
 const H = 260;
 const T = 1_000_000;
 const SEED = 99;
 
-function steady(phase: PhaseName): PhaseReading {
-  return { from: phase, to: phase, share: 0 };
-}
-
 function input(over: Partial<SceneInput> = {}): SceneInput {
   return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
-}
-
-function at(f: SceneFrame, x: number, y: number): number {
-  return f.picture[y * f.width + x] ?? -1;
 }
 
 /** Mean column of the globe's pixels (not the row's sky, not a star) over the glass's top rows. */

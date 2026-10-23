@@ -10,6 +10,8 @@ import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput, type SceneLayout } from './frame.ts';
 import { BASE_FOOT_ROWS, BASE_ROWS, BASE_WIDTH, renderBase } from './base-fine.ts';
 import { BASE_SINK, drawGlobe, NO_FRONT } from './globe.ts';
+import { at, hexNum } from '../../tests/helpers/scene.ts';
+import { steady } from '../../tests/helpers/phase.ts';
 
 // The XMAS-31 picture (sky, ground, disc, stars, no globe) is sceneFrame with
 // drawGlobe switched off; every other test draws the real globe.
@@ -68,10 +70,6 @@ function discFlushClears(l: SceneLayout): boolean {
   return true;
 }
 
-function steady(phase: PhaseName): PhaseReading {
-  return { from: phase, to: phase, share: 0 };
-}
-
 function input(over: Partial<SceneInput> = {}): SceneInput {
   return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
 }
@@ -84,14 +82,6 @@ function baseline(over: Partial<SceneInput> = {}): SceneFrame {
   } finally {
     globeOn.value = true;
   }
-}
-
-function hexNum(hex: string): number {
-  return Number.parseInt(hex.slice(1), 16);
-}
-
-function at(f: SceneFrame, x: number, y: number): number {
-  return f.picture[y * f.width + x] ?? -1;
 }
 
 /** Pixel centre within radius + margin of the globe's centre. */

@@ -24,7 +24,6 @@
 //   clipped to the glass circle. Non-finite turn or time: RangeError, picture
 //   untouched (as projectShape and drawShapes do).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../shared/art.generated.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { sceneFrame, sceneLayout, type SceneLayout } from './frame.ts';
@@ -32,6 +31,7 @@ import { drawGlobe } from './globe.ts';
 import { drawSanta, santaPlacement } from './santa.ts';
 import { projectPoint } from './shapes.ts';
 import { createDrag, DRAG_SETTINGS } from '../page/drag.ts';
+import { colourAt, FILL_A, FILL_B, overPlain, solid, type Drawn } from '../../tests/helpers/scene.ts';
 
 const BLOCK = 0x123456;
 const shapesMode = vi.hoisted(() => ({ block: false }));
@@ -66,9 +66,6 @@ const ORBIT = santaPlacement(-2, 0).x;
 const GLASS_MARGIN = 2;
 /** The ground tilt the shapes use: a step towards the visitor moves a floor point this far down. */
 const TILT = projectPoint(0, 1, 0, 0)[1] - projectPoint(0, 0, 0, 0)[1];
-/** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by Santa. */
-const FILL_A = 0x010203;
-const FILL_B = 0xfdfcfb;
 /** One scene step: 60 a second. */
 const STEP_MS = 1000 / 60;
 /** The most whole pixels any edge of his painted box may jump in one step (transparent edge columns allow a little more than one). */
@@ -85,11 +82,6 @@ function drawing(name: string): Drawing {
   const d = drawings[name];
   if (d === undefined) throw new Error(`no drawing ${name}`);
   return d;
-}
-
-function colourAt(d: Drawing, x: number, y: number): number {
-  const n = d.pixels[y * d.width + x] ?? 0;
-  return n === 0 ? -1 : Number.parseInt((masterColours[n - 1] ?? '#000000').slice(1), 16);
 }
 
 /** The colour of every opaque pixel of the drawing. */
@@ -117,20 +109,9 @@ function expected(turn: number, timeMs: number): Expected {
   };
 }
 
-interface Drawn { a: Uint32Array; b: Uint32Array; width: number }
-
 /** drawSanta over the two plain backgrounds. */
 function drawn(turn: number, timeMs: number, layout: SceneLayout = LAYOUT): Drawn {
-  const over = (fill: number): Uint32Array => {
-    const pic = new Uint32Array(layout.width * layout.height).fill(fill);
-    drawSanta(pic, layout.width, layout, turn, timeMs);
-    return pic;
-  };
-  return { a: over(FILL_A), b: over(FILL_B), width: layout.width };
-}
-
-function solid(d: Drawn, i: number): boolean {
-  return d.a[i] === d.b[i] && d.a[i] !== FILL_A;
+  return overPlain(layout, (pic, width) => drawSanta(pic, width, layout, turn, timeMs));
 }
 
 function touchedIndexes(d: Drawn): number[] {

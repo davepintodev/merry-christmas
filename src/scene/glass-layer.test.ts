@@ -6,16 +6,12 @@ import { sceneFrame, type SceneInput } from './frame.ts';
 import { BASE_SINK } from './globe.ts';
 import { glassLayer } from './glass-layer.ts';
 import { pictureWithOpenBackdrop } from './backdrop-lean.ts';
-import type { PhaseName, PhaseReading } from '../shared/clock.ts';
+import { steady } from '../../tests/helpers/phase.ts';
 
 const W = 400;
 const H = 260;
 const T = 1_000_000;
 const SEED = 99;
-
-function steady(phase: PhaseName): PhaseReading {
-  return { from: phase, to: phase, share: 0 };
-}
 
 function input(over: Partial<SceneInput> = {}): SceneInput {
   return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: true, shapeBodies: false, ...over };

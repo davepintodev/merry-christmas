@@ -21,6 +21,7 @@ import { flakeSize, type SnowStep } from '../scene/snow-draw-list.ts';
 import { makeFineLayer, type FineFrame, type FineSite } from './fine-layer.ts';
 import { blankFineTrace, type FineTrace } from './frame-trace.ts';
 import { paintSantaOver } from './fine-layer-santa.ts';
+import { IDENTITY, through, type Matrix, type Point } from '../../tests/helpers/matrix.ts';
 
 const W = 240;
 const H = 180;
@@ -28,10 +29,7 @@ const LAYOUT = sceneLayout(W, H, 7);
 const BOX = leanBox(W, LAYOUT);
 const BW = BOX.right - BOX.left + 1;
 const BH = BOX.bottom - BOX.top;
-const IDENTITY = [1, 0, 0, 1, 0, 0];
 
-type Matrix = number[];
-type Point = [number, number];
 type Op = { canvas: FakeCanvas; kind: 'face' | 'ink'; seq: number; args: number[]; matrix: Matrix };
 
 function near(p: readonly number[], q: readonly number[]): boolean {
@@ -41,11 +39,6 @@ function near(p: readonly number[], q: readonly number[]): boolean {
 /** Whether a matrix is a pure translation, so its draw is a copy and not a face. */
 function copying(m: readonly number[]): boolean {
   return near(m.slice(0, 4), IDENTITY.slice(0, 4));
-}
-
-function through(m: readonly number[], x: number, y: number): Point {
-  const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = m;
-  return [a * x + c * y + e, b * x + d * y + f];
 }
 
 function inside(poly: readonly Point[], x: number, y: number): boolean {

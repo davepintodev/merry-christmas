@@ -2,26 +2,18 @@
 // colour numbers, the two build-stopping errors, the GIMP palette file, the
 // generated art module and the whole build step. Every sheet here is a small
 // made-up PNG built with node:zlib; none depends on the real art.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ArtBuildError, buildArt, generateArtModule, gplFile, packSheet, type SheetSpec } from './art.ts';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-art-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-art-');
 
 function chunk(type: string, data: Uint8Array): Buffer {
   const typeAndData = Buffer.concat([Buffer.from(type, 'latin1'), data]);

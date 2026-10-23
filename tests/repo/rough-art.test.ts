@@ -2,15 +2,15 @@
 // house.png, santa.png, props.png, base.png and buttons.png at rough level.
 // Every check reads the real art/sheets through the art build, run here into
 // a temp dir so the committed outputs are never touched.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import os from 'node:os';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { masterColours } from '../../art/colours.ts';
 import { maxColoursPerObject, objects, type ArtObject } from '../../art/objects.ts';
 import { sheets } from '../../art/sheets.ts';
 import { buildArt, type SheetSpec } from '../../tools/art.ts';
+import { useTempDirs } from '../helpers/temp.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHEETS_DIR = path.join(ROOT, 'art', 'sheets');
@@ -18,15 +18,7 @@ const NEW_SHEET_FILES = ['house.png', 'santa.png', 'props.png', 'base.png', 'but
 
 type Drawing = { sheet: string; x: number; y: number; width: number; height: number; pixels: Uint8Array };
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-rough-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-rough-');
 
 function buildInto(dir: string, sheetsDir: string, list: readonly SheetSpec[] = sheets) {
   const out = { moduleFile: path.join(dir, 'art.generated.ts'), gplFile: path.join(dir, 'xmas.gpl') };

@@ -7,11 +7,12 @@
 // were removed with the switch off: bring them back from git history (before
 // the test cleanup) if the hint is switched on again.
 import { describe, expect, it } from 'vitest';
-import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { BASE_ROWS } from './base-fine.ts';
 import { MIN_HEIGHT, sceneFrame, sceneLayout, type SceneFrame, type SceneInput } from './frame.ts';
 import { BASE_SINK } from './globe.ts';
 import { HINT_ENABLED, hintText, paintHint } from './hint.ts';
+import { at } from '../../tests/helpers/scene.ts';
+import { steady } from '../../tests/helpers/phase.ts';
 
 const HINT = 'DRAG TO SPIN AND STIR';
 /** The base's rows below the horizon: its top BASE_SINK rows rise over the glass's foot. */
@@ -20,16 +21,8 @@ const BASE_HEIGHT = BASE_ROWS - BASE_SINK;
 const SHADOW_ROWS = 7;
 const SEED = 4242;
 
-function steady(phase: PhaseName): PhaseReading {
-  return { from: phase, to: phase, share: 0 };
-}
-
 function input(over: Partial<SceneInput> = {}): SceneInput {
   return { time: 1_000_000, drag: 0, phase: steady('purple-night'), seed: SEED, width: 130, height: 260, backdrop: false, ...over };
-}
-
-function at(f: SceneFrame, x: number, y: number): number {
-  return f.picture[y * f.width + x] ?? -1;
 }
 
 /** First row under the base. */

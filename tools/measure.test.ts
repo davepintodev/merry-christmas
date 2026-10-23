@@ -1,22 +1,14 @@
 // XMAS-24 "Cap script: download caps checked after every build": the I/O
 // layer. Brotli sizing and listing built files, against temp dirs.
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { brotliCompressSync, constants } from 'node:zlib';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { brotliSize, measureDir } from './measure.ts';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-caps-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-caps-');
 
 describe('brotliSize', () => {
   it('compresses repetitive data to less than its input size', () => {

@@ -3,12 +3,11 @@
 // `pnpm run test:unit` runs, and the `pnpm frames` viewing page. Pictures are
 // PNGs written with tools/png.ts; only the update command writes them.
 import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { BASE_ROWS } from '../src/scene/base-fine.ts';
 import { sceneFrame } from '../src/scene/frame.ts';
 import { BASE_SINK } from '../src/scene/globe.ts';
@@ -17,6 +16,7 @@ import { drawSanta } from '../src/scene/santa.ts';
 import type { PhaseName } from '../src/shared/clock.ts';
 import { framesAddress, referenceFrames, referenceProblems, renderReference, updateReferences } from './frames.ts';
 import { decodePng, encodePng } from './png.ts';
+import { useTempDirs } from '../tests/helpers/temp.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NAMES = [
@@ -55,15 +55,7 @@ const TURNED: [string, PhaseName, number][] = [
 const FILES = [...NAMES, 'preview'].map((n) => `${n}.png`).sort();
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 
-const temps: string[] = [];
-function tempDir(): string {
-  const d = mkdtempSync(path.join(os.tmpdir(), 'xmas-frames-'));
-  temps.push(d);
-  return d;
-}
-afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
-});
+const tempDir = useTempDirs('xmas-frames-');
 
 function snapshot(dir: string): Record<string, string> {
   const out: Record<string, string> = {};

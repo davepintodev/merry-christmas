@@ -4,6 +4,7 @@
 // (phases and blends). Every local date is built after the zone is set.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeClock, phaseAt, timeLeft, type PhaseName, type PhaseReading } from './clock.ts';
+import { steady } from '../../tests/helpers/phase.ts';
 
 const originalTZ = process.env['TZ'];
 function setTZ(tz: string): void {
@@ -31,10 +32,6 @@ function weight(r: PhaseReading, phase: PhaseName): number {
   if (r.from === phase) w += 1 - r.share;
   if (r.to === phase) w += r.share;
   return w;
-}
-
-function steady(phase: PhaseName): PhaseReading {
-  return { from: phase, to: phase, share: 0 };
 }
 
 describe('timeLeft: counting down to 25 December', () => {

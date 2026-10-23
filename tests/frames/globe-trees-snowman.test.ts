@@ -15,12 +15,12 @@
 // 'snowman-face', 'snowman-arms' and 'snowman-scarf'. A four-cornered face's
 // corners are its drawing's top left, top right, bottom right and bottom left.
 import { describe, expect, it } from 'vitest';
-import { masterColours } from '../../art/colours.ts';
 import { drawings, type Drawing } from '../../src/shared/art.generated.ts';
 import type { PhaseName, PhaseReading } from '../../src/shared/clock.ts';
 import { GLOBE_RADIUS, sceneFrame, sceneLayout, type SceneLayout } from '../../src/scene/frame.ts';
 import { drawShapes } from '../../src/scene/shapes-draw.ts';
 import { globeShapes, onFloor, projectPoint, projectShape, type GlobeShape, type ProjectedFace } from '../../src/scene/shapes.ts';
+import { bare, colourAt, FILL_A, overPlain, solid, type Drawn } from '../helpers/scene.ts';
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 const READINGS: [string, PhaseReading][] = [
@@ -34,9 +34,6 @@ const SEED = 12345;
 const T = 1_000_000;
 const FULL = 2 * Math.PI;
 const SIZES: [number, number][] = [[W, H], [320, 180], [240, 300], [161, 172], [2 * GLOBE_RADIUS, 172]];
-/** Two backgrounds no drawing uses: a pixel that comes out the same over both is wholly covered by a shape. */
-const FILL_A = 0x010203;
-const FILL_B = 0xfdfcfb;
 const LAYOUT = sceneLayout(W, H, SEED);
 const NIGHT: PhaseReading = { from: 'purple-night', to: 'purple-night', share: 0 };
 /** The rows below the globe's centre still above the base, in the shortest picture. */
@@ -45,10 +42,6 @@ const LOWEST_FREE = Math.min(...SIZES.map(([w, h]) => sceneLayout(w, h, SEED)).m
 const SPRITE_COLOURS = new Set<number>(Object.values(drawings).flatMap((d) => [...palette(d)]));
 const SNOWMAN_DRAWINGS = ['snowman-body', 'snowman-face', 'snowman-arms', 'snowman-scarf', 'snowman-buttons'];
 const TURNING_KINDS = new Set(['house', 'present', 'lamp-post']);
-
-function hexNum(hex: string): number {
-  return Number.parseInt(hex.slice(1), 16);
-}
 
 function rgb(n: number): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -69,12 +62,6 @@ function drawing(name: string): Drawing {
   const d = drawings[name];
   if (d === undefined) throw new Error(`no drawing ${name}`);
   return d;
-}
-
-/** A drawing's colour at (x, y), as a 0xRRGGBB number; -1 when transparent. */
-function colourAt(d: Drawing, x: number, y: number): number {
-  const n = d.pixels[y * d.width + x] ?? 0;
-  return n === 0 ? -1 : hexNum(masterColours[n - 1] ?? '#000000');
 }
 
 /** Every colour a drawing uses. */
@@ -151,24 +138,11 @@ function expectOnGrid(f: ProjectedFace, why: string): void {
   expect(Math.abs(top - Math.round(top)), `${why}: top edge on the grid`).toBeLessThan(1e-9);
 }
 
-interface Drawn { a: Uint32Array; b: Uint32Array; layout: SceneLayout; width: number }
-
 /** drawShapes over the two plain backgrounds. */
 function drawn(turn: number, shapes: readonly GlobeShape[], layout: SceneLayout = LAYOUT, phase: PhaseReading = NIGHT): Drawn {
-  const width = layout.width;
-  const a = new Uint32Array(width * layout.height).fill(FILL_A);
-  const b = new Uint32Array(width * layout.height).fill(FILL_B);
-  drawShapes(a, width, layout, phase, turn, shapes);
-  drawShapes(b, width, layout, phase, turn, shapes);
-  return { a, b, layout, width };
+  return overPlain(layout, (pic, width) => drawShapes(pic, width, layout, phase, turn, shapes));
 }
 
-/** Wholly covered by a shape: the same colour over both backgrounds. */
-function solid(d: Drawn, i: number): boolean {
-  return d.a[i] === d.b[i] && d.a[i] !== FILL_A;
-}
-
-const bare = (d: Drawn, i: number): boolean => d.a[i] === FILL_A && d.b[i] === FILL_B;
 const solidIndexes = (d: Drawn): number[] => Array.from(d.a, (_, i) => i).filter((i) => solid(d, i));
 
 /** The colours wholly covered pixels show. */

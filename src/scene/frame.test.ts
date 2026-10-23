@@ -15,6 +15,8 @@ import { DISC_MARGIN, DISC_SIZE, GLOBE_RADIUS, MIN_HEIGHT, sceneFrame, sceneLayo
 import { BASE_ROWS, BASE_WIDTH } from './base-fine.ts';
 import { BASE_SINK } from './globe.ts';
 import { createGlobeSnow, stepGlobeSnow, type Flake, type GlobeSnow } from './snow.ts';
+import { at, hexNum } from '../../tests/helpers/scene.ts';
+import { steady } from '../../tests/helpers/phase.ts';
 
 const PHASES: PhaseName[] = ['dawn', 'frosty-morning', 'sunset', 'purple-night'];
 const W = 240;
@@ -28,10 +30,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function steady(phase: PhaseName): PhaseReading {
-  return { from: phase, to: phase, share: 0 };
-}
-
 function input(over: Partial<SceneInput> = {}): SceneInput {
   // The plain sky and ground: the backdrop (XMAS-70) has its own tests in backdrop.test.ts.
   return { time: T, drag: 0, phase: steady('purple-night'), seed: SEED, width: W, height: H, backdrop: false, ...over };
@@ -42,11 +40,9 @@ function pic(over: Partial<SceneInput> = {}): number[] {
   return Array.from(sceneFrame(input(over)).picture);
 }
 
-const hexNum = (hex: string): number => Number.parseInt(hex.slice(1), 16);
 const hexOf = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
 const rgb = (n: number): [number, number, number] => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 const distance = (a: number, b: number): number => rgb(a).reduce((t, v, i) => t + Math.abs(v - (rgb(b)[i] ?? 0)), 0);
-const at = (f: SceneFrame, x: number, y: number): number => f.picture[y * f.width + x] ?? -1;
 
 function* grid(w: number, h: number): Generator<[number, number]> {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) yield [x, y];
