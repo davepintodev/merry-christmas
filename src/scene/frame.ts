@@ -11,6 +11,7 @@ import { drawings } from '../shared/art.generated.ts';
 import { SKY_ABOVE } from '../shared/sky.ts';
 import { pictureWithOpenBackdrop } from './backdrop-lean.ts';
 import { type Backdrop, backdropFor, covered, paintBackdrop, random } from './backdrop.ts';
+import type { BunnySpot } from './scenery.ts';
 import { drawOutsideSnow, type OutsideSnow } from './outside-snow.ts';
 import type { PhaseName, PhaseReading } from '../shared/clock.ts';
 import { BASE_WIDTH } from './base-fine.ts';
@@ -96,6 +97,8 @@ export interface SceneInput {
   glassApart?: boolean;
   /** Whether the shake is live (XMAS-43b): the hint names it. Absent or false keeps the drag words. */
   shakeLive?: boolean;
+  /** Where the bunny sits on the phone while the shake sign shows (XMAS-125): at the sign's end, facing it. Absent keeps it home. */
+  bunny?: BunnySpot;
 }
 
 export interface SceneFrame {
@@ -479,7 +482,7 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
     picture.fill(y < groundTop + GROUND_SHADOW_ROWS ? shadow : snow, y * width, (y + 1) * width);
   }
   // Clouds, hills and pines (XMAS-70) stand on the sky and ground, behind the outside snow and the globe.
-  const backdrop = input.backdrop === false ? undefined : backdropFor(layout);
+  const backdrop = input.backdrop === false ? undefined : backdropFor(layout, input.bunny);
   if (backdrop !== undefined) paintBackdrop(picture, backdrop, from, to, share);
   // The outside snow falls behind the globe, so the glass and objects cover it.
   if (input.outsideSnow !== undefined) drawOutsideSnow(picture, width, layout, input.outsideSnow, input.time, {

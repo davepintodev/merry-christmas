@@ -32,6 +32,13 @@ export const masterColours: readonly string[] = [
   '#c24c47', '#a83c3c', '#2c8f6f',
   // Added for the base (XMAS-68): the darker gold of its lip and lettering.
   '#c4923a',
+  // Added for the shake sign (XMAS-125): its wooden board's body, lit edge and
+  // shade in each phase (dawn, frosty morning, sunset, purple night), toned
+  // like the backdrop's cabin logs; the list had no browns.
+  '#8a5a58', '#a87462', '#6a3c48',
+  '#9a6448', '#b8805a', '#74463a',
+  '#7a3a4c', '#9a5060', '#5a2840',
+  '#5a4060', '#74567a', '#40304c',
 ];
 
 export interface PhaseColours {

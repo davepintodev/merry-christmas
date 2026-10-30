@@ -90,6 +90,23 @@ export function bunny(put: Put, x: number, bottom: number): void {
   stamp(put, x + 15, bottom - 3, ['.gg', 'CCC', '.CC', '..C'], { g: C.WREATH, C: C.CARROT });
 }
 
+/** Where the bunny sits facing left (XMAS-125): its left column, its bottom row, and whether it is the short one. */
+export interface BunnySpot {
+  x: number;
+  bottom: number;
+  short: boolean;
+}
+
+/** The bunny one ear row and one body row shorter, for the shallowest snow under the base (XMAS-125). */
+const BUNNY_SHORT_ROWS = [0, 1, 3, 4, 5, 6, 7, 8, 9, 11, 12].map((i) => BUNNY_ROWS[i] ?? '');
+/** The bunny mirrored to face left, its columns x..x + 13 and its bottom row `bottom`, with its soft shadow and no carrot: it sits at the shake sign's end looking at it (XMAS-125). */
+export function bunnyFacingLeft(put: Put, x: number, bottom: number, short: boolean): void {
+  const rows = short ? BUNNY_SHORT_ROWS : BUNNY_ROWS;
+  const mirrored: Put = (px, py, code) => put(2 * x + BUNNY_SIZE.width - 1 - px, py, code);
+  stamp(mirrored, x, bottom - rows.length + 1, rows, { o: C.OUTLINE, B: C.BUNNY, L: C.BUNNY_LIGHT, p: C.PINK, e: C.EYE, n: C.PINK, c: C.PINK });
+  for (let dx = 1; dx <= 12; dx++) put(x + dx, bottom + 1, C.FLOOR_SHADE);
+}
+
 /** A fence panel row along a ground line: tall posts with thick snow caps, two rails, a lantern on the first post and an owl on the last. */
 export function fence(put: Put, x: number, panels: number, groundAt: (x: number) => number): void {
   const step = 6;

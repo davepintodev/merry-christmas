@@ -1,6 +1,7 @@
-// XMAS-43b "Shake wiring and the shake button", in the built page: where the browser needs a tap first, a real button
-// at the bottom right reads "TAP TO TURN ON SHAKE", inside the viewport and off the globe's glass. What a tap does
-// (granted, refused, silent, no tap needed) is covered by the unit tests. Motion is pretended: a fake
+// XMAS-43b "Shake wiring and the shake button", XMAS-125 "Shake button covers the base lettering", in the built page:
+// where the browser needs a tap first, a real button reads "TAP TO SHAKE" as a sign in the snow, under the globe's base
+// on phones (never over it, nor over the sound and pause buttons), inside the viewport and off the globe's glass. What a
+// tap does (granted, refused, silent, no tap needed) is covered by the unit tests. Motion is pretended: a fake
 // DeviceMotionEvent is defined before the page runs.
 // Determinism: as in pause.spec.ts, the page runs on Playwright's fake clock.
 import { expect, test, type Page } from '@playwright/test';
@@ -11,6 +12,7 @@ const START = new Date(2026, 11, 1, 22, 0, 0);
 const NOW = '2026-12-01T22:00:00';
 const VIEWPORT = { width: 360, height: 700 };
 const SETTLE_MS = 30_000;
+const SHAKE_NAME = 'TAP TO SHAKE';
 const STEP_MS = 16;
 
 /** Defines a pretend DeviceMotionEvent that needs a tap and grants access, and counts the page's devicemotion listeners (added minus removed). */
@@ -38,9 +40,10 @@ async function pretend(page: Page): Promise<void> {
   });
 }
 
-async function boot(page: Page, viewport = VIEWPORT): Promise<void> {
+async function boot(page: Page, viewport = VIEWPORT, now = NOW): Promise<void> {
+  const start = now === NOW ? START : new Date(now);
   await page.setViewportSize(viewport);
-  await page.clock.install({ time: START });
+  await page.clock.install({ time: start });
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -49,9 +52,9 @@ async function boot(page: Page, viewport = VIEWPORT): Promise<void> {
     await gate;
     await route.continue();
   });
-  await page.goto(`/?now=${NOW}`);
+  await page.goto(`/?now=${now}`);
   await expect(page.locator('canvas#countdown')).toBeVisible();
-  await page.clock.pauseAt(new Date(START.getTime() + SETTLE_MS));
+  await page.clock.pauseAt(new Date(start.getTime() + SETTLE_MS));
   release();
   await page.waitForTimeout(300);
   for (let k = 0; k < 400 && !(await page.evaluate(() => Boolean(document.querySelector<HTMLCanvasElement>('canvas#scene')?.style.width))); k++) {
@@ -61,21 +64,58 @@ async function boot(page: Page, viewport = VIEWPORT): Promise<void> {
 }
 
 const state = (page: Page) => page.evaluate(() => ({ listening: (window as never as Record<string, number>).__listening!, asked: (window as never as Record<string, number>).__asked! }));
-const shakeButton = (page: Page) => page.getByRole('button', { name: 'TAP TO TURN ON SHAKE', exact: true });
+const shakeButton = (page: Page) => page.getByRole('button', { name: SHAKE_NAME, exact: true });
 
-test('where a tap is needed the button is shown from the start at the bottom right, named, with a tap area of 44 pixels or more, and nothing listens yet', async ({ page }) => {
+test('where a tap is needed the button is shown from the start, named, with a tap area of 44 pixels or more, and nothing listens yet', async ({ page }) => {
   await pretend(page);
   await boot(page);
   await expect(shakeButton(page)).toBeVisible();
   const box = (await page.locator('button#shake').boundingBox())!;
-  // XMAS-91: 8 pixels in from the right edge; on a phone width the button sits one row up, clear of the pause button.
-  expect(box.x + box.width).toBeCloseTo(VIEWPORT.width - 8, 0);
-  const pause = (await page.locator('button#pause').boundingBox())!;
-  expect(box.y + box.height).toBeLessThanOrEqual(pause.y - 8 + 1);
   expect(box.width).toBeGreaterThanOrEqual(44);
   expect(box.height).toBeGreaterThanOrEqual(44);
   expect(await state(page)).toEqual({ listening: 0, asked: 0 });
 });
+
+/** The phone sizes the ticket names, with each one's real device pixel ratio (a new context per size: setViewportSize alone stays at 1). */
+const PHONES = [
+  [320, 568, 2], [375, 667, 2], [390, 600, 3], [390, 664, 3], [393, 727, 2.75], [430, 739, 3], [360, 700, 3], [412, 839, 2.625],
+] as const;
+const NIGHT = NOW;
+const PHASE_TIMES = ['2026-12-01T07:00:00', '2026-12-01T12:00:00', '2026-12-01T18:00:00', '2026-12-25T10:00:00'];
+
+for (const [width, height, dpr] of PHONES) {
+  const times = (width === 390 && height === 600) || width === 320 ? [NIGHT, ...PHASE_TIMES] : [NIGHT];
+  for (const now of times) {
+    test(`XMAS-125: at ${width}x${height}@${dpr} (${now}) the drawn sign sits under the base, its 44-pixel tap area clear of sound and pause, inside the viewport`, async ({ browser }) => {
+      const viewport = { width, height };
+      const context = await browser.newContext({ viewport, deviceScaleFactor: dpr });
+      const page = await context.newPage();
+      await pretend(page);
+      await boot(page, viewport, now);
+      expect(await page.evaluate(() => devicePixelRatio)).toBe(dpr);
+      await expect(shakeButton(page)).toBeVisible();
+      const b = (await page.locator('button#shake').boundingBox())!;
+      const sign = (await page.locator('button#shake canvas').boundingBox())!;
+      // The base's bottom edge, worked out from the engine's layout: the first art row under the base, from the canvas top.
+      const p = pagePixels(viewport, dpr);
+      const canvas = (await page.locator('canvas#scene').boundingBox())!;
+      const baseEdge = canvas.y + ((sceneLayout(p.width, p.height, 1).groundTop + 23) * p.scale) / dpr;
+      // The drawn sign stays under the base; the tap area may reach up over it, clear, to be 44 tall.
+      expect(sign.y, `sign ${JSON.stringify(sign)}`).toBeGreaterThanOrEqual(baseEdge);
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width).toBeLessThanOrEqual(width);
+      expect(b.y + b.height).toBeLessThanOrEqual(height);
+      expect(b.width).toBeGreaterThanOrEqual(44);
+      expect(b.height).toBeGreaterThanOrEqual(44);
+      for (const id of ['sound', 'pause']) {
+        const o = (await page.locator(`button#${id}`).boundingBox())!;
+        expect(b.x >= o.x + o.width || o.x >= b.x + b.width || b.y >= o.y + o.height || o.y >= b.y + b.height, `${id} ${JSON.stringify(o)}`).toBe(true);
+      }
+      await context.close();
+    });
+  }
+}
 
 for (const viewport of [VIEWPORT, { width: 1920, height: 1130 }]) {
   test(`the button stays inside the viewport and off the globe's glass at ${viewport.width}x${viewport.height}`, async ({ page }) => {

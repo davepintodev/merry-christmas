@@ -1,70 +1,88 @@
-// XMAS-43b "Shake wiring and the shake button": the page's shake button, a real focusable button in the bottom-right
-// corner. It reads "TAP TO TURN ON SHAKE" on the shake frame from the buttons sheet, stretched wide enough for the text.
-// It is shown only while the browser still needs a tap for motion access (ShakeAccess.buttonShown); a press asks for
-// it (ShakeAccess.tap). The picture is drawn in art pixels, the same way as the pause button (pause-button.ts).
-import { drawings, type Drawing } from '../shared/art.generated.ts';
-import { glyph, glyphWidth, GLYPH_HEIGHT } from '../shared/font.ts';
-import { buttonBox, EDGE, paint, pauseDrawing } from './pause-button.ts';
+// XMAS-43b "Shake wiring and the shake button", XMAS-125 "Shake button covers the base lettering": the page's shake
+// button, a real focusable button whose picture is the shake sign (scene/shake-sign.ts), a small wooden sign reading
+// "TAP TO SHAKE" standing in the snow: on the phone under the base, right of the sound and pause buttons, with the
+// scene's bunny at its end; on a wide window right of the base. It is shown only while the browser still needs a tap
+// for motion access (ShakeAccess.buttonShown); a press asks for it (ShakeAccess.tap). The picture is drawn in art
+// pixels, one canvas pixel each, and the CSS size scales it to `scale` device pixels an art pixel, as the pause button.
+import { sceneLayout } from '../scene/frame.ts';
+import type { BunnySpot } from '../scene/scenery.ts';
+import { SHAKE_TEXT, signInks, signPicture, signPlace, type SignPlace } from '../scene/shake-sign.ts';
+import type { PhaseReading } from '../shared/clock.ts';
+import { buttonBox, EDGE, pauseDrawing, TAP_MIN } from './pause-button.ts';
 import type { ShakeAccess } from './shake-access.ts';
 
-/** The button's words: its screen reader name, and the text on its picture. */
-export const SHAKE_TEXT = 'TAP TO TURN ON SHAKE';
+export { SHAKE_TEXT };
 
-/** The font's one-column gap after each glyph. */
-const GLYPH_GAP = 1;
-/** The text's width in art pixels: its last glyph's last column plus one. */
-const TEXT_WIDTH = [...SHAKE_TEXT].reduce((sum, char) => sum + glyphWidth(char) + GLYPH_GAP, -GLYPH_GAP);
-/** Clear art pixels kept on each side of the text, inside the frame's ends: the picture is 87 wide. */
-const PADDING = 4;
-/** The frame's ends keep their columns; the middle one is the column repeated to stretch it. */
-const FRAME_HALF = 30;
+/** What the button is placed on: the scene picture's size and place, and the phase its colours follow. */
+export interface ShakeView {
+  /** Device pixels per art pixel, and the screen's device pixel ratio. */
+  scale: number;
+  ratio: number;
+  /** The picture's size in art pixels, its seed, and its left edge in CSS pixels (its top is the window's). */
+  width: number;
+  height: number;
+  seed: number;
+  left: number;
+  /** The window's height in CSS pixels. */
+  windowHeight: number;
+  phase: PhaseReading;
+}
 
-/** The shake frame stretched to `width` art pixels: its ends kept, its middle column repeated between them. */
-function stretchedFrame(frame: Drawing, width: number): Pick<Drawing, 'width' | 'height' | 'pixels'> {
-  const pixels = new Uint8Array(width * frame.height);
-  for (let y = 0; y < frame.height; y++) {
-    for (let x = 0; x < width; x++) {
-      const fromLeft = x < FRAME_HALF;
-      const fromRight = width - x <= FRAME_HALF;
-      const column = fromLeft ? x : fromRight ? frame.width - (width - x) : FRAME_HALF;
-      pixels[y * width + x] = frame.pixels[y * frame.width + column] ?? 0;
-    }
-  }
-  return { width, height: frame.height, pixels };
+/** A box in CSS pixels. */
+export interface CssBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The tap area in CSS pixels, and where the sign's picture sits inside it. */
+export interface TapArea extends CssBox {
+  /** The picture's top inside the tap area: above it the area is clear. */
+  artTop: number;
 }
 
 /**
- * The shake button's picture: the shake frame stretched to fit SHAKE_TEXT with PADDING clear on each side, and the
- * text centred inside it in the font's own palette indices.
+ * The button's tap area for a sign at `box` (art pixels) on the view's picture: it starts at the sign picture's top
+ * and left (on the phone, the base's bottom edge), at least TAP_MIN each way. Where the window's bottom leaves under
+ * TAP_MIN below that top, the area reaches up over it instead (clear there), ending at the window's bottom; the
+ * picture stays where it is.
  */
-export function shakeButtonPicture(): Pick<Drawing, 'width' | 'height' | 'pixels'> {
-  const frame = drawings['shake-frame'];
-  if (frame === undefined) throw new Error('the buttons sheet has no shake drawing');
-  const width = TEXT_WIDTH + 2 * PADDING;
-  const picture = stretchedFrame(frame, width);
-  const left = Math.floor((width - TEXT_WIDTH) / 2);
-  const top = Math.floor((frame.height - GLYPH_HEIGHT) / 2);
-  let x = left;
-  for (const char of SHAKE_TEXT) {
-    const stroke = glyph(char);
-    if (stroke !== undefined) {
-      stroke.pixels.forEach((n, i) => {
-        if (n === 0) return;
-        picture.pixels[(top + Math.floor(i / stroke.width)) * width + x + (i % stroke.width)] = n;
-      });
-    }
-    x += glyphWidth(char) + GLYPH_GAP;
-  }
-  return picture;
+export function tapArea(box: SignPlace['box'], view: Pick<ShakeView, 'scale' | 'ratio' | 'left' | 'windowHeight'>): TapArea {
+  const css = view.scale / view.ratio;
+  // Layout keeps CSS pixels in 64ths, rounding down: rounded up to the next one, the picture's top stays under the sign's edge.
+  const artTop = Math.ceil(box.y * css * 64) / 64;
+  const height = Math.ceil(Math.max(TAP_MIN, box.height * css) * view.ratio) / view.ratio;
+  const top = Math.min(artTop, Math.floor((view.windowHeight - Math.min(height, view.windowHeight)) * 64) / 64);
+  return {
+    left: view.left + box.x * css,
+    top,
+    width: Math.ceil(Math.max(TAP_MIN, box.width * css) * view.ratio) / view.ratio,
+    height: Math.max(TAP_MIN, Math.min(height, Math.floor((view.windowHeight - top) * 64) / 64)),
+    artTop: artTop - top,
+  };
 }
 
 /** What the page does with the button after it is wired: the page places it on every frame it draws. */
 export interface ShakeButton {
-  /**
-   * Places the button for art pixels `scale` device pixels across, on a screen of device pixel ratio `ratio`, and
-   * shows it while the access asks for a tap. Cheap when the size has not changed.
-   */
-  place(scale: number, ratio: number): void;
+  /** Shows the button while the access asks for a tap, and places and paints it for the view. Cheap when nothing changed. */
+  place(view: ShakeView): void;
+  /** Where the scene's bunny sits while the sign shows on the phone (at its end); undefined while hidden: it stays home. */
+  readonly bunny: BunnySpot | undefined;
+}
+
+/** Paints the sign's picture on `canvas`, one canvas pixel an art pixel. */
+function paintSign(canvas: HTMLCanvasElement, picture: ReturnType<typeof signPicture>): void {
+  canvas.width = picture.width;
+  canvas.height = picture.height;
+  const context = canvas.getContext('2d');
+  if (context === null) return;
+  context.clearRect(0, 0, picture.width, picture.height);
+  picture.colours.forEach((colour, i) => {
+    if (colour === '') return;
+    context.fillStyle = colour;
+    context.fillRect(i % picture.width, Math.floor(i / picture.width), 1, 1);
+  });
 }
 
 /**
@@ -72,10 +90,10 @@ export interface ShakeButton {
  * button shows while a tap is still needed.
  */
 export function attachShakeButton(button: HTMLButtonElement, art: HTMLCanvasElement, access: ShakeAccess): ShakeButton {
-  const picture = shakeButtonPicture();
   let placed = '';
+  let painted = '';
+  let at: SignPlace | null = null;
 
-  paint(art, picture);
   button.setAttribute('aria-label', SHAKE_TEXT);
   // The button goes as soon as the answer is in, not on the next drawn frame: a paused scene draws none.
   button.addEventListener('click', () => {
@@ -85,25 +103,39 @@ export function attachShakeButton(button: HTMLButtonElement, art: HTMLCanvasElem
   });
 
   return {
-    place(scale, ratio) {
+    get bunny() {
+      return button.hidden ? undefined : (at?.bunny ?? undefined);
+    },
+    place(view) {
       button.hidden = !access.buttonShown;
-      const key = `${scale} ${ratio} ${window.innerWidth}`;
-      if (key === placed) return;
-      placed = key;
-      const box = buttonBox(picture, scale, ratio);
-      button.style.right = `${EDGE}px`;
-      button.style.width = `${box.tap.width}px`;
-      button.style.height = `${box.tap.height}px`;
-      // The sound and pause buttons take two slots from the left; when this one would touch them, it moves up a row.
-      const slot = buttonBox(pauseDrawing(false), scale, ratio).tap.width;
-      const sideBySide = window.innerWidth - EDGE - box.tap.width >= 2 * EDGE + 2 * slot;
-      button.style.bottom = `${sideBySide ? EDGE : 2 * EDGE + box.tap.height}px`;
-      // One art pixel in CSS pixels, for the focus ring's two lines.
-      button.style.setProperty('--art', `${scale / ratio}px`);
-      art.style.width = `${box.drawing.width}px`;
-      art.style.height = `${box.drawing.height}px`;
-      art.style.left = `${box.drawing.left}px`;
-      art.style.top = `${box.drawing.top}px`;
+      if (button.hidden) return;
+      const { scale, ratio, width, height, seed, left, windowHeight } = view;
+      const key = `${scale} ${ratio} ${width} ${height} ${seed} ${left} ${windowHeight}`;
+      if (key !== placed || at === null) {
+        placed = key;
+        painted = '';
+        // The sound and pause buttons take two tap slots from the left edge; the sign keeps right of them.
+        const slot = buttonBox(pauseDrawing(false), scale, ratio).tap.width;
+        const buttonsRight = Math.ceil(((EDGE + 2 * slot - left) * ratio) / scale);
+        at = signPlace(sceneLayout(width, height, seed), buttonsRight);
+        const tap = tapArea(at.box, view);
+        button.style.left = `${tap.left}px`;
+        button.style.top = `${tap.top}px`;
+        button.style.width = `${tap.width}px`;
+        button.style.height = `${tap.height}px`;
+        // One art pixel in CSS pixels, for the focus ring's two lines.
+        button.style.setProperty('--art', `${scale / ratio}px`);
+        art.style.width = `${(at.box.width * scale) / ratio}px`;
+        art.style.height = `${(at.box.height * scale) / ratio}px`;
+        art.style.left = '0px';
+        // Over the picture's top the tap area is clear (XMAS-125: a full 44 pixels where the strip is shorter).
+        art.style.top = `${tap.artTop}px`;
+      }
+      const inks = signInks(view.phase);
+      const inkKey = Object.values(inks).join();
+      if (inkKey === painted) return;
+      painted = inkKey;
+      paintSign(art, signPicture(at, inks));
     },
   };
 }

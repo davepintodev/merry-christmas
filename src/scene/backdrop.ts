@@ -15,7 +15,7 @@ import {
 } from './backdrop-codes.ts';
 import { BASE_TOP_ROWS, BASE_WIDTH } from './base-fine.ts';
 import { BASE_SINK } from './globe.ts';
-import { bird, bunny, BUNNY_SIZE, cabin, CABIN, fence, gifts, topStar, type Put } from './scenery.ts';
+import { bird, bunny, bunnyFacingLeft, BUNNY_SIZE, cabin, CABIN, fence, gifts, topStar, type BunnySpot, type Put } from './scenery.ts';
 
 /** A seeded PRNG (mulberry32); the scene's only randomness. */
 export function random(seed: number): () => number {
@@ -301,8 +301,8 @@ function seedOf(layout: SceneLayout): number {
   return layout.stars.reduce((h, star) => Math.imul(h ^ (star.y * 4099 + star.x), 0x01000193) >>> 0, 0x811c9dc5);
 }
 
-/** The backdrop plan for one layout; clip false also fills the space inside the upright glass, for a leaning glass to show where it has left. */
-export function makeBackdrop(layout: SceneLayout, clip = true): Backdrop {
+/** The backdrop plan for one layout, the bunny at `bunnyAt` on the phone when given (XMAS-125); clip false also fills the space inside the upright glass, for a leaning glass to show where it has left. */
+export function makeBackdrop(layout: SceneLayout, clip = true, bunnyAt?: BunnySpot): Backdrop {
   const { width, height, groundTop } = layout;
   const top = layout.countdown.y + layout.countdown.height;
   const codes = new Uint8Array(width * height);
@@ -417,15 +417,18 @@ export function makeBackdrop(layout: SceneLayout, clip = true): Backdrop {
     if (spots.every(([x, y]) => bare(x, y))) bird(put, bx, by);
   }
   floorDetails(layout, rand)(put);
-  if (low !== null) bunnyOnSnow(put, low.x, low.bottom);
+  // XMAS-125: while the shake sign shows, the bunny sits at its end facing it instead (the phone only).
+  if (low !== null && bunnyAt !== undefined) bunnyFacingLeft(put, bunnyAt.x, bunnyAt.bottom, bunnyAt.short);
+  else if (low !== null) bunnyOnSnow(put, low.x, low.bottom);
   return { codes, width };
 }
 
-let last: { layout: SceneLayout; backdrop: Backdrop } | undefined;
+let last: { layout: SceneLayout; bunny: string; backdrop: Backdrop } | undefined;
 
-/** The backdrop for a layout; the last one is kept, as one picture size asks for the same every frame. */
-export function backdropFor(layout: SceneLayout): Backdrop {
-  if (last?.layout !== layout) last = { layout, backdrop: makeBackdrop(layout) };
+/** The backdrop for a layout, with the bunny at `bunnyAt` (the phone) or home; the last one is kept, as one picture size asks for the same every frame. */
+export function backdropFor(layout: SceneLayout, bunnyAt?: BunnySpot): Backdrop {
+  const bunnyKey = bunnyAt === undefined ? '' : `${bunnyAt.x} ${bunnyAt.bottom} ${bunnyAt.short}`;
+  if (last?.layout !== layout || last.bunny !== bunnyKey) last = { layout, bunny: bunnyKey, backdrop: makeBackdrop(layout, true, bunnyAt) };
   return last.backdrop;
 }
 

@@ -298,7 +298,8 @@ const scene: PausableScene = {
     if (scale !== dragScale) startDrag(canvas, scale);
     soundButton?.place(scale, dpr);
     pauseButton?.place(scale, dpr);
-    shakeButton?.place(scale, dpr);
+    const phase = phaseAt(clock());
+    shakeButton?.place({ scale, ratio: dpr, width, height, seed: SEED, left, windowHeight: window.innerHeight, phase });
     const size = width * height;
     if (buffers === null || buffers.picture.length !== size) {
       const picture = new Uint32Array(size);
@@ -320,7 +321,6 @@ const scene: PausableScene = {
     }
     // The frame leaves the shapes' bodies, Santa and the flakes to the fine layer while it drew them last time; one that cannot draw them gets them in the picture.
     const onFine = fineDrew;
-    const phase = phaseAt(clock());
     const frame = frames(
       {
         time,
@@ -337,6 +337,7 @@ const scene: PausableScene = {
         shapeBodies: !onFine,
         glassApart: onFine,
         shakeLive: shakeAccess.live,
+        bunny: shakeButton?.bunny,
       },
       buffers.picture,
     );

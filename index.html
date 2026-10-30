@@ -43,7 +43,7 @@
         z-index: 1;
       }
       /* The sound button (XMAS-46c) takes the bottom-left corner slot, the pause button (XMAS-45b) sits one tap
-         slot in, and the shake button (XMAS-43b) is in the bottom-right corner; the page sets their size and
+         slot in, and the shake button (XMAS-43b) is a sign in the snow (XMAS-125); the page sets their size and
          place, and each drawing's canvas inside. They stay hidden until the scene has drawn. */
       button#sound,
       button#pause,
@@ -62,7 +62,9 @@
         left: 0;
       }
       button#shake {
-        right: 0;
+        top: 0;
+        left: 0;
+        bottom: auto;
       }
       button#sound canvas,
       button#pause canvas,
@@ -107,7 +109,7 @@
     <div id="globe" class="focus-ring" tabindex="0" role="application" aria-label="Snow globe. Arrow keys turn it, Space shakes the snow." hidden></div>
     <button id="sound" class="focus-ring" type="button" aria-label="Sound is off. Turn sound on" hidden><canvas aria-hidden="true"></canvas></button>
     <button id="pause" class="focus-ring" type="button" aria-label="Pause the movement" hidden><canvas aria-hidden="true"></canvas></button>
-    <button id="shake" class="focus-ring" type="button" aria-label="TAP TO TURN ON SHAKE" hidden><canvas aria-hidden="true"></canvas></button>
+    <button id="shake" class="focus-ring" type="button" aria-label="TAP TO SHAKE" hidden><canvas aria-hidden="true"></canvas></button>
     <noscript><span>Christmas is on 25 December</span></noscript>
     <!-- countdown-script -->
   </body>
