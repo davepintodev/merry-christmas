@@ -601,3 +601,34 @@ describe('countdownFrame: roles and drop shadow (XMAS-73)', () => {
     expect(Array.from({ length: f.width }, (_, x) => at(f, x, f.height - 1))).toContain(SHADOW_PIXEL);
   });
 });
+
+describe('countdownFrame: the tight frame (XMAS-128)', () => {
+  // 88:00:00:00 has only full-width glyphs, so every blank column in the digit band (rows 7 on) is a gap.
+  const t = left(88, 0, 0, 0);
+  const d = 3;
+  const band = (f: Frame, x: number, role?: number): boolean => {
+    for (let y = 7; y < 7 + 5 * d + 1; y++) if (role === undefined ? at(f, x, y) !== SKY_PIXEL : at(f, x, y) === role) return true;
+    return false;
+  };
+  /** The [start, end) column runs where the digit band holds a pixel (of a role, when given). */
+  const runs = (f: Frame, role?: number): [number, number][] => {
+    const out: [number, number][] = [];
+    for (let x = 0; x < f.width; x++) if (band(f, x, role)) (out.at(-1)?.[1] === x ? (out.at(-1)![1] = x + 1) : out.push([x, x + 1]));
+    return out;
+  };
+
+  it('sets each glyph one art pixel closer, yet leaves a clear column after every shadow', () => {
+    const tight = countdownFrame(t, true, d, true);
+    expect(countdownFrame(t, true, d).width - tight.width).toBe(4 + 3 * 2); // one gap in each group, two in each colon slot
+    expect(runs(tight)).toHaveLength(8 + 3); // eight shadowed digits and three colons, none touching
+  });
+
+  it('keeps each colon centred between its groups', () => {
+    const on = countdownFrame(t, true, d, true);
+    const ink = runs(on, DIGIT_PIXEL);
+    for (const i of [2, 5, 8]) {
+      const [before, colon, after] = [ink[i - 1]!, ink[i]!, ink[i + 1]!];
+      expect(colon[0] - before[1], `colon ${i}`).toBe(after[0] - colon[1]);
+    }
+  });
+});

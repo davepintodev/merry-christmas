@@ -229,7 +229,9 @@ test.describe('redraws at once (timers frozen)', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('resize')));
     expect(await shown(page, later, GOLD)).not.toBeNull();
     const size = await canvasSize(page);
-    const frame = countdownFrame(timeLeft(plus(start, 125)), true, pagePixels({ width: 400, height: 300 }, size.dpr).digitScale);
+    const shownLeft = timeLeft(plus(start, 125));
+    const { digitScale, tight } = pagePixels({ width: 400, height: 300 }, size.dpr, shownLeft);
+    const frame = countdownFrame(shownLeft, true, digitScale, tight);
     // XMAS-31b: one art pixel size across the page, shared with the scene.
     expect(size.width / frame.width).toBe(pagePixels({ width: 400, height: 300 }, size.dpr).scale);
   });
@@ -280,7 +282,8 @@ for (const dpr of [2]) {
     const page = await context.newPage();
     const at = local(2026, 12, 1, 22, 0, 0);
     await open(page, '2026-12-01T22:00:00');
-    const frame = countdownFrame(timeLeft(at), true, pagePixels(viewport, dpr).digitScale);
+    const { digitScale, tight } = pagePixels(viewport, dpr, timeLeft(at));
+    const frame = countdownFrame(timeLeft(at), true, digitScale, tight);
     const size = await canvasSize(page);
     expect(size.dpr).toBe(dpr);
     // XMAS-31b: the countdown uses the page's one art pixel size, shared with the scene.
@@ -544,10 +547,12 @@ for (const [name, { viewport, dpr }] of [['phone', PHONE], ['laptop', LAPTOP]] a
 
     test('the countdown canvas is the frame at the page digitScale and scale', async ({ browser }) => {
       const { page, close } = await openAt(browser, '2026-12-01T22:00:00');
-      const { scale, digitScale } = pagePixels(viewport, dpr);
-      expect(digitScale).toBe(name === 'phone' ? 2 : 4);
+      // XMAS-128: the digit scale fits the reading on show, so the phone's two-digit days take 3.
+      const shownLeft = timeLeft(local(2026, 12, 1, 22, 0, 0));
+      const { scale, digitScale, tight } = pagePixels(viewport, dpr, shownLeft);
+      expect(digitScale).toBe(name === 'phone' ? 3 : 4);
       expect(scale).toBe(6);
-      const frame = countdownFrame(timeLeft(local(2026, 12, 1, 22, 0, 0)), true, digitScale);
+      const frame = countdownFrame(shownLeft, true, digitScale, tight);
       const size = await canvasSize(page);
       expect(size.dpr).toBe(dpr);
       expect(size.width).toBe(frame.width * scale);
@@ -586,8 +591,9 @@ for (const [name, { viewport, dpr }] of [['phone', PHONE], ['laptop', LAPTOP]] a
 
     test('the Christmas Day greeting fits inside the window width', async ({ browser }) => {
       const { page, close } = await openAt(browser, '2026-12-25T00:00:01');
-      const { scale, digitScale } = pagePixels(viewport, dpr);
-      const frame = countdownFrame(timeLeft(local(2026, 12, 25, 0, 0, 1)), true, digitScale);
+      const shownLeft = timeLeft(local(2026, 12, 25, 0, 0, 1));
+      const { scale, digitScale, tight } = pagePixels(viewport, dpr, shownLeft);
+      const frame = countdownFrame(shownLeft, true, digitScale, tight);
       const size = await canvasSize(page);
       expect(size.width).toBe(frame.width * scale);
       expect(size.cssWidth).toBeLessThanOrEqual(viewport.width - (7 * scale) / dpr + 0.01);

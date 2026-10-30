@@ -9,6 +9,7 @@ import { mixHex, skyAndInk } from '../countdown/colours.ts';
 import { countdownFrame } from '../countdown/render.ts';
 import { drawings } from '../shared/art.generated.ts';
 import { SKY_ABOVE } from '../shared/sky.ts';
+import { countdownDrop } from '../page/pixel.ts';
 import { pictureWithOpenBackdrop } from './backdrop-lean.ts';
 import { type Backdrop, backdropFor, covered, paintBackdrop, random } from './backdrop.ts';
 import type { BunnySpot } from './scenery.ts';
@@ -206,16 +207,21 @@ function touches(taken: ReadonlySet<number>, width: number, x: number, y: number
   return false;
 }
 
-/** The stars' one art pixel each: below the countdown strip, above the ground, off the disc, clear of the globe by radius + 1, never touching. */
+/**
+ * The stars' one art pixel each: off the countdown strip (above it only where
+ * a tall picture moved it down, XMAS-128), above the ground, off the disc,
+ * clear of the globe by radius + 1, never touching.
+ */
 function placeStars(width: number, groundTop: number, globe: Circle, disc: Rect, countdown: Rect, seed: number): Star[] {
-  const top = countdown.y + countdown.height;
-  const wanted = Math.max(8, Math.round((width * (groundTop - top)) / SKY_PER_STAR));
+  const rows = groundTop - countdown.height; // the sky rows outside the strip
+  const wanted = Math.max(8, Math.round((width * rows) / SKY_PER_STAR));
   const rand = random(seed);
   const stars: Star[] = [];
   const taken = new Set<number>();
   for (let tries = 0; tries < wanted * STAR_TRIES && stars.length < wanted; tries++) {
     const x = Math.floor(rand() * width);
-    const y = top + Math.floor(rand() * (groundTop - top));
+    const row = Math.floor(rand() * rows);
+    const y = row < countdown.y ? row : row + countdown.height;
     if (x >= disc.x && x < disc.x + disc.width && y >= disc.y && y < disc.y + disc.height) continue;
     const dx = x + 0.5 - globe.cx;
     const dy = y + 0.5 - globe.cy;
@@ -260,7 +266,8 @@ export function sceneLayout(width: number, height: number, seed: number): SceneL
     throw new RangeError(`a picture needs a whole height of at least ${MIN_HEIGHT} art pixels, got ${height}`);
   }
   if (!Number.isFinite(seed)) throw new RangeError(`seed must be a finite number, got ${seed}`);
-  const countdown: Rect = { x: 0, y: 0, width, height: COUNTDOWN_HEIGHT };
+  // XMAS-128: a tall picture moves the strip down into its spare sky (countdownDrop, shared with the page).
+  const countdown: Rect = { x: 0, y: countdownDrop(height), width, height: COUNTDOWN_HEIGHT };
   // The base, its shadow and a margin stay in the picture: the globe rises to leave room under it, as far as the countdown allows.
   const room = BASE_MARGIN;
   const lowest = Math.max(COUNTDOWN_HEIGHT + GLOBE_RADIUS, height - GLOBE_RADIUS - BASE_BELOW - room);
@@ -274,7 +281,8 @@ export function sceneLayout(width: number, height: number, seed: number): SceneL
   // which raises the horizon and sinks the glass's foot into the base (its
   // lowest 19 rows at the minimum height 172, where cy stays 100).
   const groundTop = Math.min(height - BASE_BELOW - room, globe.cy + GLOBE_RADIUS);
-  const disc: Rect = { x: discGap(globe, COUNTDOWN_HEIGHT), y: COUNTDOWN_HEIGHT, width: DISC_SIZE, height: DISC_SIZE };
+  const stripBottom = countdown.y + countdown.height;
+  const disc: Rect = { x: discGap(globe, stripBottom), y: stripBottom, width: DISC_SIZE, height: DISC_SIZE };
   return { width, height, groundTop, countdown, globe, disc, stars: placeStars(width, groundTop, globe, disc, countdown, seed) };
 }
 
@@ -455,7 +463,7 @@ function paint(picture: Uint32Array, layout: SceneLayout, input: SceneInput): vo
   const { width, height, groundTop, countdown } = layout;
   const share = shareOf(input.phase);
   const { from, to } = input.phase;
-  const top = countdown.height;
+  const top = countdown.y + countdown.height;
   // The countdown strip is the plain sky the digits sit on, whatever the bands do below it.
   const strip = skyAndInk(input.phase).sky;
   // A frosty-morning blend steps the strip along the countdown's bridge, off

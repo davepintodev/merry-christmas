@@ -374,7 +374,8 @@ test.describe('one art pixel size, whole physical pixels, hard edges', () => {
       }));
       expect(scroll).toEqual({ x: 0, y: 0 });
       // The countdown uses the same art pixel size.
-      const frame = countdownFrame(timeLeft(AT), true, want.digitScale);
+      const shown = pagePixels(viewport, dpr, timeLeft(AT));
+      const frame = countdownFrame(timeLeft(AT), true, shown.digitScale, shown.tight);
       const countdown = await rect(page, 'canvas#countdown');
       expect(Math.abs((countdown.width * dpr) / frame.width - want.scale)).toBeLessThanOrEqual(0.01);
       expect(Math.abs((countdown.height * dpr) / frame.height - want.scale)).toBeLessThanOrEqual(0.01);

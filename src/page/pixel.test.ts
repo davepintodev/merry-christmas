@@ -6,8 +6,9 @@
 // never stretches: sky and ground just get more art pixels in a bigger window.
 import { describe, expect, it } from 'vitest';
 import { countdownFrame } from '../countdown/render.ts';
+import type { TimeLeft } from '../shared/clock.ts';
 import { GLOBE_RADIUS, MIN_HEIGHT, sceneLayout } from '../scene/frame.ts';
-import { MIN_PICTURE, pagePixels, pictureLeft } from './pixel.ts';
+import { countdownDrop, MIN_PICTURE, pagePixels, pictureLeft } from './pixel.ts';
 
 type Viewport = { width: number; height: number };
 
@@ -48,18 +49,24 @@ describe('MIN_PICTURE', () => {
 });
 
 /** The widest countdown frame (three-digit days, the greeting, the title) at a digit scale. */
-function widest(digitScale: number): number {
+function widest(digitScale: number, tight = false): number {
   return Math.max(
-    countdownFrame({ christmasDay: false, days: 364, hours: 23, minutes: 59, seconds: 59 }, true, digitScale).width,
-    countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, false, digitScale).width,
-    countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true, digitScale).width,
+    countdownFrame({ christmasDay: false, days: 364, hours: 23, minutes: 59, seconds: 59 }, true, digitScale, tight).width,
+    countdownFrame({ christmasDay: false, days: 123, hours: 4, minutes: 5, seconds: 6 }, false, digitScale, tight).width,
+    countdownFrame({ christmasDay: true, days: 0, hours: 0, minutes: 0, seconds: 0 }, true, digitScale, tight).width,
   );
 }
 
-/** The largest digit scale in 1..4 whose widest frame leaves 4 art pixels free at each side; 1 at least. */
+/** XMAS-128: the digit scales largest first, a tight 3 between 3 and 2. */
+const RUNGS = [{ digitScale: 4, tight: false }, { digitScale: 3, tight: false }, { digitScale: 3, tight: true }, { digitScale: 2, tight: false }];
+
+/** The largest rung whose widest frame leaves 4 art pixels free at each side; scale 1 at least. */
+function expectedRung(width: number): { digitScale: number; tight: boolean } {
+  return RUNGS.find((r) => widest(r.digitScale, r.tight) <= width - 8) ?? { digitScale: 1, tight: false };
+}
+
 function expectedDigitScale(width: number): number {
-  for (const d of [4, 3, 2]) if (widest(d) <= width - 8) return d;
-  return 1;
+  return expectedRung(width).digitScale;
 }
 
 describe('pagePixels', () => {
@@ -131,11 +138,11 @@ describe('pagePixels', () => {
   });
 
   it('a window smaller than the minimum picture still gives scale 1 and the minimum picture (cropped)', () => {
-    expect(pagePixels({ width: 100, height: 90 }, 1)).toEqual({ scale: 1, width: MIN_PICTURE.width, height: MIN_PICTURE.height, digitScale: expectedDigitScale(MIN_PICTURE.width) });
+    expect(pagePixels({ width: 100, height: 90 }, 1)).toEqual({ scale: 1, width: MIN_PICTURE.width, height: MIN_PICTURE.height, ...expectedRung(MIN_PICTURE.width) });
   });
 
   it('a zero-size window (minimised, or not laid out yet) gives the minimum picture, not NaN or zero', () => {
-    expect(pagePixels({ width: 0, height: 0 }, 1)).toEqual({ scale: 1, width: MIN_PICTURE.width, height: MIN_PICTURE.height, digitScale: expectedDigitScale(MIN_PICTURE.width) });
+    expect(pagePixels({ width: 0, height: 0 }, 1)).toEqual({ scale: 1, width: MIN_PICTURE.width, height: MIN_PICTURE.height, ...expectedRung(MIN_PICTURE.width) });
   });
 
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('a devicePixelRatio of %s is read as 1', (dpr) => {
@@ -186,6 +193,24 @@ describe('pagePixels: digitScale', () => {
     expect(pagePixels({ width: 360, height: 700 }, 2).digitScale).toBe(2);
   });
 
+  // XMAS-128: given the reading on show, scales below 4 fit that reading, not the widest one.
+  const TWO_DIGIT_DAYS: TimeLeft = { christmasDay: false, days: 55, hours: 23, minutes: 59, seconds: 59 };
+  const THREE_DIGIT_DAYS: TimeLeft = { christmasDay: false, days: 364, hours: 23, minutes: 59, seconds: 59 };
+
+  it('fits the reading on show: two-digit days take 3 on a 120 wide picture, three-digit days keep 2', () => {
+    expect(pagePixels({ width: 360, height: 700 }, 2, TWO_DIGIT_DAYS)).toMatchObject({ width: 120, digitScale: 3, tight: false });
+    expect(pagePixels({ width: 360, height: 700 }, 2, THREE_DIGIT_DAYS)).toMatchObject({ digitScale: 2, tight: false });
+  });
+
+  it('takes the tight 3 where plain 3 is just too wide for the reading (115 wide picture)', () => {
+    expect(pagePixels({ width: 344, height: 882 }, 2, TWO_DIGIT_DAYS)).toMatchObject({ width: 115, digitScale: 3, tight: true });
+  });
+
+  it('keeps 4 for the widest reading: two-digit days that would fit at 4 stay at 3 on a 160 wide picture', () => {
+    expect(countdownFrame(TWO_DIGIT_DAYS, true, 4).width).toBeLessThanOrEqual(160 - 8);
+    expect(pagePixels({ width: 320, height: 480 }, 1, TWO_DIGIT_DAYS)).toMatchObject({ width: 160, digitScale: 3 });
+  });
+
   it('1920x1130 at ratio 1 gives 4', () => {
     expect(pagePixels({ width: 1920, height: 1130 }, 1).digitScale).toBe(4);
   });
@@ -224,7 +249,7 @@ describe('pagePixels: digitScale', () => {
     for (const viewport of [{ width: 320, height: 480 }, { width: 360, height: 700 }, { width: 768, height: 1024 }, { width: 4000, height: 2000 }]) {
       const p = pagePixels(viewport, dpr);
       expect(Number.isFinite(p.digitScale)).toBe(true);
-      expect(p.digitScale).toBe(expectedDigitScale(p.width));
+      expect({ digitScale: p.digitScale, tight: p.tight }).toEqual(expectedRung(p.width));
       expect(p.width).toBeGreaterThanOrEqual(MIN_PICTURE.width);
     }
   });
@@ -286,6 +311,18 @@ describe('pictureLeft (XMAS-81: where the scene canvas and the fine layer both s
         const left = pictureLeft(viewport.width, width, scale, dpr);
         const right = viewport.width - left - (width * scale) / dpr;
         expect(Math.abs(left - right)).toBeLessThanOrEqual(1 / dpr + 1e-9);
+      }
+    }
+  });
+});
+
+describe('countdownDrop (XMAS-128: the strip moves down into a tall picture\'s spare sky)', () => {
+  it('follows the engine\'s own globe: the spare sky over the globe, less 8 rows, halved, at every height', () => {
+    for (const width of [112, 130]) {
+      for (let height = MIN_HEIGHT; height <= 600; height++) {
+        const l = sceneLayout(width, height, 1);
+        const spare = l.globe.cy - GLOBE_RADIUS - l.countdown.height;
+        expect(countdownDrop(height), `${width} x ${height}`).toBe(Math.max(0, Math.floor((spare - 8) / 2)));
       }
     }
   });

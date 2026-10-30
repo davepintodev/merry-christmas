@@ -10,7 +10,7 @@
 // with the scene (src/page/pixel.ts), and once the countdown first shows the
 // page asks for the scene's own file; a failure leaves this plain sky.
 import { makeClock, phaseAt, timeLeft, type TimeLeft } from '../shared/clock.ts';
-import { pagePixels } from '../page/pixel.ts';
+import { countdownDrop, pagePixels } from '../page/pixel.ts';
 import { PHONE_EXTRA_SKY, SKY_ABOVE } from '../shared/sky.ts';
 import { announcement, spokenTime } from './announce.ts';
 import { skyAndInk } from './colours.ts';
@@ -43,8 +43,9 @@ function askForScene(): void {
 function draw(now: Date, left: TimeLeft): void {
   if (canvas === null || context === null) return;
   const dpr = window.devicePixelRatio || 1;
-  const { scale, digitScale } = pagePixels({ width: window.innerWidth, height: window.innerHeight }, dpr);
-  const frame = countdownFrame(left, now.getSeconds() % 2 === 0, digitScale);
+  // XMAS-128: the digit scale fits this reading, so two-digit days take the size up a phone has room for.
+  const { scale, height, digitScale, tight } = pagePixels({ width: window.innerWidth, height: window.innerHeight }, dpr, left);
+  const frame = countdownFrame(left, now.getSeconds() % 2 === 0, digitScale, tight);
   // Assigning width/height reallocates the backing store, so only do it when
   // the whole-pixel size actually changes.
   const physicalWidth = frame.width * scale;
@@ -56,7 +57,8 @@ function draw(now: Date, left: TimeLeft): void {
   // Blank sky above the first inked row, so the title is not clipped by the window's top edge.
   // XMAS-93: a smaller digit scale (the phone) leaves the strip rows to spare, so it takes five more art pixels of sky; the
   // largest digit scale already fills the strip and keeps SKY_ABOVE alone.
-  const gap = SKY_ABOVE + (digitScale < 4 ? PHONE_EXTRA_SKY : 0);
+  // XMAS-128: a tall picture moves the whole strip down by countdownDrop, the scene's strip with it.
+  const gap = countdownDrop(height) + SKY_ABOVE + (digitScale < 4 ? PHONE_EXTRA_SKY : 0);
   canvas.style.top = `${(gap * scale) / dpr}px`;
   // Left edge on a whole device pixel, so the digits stay sharp at fractional ratios.
   canvas.style.transform = 'none';

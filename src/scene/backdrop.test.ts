@@ -67,8 +67,8 @@ describe('the backdrop plan', () => {
 
   it.each(PHASES)('leaves the countdown strip as plain sky in %s', (phase) => {
     const f = sceneFrame({ time: 0, drag: 0, phase: { from: phase, to: phase, share: 0 }, seed: 7, width: 130, height: 260 });
-    const strip = f.layout.countdown.height;
-    for (let y = 0; y < strip; y++) {
+    const { y: top, height } = f.layout.countdown;
+    for (let y = top; y < top + height; y++) {
       for (let x = 1; x < f.width; x++) expect(f.picture[y * f.width + x]).toBe(f.picture[y * f.width]);
     }
   });

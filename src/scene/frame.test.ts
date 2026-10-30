@@ -813,19 +813,20 @@ describe('sceneLayout: the countdown area', () => {
     ),
   ];
 
-  it.each(AREA_SIZES)('reserves the full-width top of a %s x %s picture, as tall as the countdown frame, and keeps the globe, the disc and every star out of it', (width, height) => {
+  it.each(AREA_SIZES)('reserves a full-width strip near the top of a %s x %s picture, as tall as the countdown frame, and keeps the globe, the disc and every star out of it', (width, height) => {
     expect(sceneFrame(input({ width, height })).layout.countdown).toEqual(sceneLayout(width, height, SEED).countdown);
     for (const seed of [0, 1, 31, SEED, 0xffffffff]) {
       const l = sceneLayout(width, height, seed);
       const c = l.countdown;
       const bottom = c.y + c.height;
-      expect(c, 'countdown area').toEqual({ x: 0, y: 0, width, height: COUNTDOWN_HEIGHT });
+      // XMAS-128: the tall 130 x 260 picture moves the strip 19 rows down into its spare sky.
+      expect(c, 'countdown area').toEqual({ x: 0, y: height === 260 ? 19 : 0, width, height: COUNTDOWN_HEIGHT });
       expect(l.globe.cy - l.globe.radius, 'globe top').toBeGreaterThanOrEqual(bottom);
       expect(l.disc.y, 'disc top').toBeGreaterThanOrEqual(bottom);
       expect(l.groundTop).toBeGreaterThan(bottom);
       // Where even x = 0 overlaps the globe (the narrowest pictures) there is nothing to assert.
       if (discClearsAt(l, 0)) expect(discClearsAt(l, l.disc.x), 'disc in the globe').toBe(true);
-      for (const s of l.stars) expect(s.y >= bottom, `seed ${seed}: star ${s.x},${s.y} in the countdown area`).toBe(true);
+      for (const s of l.stars) expect(s.y < c.y || s.y >= bottom, `seed ${seed}: star ${s.x},${s.y} in the countdown area`).toBe(true);
     }
   });
 
