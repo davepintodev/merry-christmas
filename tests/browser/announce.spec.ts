@@ -215,7 +215,13 @@ test('the text comes from the countdown script alone: it is there with every oth
 });
 
 test('keyboard focus skips the canvas and both hidden texts', async ({ page }) => {
+  // The scene is slow here, so the controls show late and Tab must not beat them.
+  await page.route(/\/assets\/scene-/, async (route) => {
+    await new Promise((done) => setTimeout(done, 1_500));
+    await route.continue();
+  });
   await open(page, '2026-12-01T22:00:00');
+  await expect(page.locator('#globe')).toBeVisible(); // the scene has shown the controls
   expect(await page.locator('canvas#countdown').getAttribute('aria-hidden')).toBe('true');
   for (const selector of ['canvas#countdown', TEXT, LIVE]) {
     await expect(page.locator(selector), selector).toHaveCount(1);
