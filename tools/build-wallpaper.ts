@@ -33,7 +33,7 @@ function stripForWallpaper(html: string): string {
 const project = {
   file: 'index.html',
   preview: 'preview.png',
-  title: 'Christmas Countdown',
+  title: 'Snow Globe Christmas Countdown',
   type: 'web',
   general: {
     properties: {

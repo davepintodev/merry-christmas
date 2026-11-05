@@ -42,7 +42,7 @@ describe('the wallpaper folder', () => {
   });
 
   it('project.json is a web wallpaper with a title, the preview and the two properties', () => {
-    expect(project).toMatchObject({ file: 'index.html', preview: 'preview.png', type: 'web', title: 'Christmas Countdown' });
+    expect(project).toMatchObject({ file: 'index.html', preview: 'preview.png', type: 'web', title: 'Snow Globe Christmas Countdown' });
     const properties = (project['general'] as { properties: Record<string, { type: string; value: boolean; text: string }> }).properties;
     expect(properties['sound']).toMatchObject({ type: 'bool', value: false });
     expect(properties['movement']).toMatchObject({ type: 'bool', value: true });
