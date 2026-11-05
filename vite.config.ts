@@ -6,6 +6,7 @@ const host = process.env['HOST'] || 'localhost';
 
 export default defineConfig({
   plugins: [countdownPlugin()],
+  define: { __XMAS_WALLPAPER__: false },
   server: { host },
   // `vite preview` only serves the e2e tests; keep it on loopback even when
   // HOST points the dev server elsewhere.

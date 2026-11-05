@@ -22,6 +22,8 @@
 // it through keys.ts; the globe's focus target is placed over the globe's square on every drawn frame.
 // XMAS-46c "Sound button and page wiring": the stir of each step drives the sound engine (sound-engine.ts), and the
 // sound button is placed on every drawn frame; the scene draws nothing of the sound.
+// XMAS-131 "Wallpaper Engine build": the wallpaper build hands the sound, the pause and the frame cap to Wallpaper
+// Engine's property listener (wallpaper.ts), set as the scene starts; it has no readout, as no file is loaded there.
 import { makeClock, phaseAt, timeLeft, type PhaseReading } from '../shared/clock.ts';
 import { makeFrameSource, toRgba, type FrameSource } from './frames.ts';
 import { createDrag, type Drag } from './drag.ts';
@@ -37,6 +39,7 @@ import { attachShakeButton, type ShakeButton } from './shake-button.ts';
 import { createShakeAccess, hostFromWindow } from './shake-access.ts';
 import { attachSoundButton, type SoundButton } from './sound-button.ts';
 import { createSoundEngine, type SoundEngine } from './sound-engine.ts';
+import { createWallpaperListener } from './wallpaper.ts';
 import { wantsPerf } from './perf-option.ts';
 import { readoutLink } from './scene-perf.ts';
 import { pagePixels, pictureLeft } from './pixel.ts';
@@ -417,7 +420,7 @@ function heapUsedBytes(): number | undefined {
   return typeof used === 'number' ? used : undefined;
 }
 
-const readout = wantsPerf(location.search) ? readoutLink() : undefined;
+const readout = !__XMAS_WALLPAPER__ && wantsPerf(location.search) ? readoutLink() : undefined;
 // XMAS-102: with ?perf the frame trace and the fine layer's section timings are made, and take() is handed to the page as window.__xmasTrace.
 const trace = readout === undefined ? undefined : createFrameTrace(() => performance.now());
 const fineTrace = readout === undefined ? undefined : blankFineTrace();
@@ -451,6 +454,10 @@ if (canvas !== null && context !== null) {
     globeTarget = globe;
     attachKeyboard(globe, keys, () => paused);
   }
-  runSceneLoop(host, scene, loopObserver);
-  readout?.load(PERF_URL, () => trace?.peek() ?? null);
+  const sceneLoop = runSceneLoop(host, scene, loopObserver);
+  if (__XMAS_WALLPAPER__) {
+    Object.assign(window, { wallpaperPropertyListener: createWallpaperListener({ sound, scene, loop: sceneLoop }) });
+  } else {
+    readout?.load(PERF_URL, () => trace?.peek() ?? null);
+  }
 }

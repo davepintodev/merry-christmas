@@ -1,6 +1,7 @@
 prototype/
 node_modules/
 dist/
+wallpaper/
 test-results/
 playwright-report/
 .dev/

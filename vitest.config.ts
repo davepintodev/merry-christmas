@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // The wallpaper build's flag is only ever true in build:wallpaper; unit tests run the site's code.
+  define: { __XMAS_WALLPAPER__: false },
   test: {
     // The CPU renderers sweep many turns and zooms; a loaded machine needs more than the default 5 s.
     testTimeout: 30_000,
