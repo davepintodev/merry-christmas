@@ -487,3 +487,44 @@ describe('runSceneLoop callback timing', () => {
     expect(spans).toHaveLength(2);
   });
 });
+
+// XMAS-131 "Wallpaper Engine build": the general FPS cap. A skipped refresh still
+// asks for the next one but neither steps nor draws; the 60-steps-a-second clock
+// follows rAF time, so a cap changes how often it is drawn, not how fast it runs.
+describe('runSceneLoop with a frame cap', () => {
+  /** Runs `seconds` of 60 Hz refreshes (with `jitter` ms of alternating error) and returns the host and scene. */
+  function run(cap: number, seconds = 2, jitter = 0) {
+    const { host, scene } = setup();
+    const loop = runSceneLoop(host, scene);
+    loop.setFrameCap(cap);
+    for (let i = 0; i < 60 * seconds; i++) host.refresh(1000 + (i * 1000) / 60 + (i % 2 === 0 ? jitter : -jitter));
+    return { host, scene, loop };
+  }
+
+  it('cap 30 at 60 Hz draws about 30 frames a second and keeps one request waiting', () => {
+    const { host, scene } = run(30);
+    expect(scene.draws).toBeGreaterThanOrEqual(58);
+    expect(scene.draws).toBeLessThanOrEqual(62);
+    expect(host.pending.size).toBe(1);
+  });
+
+  it('cap 0 draws every refresh, also after a cap was lifted', () => {
+    const { host, scene, loop } = run(0);
+    expect(scene.draws).toBe(120);
+    loop.setFrameCap(24);
+    loop.setFrameCap(0);
+    for (let i = 0; i < 30; i++) host.refresh(4000 + (i * 1000) / 60);
+    expect(scene.draws).toBe(150);
+  });
+
+  it('keeps about 60 steps a second of rAF time under a cap', () => {
+    const { scene } = run(15);
+    expect(scene.steps).toBeGreaterThanOrEqual(115);
+    expect(scene.steps).toBeLessThanOrEqual(120);
+  });
+
+  it('a cap at the refresh rate drops no frame to rAF jitter', () => {
+    const { scene } = run(60, 2, 0.5);
+    expect(scene.draws).toBe(120);
+  });
+});

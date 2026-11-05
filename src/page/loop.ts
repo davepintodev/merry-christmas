@@ -9,8 +9,16 @@
 // Without one the loop makes no timing call at all.
 // XMAS-79 "Smooth between steps": draw gets how far the frame's time is into
 // the next step, so the scene can draw partway between two steps.
+// XMAS-131 "Wallpaper Engine build": setFrameCap limits how many frames are drawn a
+// second. A frame over the cap is skipped (no step, no draw) and still asks for the next.
 import { observeSafely, type LoopObserver } from './loop-observer.ts';
 import { makeStepper, type Stepper } from './steps.ts';
+
+/**
+ * A frame up to a quarter of an interval early still draws under a cap: rAF times jitter
+ * by a fraction of a millisecond, and a cap at the refresh rate must not drop frames to it.
+ */
+const EARLY_SHARE = 0.25;
 
 /** The page bits the loop needs, so tests can drive it without a browser. */
 export interface LoopHost {
@@ -51,6 +59,8 @@ export interface PausableScene extends LoopScene {
 export interface SceneLoop {
   /** Ends the loop: the waiting frame request is dropped and no new one is made. */
   stop(): void;
+  /** Draws at most `fps` frames a second; 0 draws every refresh. */
+  setFrameCap(fps: number): void;
 }
 
 export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopObserver): SceneLoop {
@@ -59,6 +69,8 @@ export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopOb
   let startClock = true; // the first frame starts the clock; a return from hidden restarts it
   let running = true;
   let marked = false;
+  let interval = 0; // ms between drawn frames under a cap; 0 when there is none
+  let due: number | null = null; // rAF time the next drawn frame is due under a cap
 
   function clock(): number {
     return host.now ? host.now() : performance.now();
@@ -72,6 +84,10 @@ export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopOb
   function frame(time: number): void {
     handle = null;
     if (!running || host.hidden()) return;
+    if (interval > 0 && due !== null && time < due - interval * EARLY_SHARE) {
+      schedule();
+      return;
+    }
     // XMAS-110: the whole callback, steps and draw, is timed on the host clock only when there is an observer.
     const callbackBegin = observer === undefined ? 0 : clock();
     if (startClock || stepper === null) {
@@ -97,6 +113,8 @@ export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopOb
       const callbackEnd = clock();
       observeSafely(observer, (watch) => watch.callback?.(callbackBegin, callbackEnd));
     }
+    // A frame late by more than an interval starts the count again, so the cap does not then draw a burst to catch up.
+    if (interval > 0) due = Math.max((due ?? time) + interval, time);
     schedule();
   }
 
@@ -122,6 +140,10 @@ export function runSceneLoop(host: LoopHost, scene: LoopScene, observer?: LoopOb
       running = false;
       if (handle !== null) host.cancelFrame(handle);
       handle = null;
+    },
+    setFrameCap(fps: number): void {
+      interval = fps > 0 ? 1000 / fps : 0;
+      due = null;
     },
   };
 }
