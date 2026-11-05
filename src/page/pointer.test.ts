@@ -442,6 +442,22 @@ describe('a mouse move with no button held', () => {
     expect(drag.calls.filter((c) => c[0] === 'move')).toHaveLength(2);
   });
 
+  it('with endOnButtonlessMove false (Wallpaper Engine reports buttons 0 mid-press), down, moves and up reach the drag with no cancel', () => {
+    const target = new FakeTarget();
+    const drag = new RecordingDrag();
+    attachPointer(target, drag, toArt, () => 5, { endOnButtonlessMove: false });
+    target.fire('pointerdown', { id: 1, x: 40, y: 80, buttons: 1 });
+    target.fire('pointermove', { id: 1, x: 70, y: 80, buttons: 0 });
+    target.fire('pointermove', { id: 1, x: 100, y: 80, buttons: 0 });
+    target.fire('pointerup', { id: 1, buttons: 0 });
+    expect(drag.calls).toEqual([
+      ['down', 1, 10, 20, 5],
+      ['move', 1, 20, 20, 5],
+      ['move', 1, 30, 20, 5],
+      ['up', 1, 5],
+    ]);
+  });
+
   it('a touch or pen move with buttons 0 is not affected', () => {
     const { target, drag } = setup();
     target.fire('pointerdown', { id: 1, x: 40, y: 80, pointerType: 'touch' });

@@ -8,6 +8,7 @@
     "dev": "vite",
     "build:art": "node tools/build-art.ts",
     "build": "pnpm run build:art && vite build",
+    "build:wallpaper": "pnpm run build:art && node tools/build-wallpaper.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
@@ -16,7 +17,7 @@
     "frames": "node tools/frames-serve.ts",
     "frames:turn": "node tools/turn-sequence.ts",
     "test:e2e": "playwright test",
-    "check": "pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run check:caps && pnpm run test:e2e"
+    "check": "pnpm run typecheck && pnpm run test:unit && pnpm run build && pnpm run build:wallpaper && pnpm run check:caps && pnpm run test:e2e"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

@@ -33,9 +33,10 @@ type Point = { x: number; y: number };
  * function that takes the listeners back off.
  *
  * A drag ends on pointerup, pointercancel, a lost capture, or a mouse move with
- * no button held (the button came up off the page). Only a RangeError from the
- * drag model (a refused input) is dropped; any other error is a bug and
- * propagates. Each up or cancel reaches the drag before the capture is released,
+ * no button held (the button came up off the page). `endOnButtonlessMove:
+ * false` drops that last rule, as Wallpaper Engine forwards every move with no
+ * buttons. Only a RangeError from the drag model (a refused input) is dropped;
+ * any other error is a bug and propagates. Each up or cancel reaches the drag before the capture is released,
  * so a failing release never leaves a drag stuck.
  */
 export function attachPointer(
@@ -43,7 +44,9 @@ export function attachPointer(
   drag: Drag,
   toArt: (clientX: number, clientY: number) => Point,
   nowSec: () => number,
+  options: { endOnButtonlessMove?: boolean } = {},
 ): () => void {
+  const { endOnButtonlessMove = true } = options;
   /** The art pixel point of an event, or null when it is not a finite position. */
   function artPoint(event: PointerEventLike): Point | null {
     const point = toArt(event.clientX, event.clientY);
@@ -71,7 +74,7 @@ export function attachPointer(
   });
 
   const onMove = guard((event) => {
-    if (event.pointerType === 'mouse' && event.buttons === 0) {
+    if (endOnButtonlessMove && event.pointerType === 'mouse' && event.buttons === 0) {
       drag.pointerCancel(event.pointerId);
       return;
     }

@@ -9,6 +9,7 @@
 // XMAS-31b "Scene core": the art pixel size is the page's one size, shared
 // with the scene (src/page/pixel.ts), and once the countdown first shows the
 // page asks for the scene's own file; a failure leaves this plain sky.
+// XMAS-131 "Wallpaper Engine build": the wallpaper page carries the scene inline, so it never asks for a file.
 import { makeClock, phaseAt, timeLeft, type TimeLeft } from '../shared/clock.ts';
 import { countdownDrop, pagePixels } from '../page/pixel.ts';
 import { PHONE_EXTRA_SKY, SKY_ABOVE } from '../shared/sky.ts';
@@ -32,7 +33,7 @@ let sceneAsked = false; // the scene file is imported at most once per page
 
 /** Imports the scene file once; any failure leaves the countdown on its plain sky, silently. */
 function askForScene(): void {
-  if (sceneAsked) return;
+  if (__XMAS_WALLPAPER__ || sceneAsked) return;
   sceneAsked = true;
   void import(/* @vite-ignore */ SCENE_URL).catch(() => {
     // The scene is decoration: a missing or broken file changes nothing on screen.

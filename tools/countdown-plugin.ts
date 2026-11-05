@@ -13,6 +13,10 @@
 // (tools/preview-image.ts) is emitted to the root of dist as
 // preview-<hash>.png, and the build's index.html names it in its og:image and
 // twitter:image tags. The site never requests it; a dev server does neither.
+// XMAS-131 "Wallpaper Engine build": with { wallpaper: true } the plugin inlines the
+// scene after the countdown instead of emitting it, with the build flag set so
+// neither script imports anything, and emits and tags nothing. The bundles of the
+// site build carry the flag as false; tools/build-wallpaper.ts writes the folder.
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { build, type HtmlTagDescriptor, type Plugin } from 'vite';
@@ -27,6 +31,11 @@ const MARKER = '<!-- countdown-script -->';
 const SCENE_TOKEN = '%SCENE_URL%';
 const PERF_TOKEN = '%PERF_URL%';
 
+export interface CountdownPluginOptions {
+  /** The Wallpaper Engine build: both scripts inline, nothing emitted, no preview tags. */
+  wallpaper?: boolean;
+}
+
 // The generated art and font modules name the PNG sheets they were cut from.
 // The page must never mention a PNG, so the countdown bundle drops that
 // build-time field: the field name and any quoted value, whatever spacing the
@@ -39,12 +48,16 @@ const dropSheetNames: Plugin = {
       : undefined,
 };
 
-/** The single chunk of one in-memory lib build: an iife script, or an es module when it exports. */
-async function library(entry: string, name: string, format: 'iife' | 'es' = 'iife'): Promise<string> {
+/**
+ * The single chunk of one in-memory lib build: an iife script, or an es module when it exports.
+ * `wallpaper` sets the build flag the bundle is compiled with.
+ */
+async function library(entry: string, name: string, { format = 'iife', wallpaper = false }: { format?: 'iife' | 'es'; wallpaper?: boolean } = {}): Promise<string> {
   const outputs = await build({
     configFile: false,
     logLevel: 'silent',
     plugins: [dropSheetNames],
+    define: { __XMAS_WALLPAPER__: wallpaper },
     build: { write: false, minify: true, lib: { entry, name, formats: [format] } },
   });
   const result = Array.isArray(outputs) ? outputs[0] : outputs;
@@ -55,6 +68,17 @@ async function library(entry: string, name: string, format: 'iife' | 'es' = 'iif
   // or minifier change from slipping a PNG name into the page unnoticed.
   if (/\.png\b/i.test(chunk.code)) throw new Error(`${name}: the bundle still names a PNG sheet`);
   return chunk.code;
+}
+
+/**
+ * Fills a bundle's URL token. The site's bundles name it once; the wallpaper's name none, as the flag
+ * drops every use, so a bundle with another count means a build change that would ship a dead import.
+ */
+function fillToken(code: string, token: string, value: string, name: string, wallpaper: boolean): string {
+  const expected = wallpaper ? 0 : 1;
+  const count = code.split(token).length - 1;
+  if (count !== expected) throw new Error(`${name}: the bundle names ${token} ${count} times, expected ${expected}`);
+  return code.replace(token, value);
 }
 
 type BuiltFile = { fileName: string; url: string; code: string };
@@ -68,16 +92,13 @@ function hashed(base: string, kind: string, code: string): BuiltFile {
 
 /** The readout's built code, its output name and the URL the scene names. */
 async function perfFile(base: string): Promise<BuiltFile> {
-  return hashed(base, 'perf', await library(PERF_ENTRY, 'perf', 'es'));
+  return hashed(base, 'perf', await library(PERF_ENTRY, 'perf', { format: 'es' }));
 }
 
 /** The scene's built code, its output name and the URL the countdown script names. */
 async function sceneFile(base: string, perfUrl: string): Promise<BuiltFile> {
-  const code = await library(SCENE_ENTRY, 'scene');
-  // The one token in scene.ts is the readout's URL: fail here rather than ship
-  // a scene that never names its readout file.
-  if (code.split(PERF_TOKEN).length !== 2) throw new Error('scene: the bundle does not name one readout file');
-  return hashed(base, 'scene', code.replace(PERF_TOKEN, perfUrl));
+  const code = fillToken(await library(SCENE_ENTRY, 'scene'), PERF_TOKEN, perfUrl, 'scene', false);
+  return hashed(base, 'scene', code);
 }
 
 /** The share preview's PNG bytes, the root-level file named by their hash, and the URL that names it. */
@@ -113,19 +134,26 @@ function previewTags(url: string, origin: string | undefined): HtmlTagDescriptor
   return tags;
 }
 
-async function inlineScript(sceneUrl: string): Promise<string> {
-  const code = await library(ENTRY, 'countdown');
-  // The one token in main.ts is the scene's URL: fail here rather than ship a
-  // countdown that never names its scene file.
-  if (code.split(SCENE_TOKEN).length !== 2) throw new Error('countdown: the bundle does not name one scene file');
-  const safe = code
-    .replace(SCENE_TOKEN, sceneUrl)
-    .replace(/<\/script/gi, '<\\/script')
-    .replace(/<!--/g, '<\\!--');
+/** One classic script holding a bundle's code, with nothing in it that could end or open a comment around the tag. */
+function classicScript(code: string): string {
+  const safe = code.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
   return `<script>${safe}</script>`;
 }
 
-export function countdownPlugin(): Plugin {
+async function inlineScript(sceneUrl: string): Promise<string> {
+  // The one token in main.ts is the scene's URL: fail here rather than ship
+  // a countdown that never names its scene file.
+  return classicScript(fillToken(await library(ENTRY, 'countdown'), SCENE_TOKEN, sceneUrl, 'countdown', false));
+}
+
+/** The wallpaper page's scripts: the countdown, then the scene it would otherwise import, both inline. */
+async function wallpaperScripts(): Promise<string> {
+  const countdown = fillToken(await library(ENTRY, 'countdown', { wallpaper: true }), SCENE_TOKEN, '', 'countdown', true);
+  const scene = fillToken(await library(SCENE_ENTRY, 'scene', { wallpaper: true }), PERF_TOKEN, '', 'scene', true);
+  return classicScript(countdown) + classicScript(scene);
+}
+
+export function countdownPlugin({ wallpaper = false }: CountdownPluginOptions = {}): Plugin {
   let base = '/';
   let serving = false;
   let sceneUrl: string | null = null;
@@ -144,7 +172,7 @@ export function countdownPlugin(): Plugin {
       serving = config.command === 'serve';
     },
     async buildStart() {
-      if (serving) return;
+      if (serving || wallpaper) return;
       // The readout first: the scene names its URL, so its hash goes into the scene's code.
       const perf = await perfFile(base);
       this.emitFile({ type: 'asset', fileName: perf.fileName, source: perf.code });
@@ -162,12 +190,18 @@ export function countdownPlugin(): Plugin {
         // Exactly one marker, or the built page would silently ship without its script.
         if (html.split(MARKER).length !== 2) throw new Error(`countdown: index.html needs one ${MARKER} marker`);
         if (ctx.server) return html.replace(MARKER, '<script type="module" src="/src/countdown/main.ts"></script>');
+        // A replacer function: a string replacement would read $' and $& in the minified code as patterns.
+        if (wallpaper) {
+          const scripts = await wallpaperScripts();
+          return html.replace(MARKER, () => scripts);
+        }
         if (sceneUrl === null) throw new Error('countdown: the scene file was not built');
         if (previewUrl === null) throw new Error('countdown: the preview image was not built');
         // Only a build gets here; the dev server never reads the address.
         const origin = siteOrigin();
         const image = origin === undefined ? previewUrl : new URL(previewUrl, `${origin}/`).href;
-        return { html: html.replace(MARKER, await inlineScript(sceneUrl)), tags: previewTags(image, origin) };
+        const script = await inlineScript(sceneUrl);
+        return { html: html.replace(MARKER, () => script), tags: previewTags(image, origin) };
       },
     },
   };

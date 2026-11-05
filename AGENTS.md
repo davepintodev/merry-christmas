@@ -23,10 +23,13 @@ of every file.
 
 - `pnpm check` — full gate. It runs, in order, chained with `&&`:
   `pnpm run typecheck`, `pnpm run test:unit`, `pnpm run build`,
-  `pnpm run check:caps`, `pnpm run test:e2e`.
+  `pnpm run build:wallpaper`, `pnpm run check:caps`, `pnpm run test:e2e`.
 - `pnpm run typecheck` — `tsc --noEmit`.
 - `pnpm run test:unit` — `vitest run`.
 - `pnpm run build` — `pnpm run build:art` then `vite build`.
+- `pnpm run build:wallpaper` — `pnpm run build:art` then `node tools/build-wallpaper.ts`;
+  writes the gitignored `wallpaper/` folder (one `index.html`, `project.json`,
+  `preview.png`) that Wallpaper Engine opens as a Web wallpaper.
 - `pnpm run build:art` — `node tools/build-art.ts`; packs the sheets named in
   `art/sheets.ts` into `src/shared/art.generated.ts`, the font-only
   `src/shared/font.generated.ts` and `art/xmas.gpl`.
