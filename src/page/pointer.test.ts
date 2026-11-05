@@ -503,3 +503,43 @@ describe('which errors are swallowed', () => {
     expect(() => target.fire(type, { id: 1, x: 1, y: 1 })).not.toThrow();
   });
 });
+
+describe('anchoring the first move (Wallpaper Engine)', () => {
+  function anchored(): { target: FakeTarget; drag: Drag; now: { t: number } } {
+    const target = new FakeTarget();
+    const drag = createDrag(0);
+    const now = { t: 10 };
+    attachPointer(target, drag, id3, () => now.t, { anchorOnFirstMove: true, endOnButtonlessMove: false });
+    return { target, drag, now };
+  }
+
+  it('the logged sequence (a stale down, a far first move, small moves, up) neither jumps nor flicks the globe', () => {
+    const { target, drag, now } = anchored();
+    target.fire('pointerdown', { id: 1, x: 1392, y: 500, buttons: 1 });
+    now.t = 10.001;
+    target.fire('pointermove', { id: 1, x: 997, y: 604, buttons: 1 });
+    expect(drag.step(0)).toMatchObject({ turn: 0, raise: 0 });
+    for (let i = 1; i <= 5; i++) {
+      now.t = 10.001 + i * 0.016;
+      target.fire('pointermove', { id: 1, x: 997 + 3 * i, y: 604 + i, buttons: 1 });
+    }
+    const moved = drag.step(0.08);
+    expect(moved.turn).toBeCloseTo(-15 * 0.018, 9);
+    expect(moved.raise).toBeCloseTo(5 * Math.hypot(3, 1) * 0.006, 9);
+    expect(moved.push).toEqual({ x: 30, y: 10, z: 0 });
+    now.t = 10.097;
+    target.fire('pointerup', { id: 1, buttons: 0 });
+    expect(drag.step(0.016)).toMatchObject({ raise: 0, push: { x: 0, y: 0, z: 0 } });
+  });
+
+  it.each(['pointerup', 'pointercancel', 'lostpointercapture'] as const)('a click that ends with %s leaves no press pending: buttonless hover moves turn nothing', (end) => {
+    const { target, drag, now } = anchored();
+    target.fire('pointerdown', { id: 1, x: 40, y: 80, buttons: 1 });
+    target.fire(end, { id: 1 });
+    for (const x of [200, 400, 100]) {
+      now.t += 1;
+      target.fire('pointermove', { id: 1, x, y: 80, buttons: 0 });
+    }
+    expect(drag.step(0.016)).toMatchObject({ turn: 0, raise: 0 });
+  });
+});

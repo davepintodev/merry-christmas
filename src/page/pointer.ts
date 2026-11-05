@@ -38,15 +38,21 @@ type Point = { x: number; y: number };
  * buttons. Only a RangeError from the drag model (a refused input) is dropped;
  * any other error is a bug and propagates. Each up or cancel reaches the drag before the capture is released,
  * so a failing release never leaves a drag stuck.
+ *
+ * `anchorOnFirstMove: true` starts the drag at the first move after a press,
+ * not at the press: Wallpaper Engine can send the down at a stale position,
+ * which would read as a jump.
  */
 export function attachPointer(
   target: PointerTarget,
   drag: Drag,
   toArt: (clientX: number, clientY: number) => Point,
   nowSec: () => number,
-  options: { endOnButtonlessMove?: boolean } = {},
+  options: { endOnButtonlessMove?: boolean; anchorOnFirstMove?: boolean } = {},
 ): () => void {
-  const { endOnButtonlessMove = true } = options;
+  const { endOnButtonlessMove = true, anchorOnFirstMove = false } = options;
+  /** The press waiting for its first move when `anchorOnFirstMove` is on. */
+  let pending: number | null = null;
   /** The art pixel point of an event, or null when it is not a finite position. */
   function artPoint(event: PointerEventLike): Point | null {
     const point = toArt(event.clientX, event.clientY);
@@ -70,20 +76,31 @@ export function attachPointer(
     if (point === null) return;
     event.preventDefault();
     target.setPointerCapture(event.pointerId);
+    if (anchorOnFirstMove) {
+      pending = event.pointerId;
+      return;
+    }
     drag.pointerDown(event.pointerId, point.x, point.y, nowSec());
   });
 
   const onMove = guard((event) => {
     if (endOnButtonlessMove && event.pointerType === 'mouse' && event.buttons === 0) {
+      if (pending === event.pointerId) pending = null;
       drag.pointerCancel(event.pointerId);
       return;
     }
     const point = artPoint(event);
     if (point === null) return;
+    if (pending === event.pointerId) {
+      pending = null;
+      drag.pointerDown(event.pointerId, point.x, point.y, nowSec());
+      return;
+    }
     drag.pointerMove(event.pointerId, point.x, point.y, nowSec());
   });
 
   const onUp = guard((event) => {
+    if (pending === event.pointerId) pending = null;
     try {
       drag.pointerUp(event.pointerId, nowSec());
     } finally {
@@ -92,6 +109,7 @@ export function attachPointer(
   });
 
   const onCancel = guard((event) => {
+    if (pending === event.pointerId) pending = null;
     try {
       drag.pointerCancel(event.pointerId);
     } finally {
@@ -101,6 +119,7 @@ export function attachPointer(
 
   // The capture went without an up or cancel (the element was moved or taken): the drag ends as a cancel.
   const onLost = guard((event) => {
+    if (pending === event.pointerId) pending = null;
     drag.pointerCancel(event.pointerId);
   });
 
