@@ -203,7 +203,9 @@ function startDrag(target: HTMLCanvasElement, scale: number): void {
   pressed = null;
   dragScale = scale;
   // Pointer times are performance.now() at delivery: the browser merges queued moves, so an event's own timestamp can lag.
-  detachPointer = attachPointer(target, pointerInput, (x, y) => artPoint(target, x, y), () => performance.now() / 1000);
+  detachPointer = attachPointer(target, pointerInput, (x, y) => artPoint(target, x, y), () => performance.now() / 1000, {
+    endOnButtonlessMove: !__XMAS_WALLPAPER__,
+  });
 }
 
 /** One picture size in canvas pixels and CSS pixels, and its left edge in CSS pixels; the canvas is re-sized only when it changes. */
