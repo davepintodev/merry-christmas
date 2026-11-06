@@ -7,7 +7,7 @@ of every file.
 ## Specs
 
 - XMAS-21 "Build-ready spec for the Christmas countdown site", in
-  `.scratchpad/spec.md` (private): TypeScript in strict mode, Vite, Vitest and
+  the private plan folder's `spec.md`: TypeScript in strict mode, Vite, Vitest and
   Playwright, driven by pnpm. No rendering library and no web font. Layout:
   `index.html`, `src/countdown/`, `src/scene/`, `src/page/`, `src/shared/`,
   `art/sheets/`, `art/colours.ts`, `tools/`, `tests/frames/`,
@@ -53,10 +53,3 @@ of every file.
 
 ## Golden test file
 New unit tests follow `src/page/loop-observer.test.ts`: a hand-written fake that implements the real interface, a clock the test drives, and no `vi.mock`. Run one file with `pnpm vitest run <file> --reporter=dot --bail=1`.
-
-<!-- scratchpad-init:begin -->
-## Working rules
-
-- Plan, state, spec and reference live in `.scratchpad/` (private, gitignored). Read `.scratchpad/STATE.md` first. Tickets are files in `.scratchpad/backlog/`. There is no plan store and no handoff file.
-- Work in the main checkout. Do not create git worktrees.
-<!-- scratchpad-init:end -->

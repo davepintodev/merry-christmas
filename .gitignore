@@ -8,4 +8,3 @@ playwright-report/
 .wrangler/
 .dev.vars
 .env
-.scratchpad/
