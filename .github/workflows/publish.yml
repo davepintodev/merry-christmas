@@ -15,6 +15,8 @@ concurrency:
 
 jobs:
   check:
+    # The check name a PR ruleset requires; this run on the PR's head commit is the PR gate.
+    name: gate
     runs-on: ubuntu-latest
     env:
       # The live address, or empty when the repo variable is unset.
