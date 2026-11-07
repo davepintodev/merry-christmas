@@ -21,7 +21,7 @@ of every file.
 
 ## Gate
 
-`pnpm check`, from the repo root. It must pass before every PR. It runs the commands below.
+`pnpm check`, from the repo root. It must pass before every PR. It runs the commands below. A fresh checkout needs `pnpm install --frozen-lockfile` first.
 
 ## Commands
 
