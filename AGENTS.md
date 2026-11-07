@@ -19,6 +19,10 @@ of every file.
   object list with each drawing's sheet, name and size is
   [art/objects.ts](art/objects.ts).
 
+## Gate
+
+`pnpm check`, from the repo root. It must pass before every PR. It runs the commands below.
+
 ## Commands
 
 - `pnpm check` — full gate. It runs, in order, chained with `&&`:
