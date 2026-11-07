@@ -47,10 +47,12 @@ function repoWith(before: Record<string, string>, after: Record<string, string |
   return dir;
 }
 
-function leakCheck(cwd: string, words?: string): SpawnSyncReturns<string> {
+function leakCheck(cwd: string, words?: string, required = false): SpawnSyncReturns<string> {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env['LEAK_WORDS'];
+  delete env['LEAK_WORDS_REQUIRED'];
   if (words !== undefined) env['LEAK_WORDS'] = words;
+  if (required) env['LEAK_WORDS_REQUIRED'] = 'true';
   return spawnSync(process.execPath, [SCRIPT, 'base...HEAD'], { cwd, encoding: 'utf8', env, timeout: 60_000 });
 }
 
@@ -86,6 +88,16 @@ describe('leak-check CLI', () => {
       expect(output(r)).toContain('d.txt:1');
       expect(output(r)).not.toContain(PRIVATE_IP);
     }
+  });
+
+  it('fails when the words are required but empty or unset', () => {
+    const dir = repoWith({}, { 'r.txt': 'nothing private here\n' });
+    for (const words of [undefined, '', '# only a comment\n']) {
+      const r = leakCheck(dir, words, true);
+      expect(r.status, output(r)).toBe(2);
+      expect(output(r)).toContain('LEAK_WORDS is empty or unset');
+    }
+    expect(leakCheck(dir, FAKE_WORD, true).status).toBe(0);
   });
 
   it('catches a home path', () => {

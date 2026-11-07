@@ -54,8 +54,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-      # The words are empty on a fork's PR (no secrets there); the IP and path checks still run.
+      # A fork's PR gets no secrets, so only the IP and path checks run there;
+      # on this repo's own PRs a missing secret fails instead of passing quietly.
       - name: Check the added lines for private names
         env:
           LEAK_WORDS: ${{ secrets.LEAK_WORDS }}
+          LEAK_WORDS_REQUIRED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: node tools/leak-check.ts "${BASE_SHA}...${HEAD_SHA}"

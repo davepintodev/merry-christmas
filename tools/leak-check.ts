@@ -1,10 +1,10 @@
 // XMAS-73a "Run the gate, gitleaks and leak-check in CI": the private-name
 // check over a PR's added lines. Usage: node tools/leak-check.ts <git range>
 // (CI passes base...head). The owner's words come from the LEAK_WORDS env var,
-// one extended regex per line; blank lines and `#` lines are ignored.
-// It prints only `file:line` of each hit. Neither the line, the words nor the
-// built-in pattern is ever printed: this repo's CI logs are public. Exit 0 =
-// clean, 1 = hits, 2 = could not run (bad range, bad word).
+// one extended regex per line; blank lines and `#` lines are ignored. With
+// LEAK_WORDS_REQUIRED=true, no words is an error rather than a silent pass.
+// Neither the line, the words nor the built-in pattern is ever printed: this
+// repo's CI logs are public. Exit 0 = clean, 1 = hits, 2 = could not run.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -15,11 +15,13 @@ const BUILT_IN =
 
 // grep -a reads bytes that are not valid UTF-8 as text; a UTF-8 locale keeps -i right for non-ASCII words.
 const GREP_ENV = { ...process.env, LC_ALL: 'C.UTF-8' };
+const MAX_BUFFER = 256 * 1024 * 1024;
 
 type Added = { file: string; line: number; text: string };
+type Word = { pattern: string; lineNo: number };
 
 /** The `+` lines of a zero-context diff, with the new file and line each sits on. */
-export function addedLines(diff: string): Added[] {
+function addedLines(diff: string): Added[] {
   const out: Added[] = [];
   let file = '';
   let line = 0;
@@ -37,9 +39,8 @@ export function addedLines(diff: string): Added[] {
   return out;
 }
 
-/** Words from the env text: trailing CRs dropped, blank and `#` lines skipped; each keeps its line number. */
-export function parseWords(raw: string): { pattern: string; lineNo: number }[] {
-  const words: { pattern: string; lineNo: number }[] = [];
+function parseWords(raw: string): Word[] {
+  const words: Word[] = [];
   raw.split('\n').forEach((row, i) => {
     const pattern = row.replace(/\r$/, '');
     if (pattern.trim() === '' || pattern.trimStart().startsWith('#')) return;
@@ -49,7 +50,7 @@ export function parseWords(raw: string): { pattern: string; lineNo: number }[] {
 }
 
 function grep(patternFile: string, input: string, extra: string[] = []) {
-  return spawnSync('grep', ['-aEi', ...extra, '-f', patternFile, '-'], { input, encoding: 'utf8', env: GREP_ENV, maxBuffer: 256 * 1024 * 1024 });
+  return spawnSync('grep', ['-aEi', ...extra, '-f', patternFile, '-'], { input, encoding: 'utf8', env: GREP_ENV, maxBuffer: MAX_BUFFER });
 }
 
 function fail(message: string): never {
@@ -63,15 +64,16 @@ function main(): void {
 
   const diff = spawnSync('git', ['-c', 'core.quotepath=false', 'diff', '-U0', '--no-color', '--no-ext-diff', '--diff-filter=AM', range, '--'], {
     encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
+    maxBuffer: MAX_BUFFER,
   });
   if (diff.status !== 0) fail('git diff failed for the given range');
 
   const dir = mkdtempSync(path.join(os.tmpdir(), 'xmas-leak-'));
   try {
     const words = parseWords(process.env['LEAK_WORDS'] ?? '');
+    if (words.length === 0 && process.env['LEAK_WORDS_REQUIRED'] === 'true') fail('LEAK_WORDS is empty or unset, but this run requires it');
     for (const { pattern, lineNo } of words) {
-      const file = path.join(dir, 'one');
+      const file = path.join(dir, 'probe-pattern');
       writeFileSync(file, `${pattern}\n`, { mode: 0o600 });
       // An empty line only matches a pattern that matches the empty string, which would flag every line.
       const probe = grep(file, '\n', ['-q']);
@@ -79,7 +81,7 @@ function main(): void {
       if (probe.status === 0) fail(`LEAK_WORDS line ${lineNo} matches the empty string, so it would flag every line`);
     }
 
-    const all = path.join(dir, 'all');
+    const all = path.join(dir, 'all-patterns');
     writeFileSync(all, [BUILT_IN, ...words.map((w) => w.pattern)].join('\n') + '\n', { mode: 0o600 });
 
     const added = addedLines(diff.stdout);
